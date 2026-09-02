@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zotero-audio"
+version = "0.1.0"
+description = "Local, provenance-preserving Zotero PDF to AAC/M4A pipeline for macOS"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mutagen>=1.47,<2",
+  "pypdf>=6.0,<7",
+]
+
+[project.optional-dependencies]
+kokoro-onnx = [
+  "kokoro-onnx==0.6.1",
+]
+mlx = [
+  "mlx-audio==0.4.1",
+  "misaki[en]==0.9.4",
+]
+dev = [
+  "pytest>=8.4,<9",
+]
+
+[project.scripts]
+zotero-audio = "zotero_audio.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

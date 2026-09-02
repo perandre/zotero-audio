@@ -1,0 +1,22 @@
+# Generated documents and audio (may contain copyrighted source material)
+/outputs/**
+!/outputs/.gitkeep
+/work/**
+!/work/.gitkeep
+
+# Downloaded models and local caches
+/.cache/
+/models/
+
+# Python
+/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS and editors
+.DS_Store
+*.swp
