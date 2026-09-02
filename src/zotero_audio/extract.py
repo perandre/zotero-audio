@@ -155,6 +155,18 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool) 
     if not title or title.casefold() in {"untitled", "document"}:
         title = normalize_speech_text(pdf.stem)
     author = _metadata_value(reader, "author")
+    # Preserve all bibliographic signals available in the PDF metadata. Zotero
+    # parent-item enrichment can replace these later without losing provenance.
+    metadata_fields = {}
+    if reader.metadata:
+        for raw_key, raw_value in reader.metadata.items():
+            key = str(raw_key).lstrip("/").casefold()
+            if key in {"subject", "keywords", "creator", "producer", "doi", "url", "rights", "journal", "publisher", "language", "abstract"} and raw_value:
+                metadata_fields[key] = normalize_speech_text(str(raw_value))
+    for field in ("subject", "keywords", "creator", "producer", "doi", "url", "rights", "journal", "publisher", "language", "abstract"):
+        value = _metadata_value(reader, field)
+        if value:
+            metadata_fields[field] = value
     publication_year = None
     publication_year_source = None
     for source_name, value in (
@@ -222,6 +234,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool) 
             "author": author,
             "publication_year": publication_year,
             "publication_year_source": publication_year_source,
+            "metadata": metadata_fields,
         },
         "source": {
             "filename": pdf.name,

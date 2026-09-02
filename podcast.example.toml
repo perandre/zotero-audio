@@ -1,0 +1,34 @@
+# Copy outside the repository, fill in real paths/identity, then pass it to
+# `zotero-audio podcast build --config ...` or `scripts/auto_sync.py`.
+
+[paths]
+private_root = "/Users/you/Library/Mobile Documents/com~apple~CloudDocs/Podcasts/Open Paper Audio"
+state_root = "/Users/you/Sites/zotero-audio-runtime/podcast"
+# This is a local mirror that a separate object-storage adapter can upload.
+public_root = "/Users/you/Sites/zotero-audio-runtime/podcast/public"
+
+[podcast]
+base_url = "https://audio.example.org"
+site_title = "Open Paper Audio"
+site_description = "Careful audio editions of openly licensed research papers."
+language = "en"
+author = "Open Paper Audio"
+owner_name = "Your Name"
+# This address is public in RSS and is used for Spotify ownership verification.
+owner_email = "podcast@example.org"
+category = "Science"
+copyright = "Open Paper Audio"
+
+# Safety defaults: preview only, with no public-tree or feed mutation.
+dry_run = true
+publishing_enabled = false
+
+[shows.brief]
+title = "Open Paper Briefs"
+description = "Brief editions containing the authors' abstract and, when suitable, conclusion."
+guid = "f25aa92b-5bea-51f8-b842-0836db8713ed"
+
+[shows.full]
+title = "Open Paper Full Readings"
+description = "Full readings of openly licensed research papers."
+guid = "119266cf-33b9-5795-bcc2-0e81e72291ef"

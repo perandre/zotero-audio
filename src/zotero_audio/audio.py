@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 import re
 import shutil
 import subprocess
@@ -29,12 +31,68 @@ KOKORO_SPOKEN_SYMBOLS = {
     "✓": " check mark ",
     "✔": " check mark ",
 }
+# Podcast delivery gate: integrated loudness is measured after AAC encoding.
+TARGET_LOUDNESS_LUFS = -16.0
+LOUDNESS_MIN_LUFS = -17.0
+LOUDNESS_MAX_LUFS = -15.0
+TRUE_PEAK_MAX_DBTP = -1.0
+
+
+def loudness_is_competitive(integrated_lufs: float, true_peak_dbtp: float, clipped_samples: bool = False) -> bool:
+    """Return whether a spoken episode meets the documented delivery gate."""
+    return LOUDNESS_MIN_LUFS <= integrated_lufs <= LOUDNESS_MAX_LUFS and true_peak_dbtp <= TRUE_PEAK_MAX_DBTP and not clipped_samples
+
+
+def measure_loudness(path: Path) -> dict[str, Any]:
+    """Measure integrated loudness and true peak with FFmpeg's BS.1770 filter."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg: raise RuntimeError("FFmpeg is required for podcast loudness measurement")
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(path), "-af", "loudnorm=I=-16:TP=-1:LRA=11:print_format=json", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    match = re.search(r"\{\s*\"input_i\".*?\}", result.stderr, re.S)
+    if result.returncode or not match:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"Could not measure loudness for {path}: {detail[-1200:]}")
+    raw = json.loads(match.group(0))
+    def number(key: str) -> float:
+        return float(str(raw[key]))
+    integrated, peak = number("input_i"), number("input_tp")
+    return {
+        "integrated_lufs": integrated,
+        "true_peak_dbtp": peak,
+        "loudness_range": number("input_lra"),
+        "clipped_samples": False,
+        "silent": not math.isfinite(integrated) or not math.isfinite(peak),
+        "raw": raw,
+    }
+
+
+def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
+    """Two-pass loudnorm to a WAV; returns measured post-normalization values."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg: raise RuntimeError("FFmpeg is required for two-pass loudness normalization")
+    first = measure_loudness(source)["raw"]
+    if any(str(first.get(key, "")).lower() in {"-inf", "inf", "nan"} for key in ("input_i", "input_tp")):
+        raise RuntimeError("Cannot loudness-normalize silent or non-finite audio")
+    # Use a lower working ceiling so AAC inter-sample overs remain below -1 dBTP.
+    filter_value = (f"loudnorm=I=-16:TP=-1.5:LRA=11:measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
+                    f"measured_LRA={first['input_lra']}:measured_thresh={first['input_thresh']}:offset={first['target_offset']}:linear=true:print_format=summary")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _run([ffmpeg, "-y", "-i", str(source), "-af", filter_value, "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le", str(destination)])
+    measured = measure_loudness(destination)
+    measured["normalization_gain_db"] = float(first["target_offset"])
+    measured["input"] = first
+    return measured
 
 
 class SpeechBackend(Protocol):
     config: dict[str, Any]
 
-    def synthesize(self, text: str, destination: Path) -> None: ...
+    def synthesize(self, text: str, destination: Path) -> dict[str, Any] | None: ...
 
 
 def split_kokoro_input(text: str, max_chars: int = KOKORO_INPUT_CHUNK_CHARS) -> list[str]:
@@ -198,7 +256,7 @@ class KokoroBackend:
             "determinism": "byte-stable in the project benchmark on this machine",
         }
 
-    def synthesize(self, text: str, destination: Path) -> None:
+    def synthesize(self, text: str, destination: Path) -> dict[str, Any]:
         import numpy as np
 
         samples, sample_rate = self.model.create(
@@ -222,6 +280,7 @@ class KokoroBackend:
         except BaseException:
             temporary_path.unlink(missing_ok=True)
             raise
+        return {"chunks": [{"text": text, "duration_seconds": round(len(pcm) / sample_rate, 6)}]}
 
 
 class MlxKokoroBackend:
@@ -289,14 +348,15 @@ class MlxKokoroBackend:
             "determinism": "cached segments are exact; fresh MLX synthesis may differ at the sample level",
         }
 
-    def synthesize(self, text: str, destination: Path) -> None:
+    def synthesize(self, text: str, destination: Path) -> dict[str, Any]:
         import mlx.core as mx
         import numpy as np
 
         results = []
+        chunk_records: list[dict[str, Any]] = []
         normalized_text = normalize_kokoro_text(text)
         for chunk in split_kokoro_input(normalized_text):
-            results.extend(
+            generated = list(
                 self.model.generate(
                     text=chunk,
                     voice=self.config["voice"],
@@ -304,6 +364,9 @@ class MlxKokoroBackend:
                     lang_code=self.config["language"],
                 )
             )
+            results.extend(generated)
+            frames = sum(len(np.asarray(result.audio).reshape(-1)) for result in generated)
+            chunk_records.append({"text": chunk, "duration_seconds": round(frames / TARGET_SAMPLE_RATE, 6)})
         if not results:
             excerpt = normalized_text[:120]
             raise RuntimeError(f"Kokoro MLX returned no audio for text: {excerpt!r}")
@@ -329,6 +392,7 @@ class MlxKokoroBackend:
             raise
         finally:
             mx.clear_cache()
+        return {"chunks": chunk_records}
 
 
 def create_backend(
@@ -392,6 +456,7 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
     atomic_write_json(bundle / "run-manifest.json", manifest)
     reused = 0
     for segment in plan["segments"]:
+        render_chunks: list[dict[str, Any]] | None = None
         cache_key = json_digest(
             {"text_sha256": segment["text_sha256"], "synthesis_config_sha256": config_digest}
         )
@@ -406,6 +471,7 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
                     verified = False
             if verified:
                 reused += 1
+                render_chunks = current_record.get("chunks")
             else:
                 path.unlink(missing_ok=True)
         elif path.exists():
@@ -424,9 +490,12 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
                 path.unlink()
             else:
                 reused += 1
+                render_chunks = previous_record.get("chunks")
         if not path.exists():
             try:
-                backend.synthesize(segment["text"], path)
+                synthesis_result = backend.synthesize(segment["text"], path)
+                if isinstance(synthesis_result, dict):
+                    render_chunks = synthesis_result.get("chunks")
             except Exception as exc:
                 manifest["status"] = "failed"
                 manifest["failed_ordinal"] = segment["ordinal"]
@@ -436,12 +505,18 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
                     f"Kokoro synthesis failed at segment {segment['ordinal']}: {exc}"
                 ) from exc
             audio_info = validate_wav(path)
+        if not render_chunks:
+            render_chunks = [{"text": segment["text"], "duration_seconds": audio_info["duration_seconds"]}]
+        chunk_total = sum(float(chunk["duration_seconds"]) for chunk in render_chunks)
+        if abs(chunk_total - float(audio_info["duration_seconds"])) > 0.02:
+            raise RuntimeError(f"Chunk timing mismatch for segment {segment['ordinal']}")
         record = {
                 "ordinal": segment["ordinal"],
                 "cache_key": cache_key,
                 "text_sha256": segment["text_sha256"],
                 "path": str(path.relative_to(bundle)),
                 "sha256": sha256_file(path),
+                "chunks": render_chunks,
                 **audio_info,
             }
         records.append(record)
@@ -526,7 +601,31 @@ def encode_wav_to_m4a(
     return inspect_m4a(destination)
 
 
-def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str, Any]]:
+def _embed_m4a_chapters(path: Path, chapters: list[dict[str, Any]], duration_seconds: float) -> None:
+    """Remux deterministic Nero-style MP4 chapters without re-encoding AAC."""
+    if not chapters:
+        return
+    ffmpeg = _require_executable("ffmpeg")
+    ordered = sorted(chapters, key=lambda item: float(item["start"]))
+    with tempfile.TemporaryDirectory(prefix="zotero-audio-chapters-", dir=path.parent) as temporary:
+        metadata_path = Path(temporary) / "chapters.ffmeta"
+        lines = [";FFMETADATA1"]
+        for index, chapter in enumerate(ordered):
+            start = max(0, round(float(chapter["start"]) * 1000))
+            end_value = float(ordered[index + 1]["start"]) if index + 1 < len(ordered) else duration_seconds
+            end = max(start + 1, round(end_value * 1000))
+            title = re.sub(r"([\\=;#])", r"\\\1", str(chapter["title"]).replace("\n", " "))
+            lines.extend(("[CHAPTER]", "TIMEBASE=1/1000", f"START={start}", f"END={end}", f"title={title}"))
+        metadata_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        remuxed = Path(temporary) / "chaptered.m4a"
+        _run([ffmpeg, "-y", "-i", str(path), "-f", "ffmetadata", "-i", str(metadata_path),
+              "-map", "0:a", "-map_metadata", "0", "-map_chapters", "1", "-c:a", "copy", str(remuxed)])
+        normalize_mp4_timestamps(remuxed)
+        os.replace(remuxed, path)
+
+
+def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
+                 chapters: list[dict[str, Any]] | None = None) -> tuple[Path, dict[str, Any]]:
     plan = load_json(bundle / "speech-plan.json")
     manifest = load_json(bundle / "run-manifest.json")
     if manifest["plan_sha256"] != plan["plan_sha256"]:
@@ -537,6 +636,9 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
     with tempfile.TemporaryDirectory(prefix="zotero-audio-assemble-", dir=audio_dir) as temporary:
         combined = Path(temporary) / "combined.wav"
         _concatenate_pcm(bundle, plan, manifest, combined)
+        normalized = Path(temporary) / "normalized.wav"
+        normalization = normalize_wav_loudness(combined, normalized)
+        combined = normalized
         pcm_info = validate_wav(combined)
         document = plan["document"]
         final_info = encode_wav_to_m4a(
@@ -551,6 +653,13 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
             ),
             bitrate=bitrate,
         )
+        if chapters:
+            _embed_m4a_chapters(final_path, chapters, pcm_info["duration_seconds"])
+            final_info = inspect_m4a(final_path)
+
+    # Lossy encoding can create new inter-sample peaks. Delivery is gated on
+    # this final encoded measurement, never on the intermediate WAV alone.
+    loudness = measure_loudness(final_path)
 
     final = MP4(final_path)
     expected_audio_seconds = sum(record["duration_seconds"] for record in manifest["segments"])
@@ -560,6 +669,7 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
     duration_delta = abs(duration - expected_total)
     tag_names = sorted(final.tags.keys()) if final.tags else []
     required_tags = {"©nam", "©alb", "©cmt"}
+    embedded_chapter_count = len(final.chapters or [])
     technical_pass = (
         duration_delta <= 0.25
         and final_info["channels"] == TARGET_CHANNELS
@@ -567,6 +677,7 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
         and final_info["codec"] == "aac"
         and bool(final_info["bitrate"])
         and required_tags.issubset(tag_names)
+        and (not chapters or embedded_chapter_count == len(chapters))
     )
     qa = {
         "schema": "zotero-audio-qa/v1",
@@ -584,6 +695,9 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
             "m4a_bitrate": final_info["bitrate"],
             "m4a_tags": tag_names,
             "required_tags_present": required_tags.issubset(tag_names),
+            "embedded_chapter_count": embedded_chapter_count,
+            "normalization": normalization,
+            "loudness": loudness,
         },
         "output": {
             "path": str(final_path.relative_to(bundle)),
@@ -591,6 +705,11 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000) -> tuple[Path, dict[str
             "bytes": final_path.stat().st_size,
         },
     }
+    qa["checks"]["loudness"]["pass"] = loudness_is_competitive(
+        loudness["integrated_lufs"], loudness["true_peak_dbtp"], loudness.get("clipped_samples", False)
+    ) and not loudness.get("silent", False)
+    technical_pass = technical_pass and qa["checks"]["loudness"]["pass"]
+    qa["status"] = "pass" if technical_pass else "fail"
     atomic_write_json(bundle / "qa-report.json", qa)
     if qa["status"] != "pass":
         raise RuntimeError(f"M4A QA failed; see {bundle / 'qa-report.json'}")

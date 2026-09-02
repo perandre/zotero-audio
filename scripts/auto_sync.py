@@ -7,11 +7,16 @@ import argparse
 import fcntl
 import json
 import subprocess
+import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from batch_library import main as batch_main
 from finalize_library_metadata import main as finalize_main
+from zotero_audio.audio import MlxKokoroBackend
+from zotero_audio.podcast import build_local_podcast, health_check, load_podcast_config
+from zotero_audio.util import json_digest
 
 
 DEFAULT_STORAGE = Path.home() / "Zotero" / "storage"
@@ -32,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-chars", type=int, default=900)
     parser.add_argument("--zotero-db", type=Path, default=Path.home() / "Zotero" / "zotero.sqlite")
     parser.add_argument("--notify", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--podcast-config", type=Path,
+                        help="Podcast TOML config (auto-detects <runtime>/podcast.toml when omitted)")
     return parser
 
 
@@ -128,6 +135,70 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:
                 print(f"Metadata finalization failed: {type(exc).__name__}: {exc}")
                 result = 1
+
+        # Podcast artifact generation is fail-isolated from the private audio
+        # sync and disabled unless an explicit configuration is supplied.
+        podcast_config_path = (args.podcast_config.expanduser().resolve() if args.podcast_config
+                               else (state_dir.parent / "podcast.toml"))
+        if podcast_config_path.is_file() and manifest_path.is_file():
+            podcast_config = load_podcast_config(podcast_config_path)
+            current = _load_manifest(manifest_path)
+            podcast_backend: MlxKokoroBackend | None = None
+            for item in current.get("items", []):
+                if item.get("status") != "complete" or not item.get("metadata_finalized"):
+                    continue
+                suffix = f"[{item.get('zotero_key', '')}]"
+                matches = [path for path in (state_dir / "bundles").iterdir() if path.is_dir() and path.name.endswith(suffix)]
+                bundle = matches[0] if len(matches) == 1 else None
+                try:
+                    if bundle is None:
+                        raise RuntimeError(f"could not uniquely resolve bundle for {item.get('zotero_key')}")
+                    rights = item.get("rights")
+                    read_url = item.get("url") or (f"https://doi.org/{item['doi']}" if item.get("doi") else None)
+                    license_record = None
+                    if rights:
+                        evidence = {"zotero_parent_key": item.get("zotero_parent_key"), "rights": rights}
+                        license_record = {
+                            "source_sha256": item["source_sha256"], "license_url": rights,
+                            "evidence_sha256": json_digest(evidence), "read_url": read_url,
+                            "content_version": "zotero-local-source",
+                        }
+                    selected = bool(item.get("podcast_selected"))
+                    preview = build_local_podcast(
+                        bundle, config=replace(podcast_config, dry_run=True), selected=selected,
+                        license_record=license_record, metadata=item,
+                    )
+                    if podcast_config.dry_run:
+                        continue
+                    if preview["content_qa"]["status"] != "pass":
+                        build_local_podcast(
+                            bundle, config=podcast_config, selected=selected,
+                            license_record=license_record, metadata=item,
+                        )
+                        continue
+                    if podcast_backend is None:
+                        podcast_backend = MlxKokoroBackend(model_id=args.model, voice=args.voice, speed=args.speed, language="a")
+                    podcast_backend.configure(
+                        voice=str(item.get("voice") or args.voice), speed=args.speed,
+                        language=str(item.get("kokoro_language_code") or "a"),
+                    )
+                    build_local_podcast(
+                        bundle, backend=podcast_backend, config=podcast_config, selected=selected,
+                        license_record=license_record, metadata=item,
+                    )
+                except Exception as exc:
+                    print(f"Podcast artifact generation failed (audio retained): {type(exc).__name__}: {exc}")
+            health_path = podcast_config.state_root / "health-report.json"
+            health_due = not health_path.is_file() or time.time() - health_path.stat().st_mtime >= 86_400
+            if podcast_config.publishing_enabled and health_due:
+                try:
+                    health = health_check(podcast_config, remote=True)
+                    if health["status"] != "pass":
+                        raise RuntimeError("; ".join(health["failures"][:3]))
+                except Exception as exc:
+                    print(f"Podcast health check failed: {type(exc).__name__}: {exc}")
+                    if args.notify:
+                        _notify("Podcast feed health check needs attention", title="Zotero Audio — action required")
 
         after = _load_manifest(manifest_path)
         new_count = len(_complete_keys(after) - _complete_keys(before))

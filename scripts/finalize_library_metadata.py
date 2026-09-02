@@ -48,7 +48,10 @@ def zotero_metadata(database: Path, attachment_key: str) -> dict[str, Any] | Non
                 FROM itemData d
                 JOIN fields f ON f.fieldID = d.fieldID
                 JOIN itemDataValues v ON v.valueID = d.valueID
-                WHERE d.itemID = ? AND f.fieldName IN ('title', 'date')
+                WHERE d.itemID = ? AND f.fieldName IN (
+                    'title', 'date', 'publicationTitle', 'proceedingsTitle', 'publisher',
+                    'university', 'DOI', 'url', 'rights', 'abstractNote', 'language', 'extra'
+                )
                 """,
                 (parent_id,),
             ).fetchall()
@@ -65,12 +68,47 @@ def zotero_metadata(database: Path, attachment_key: str) -> dict[str, Any] | Non
             (parent_id,),
         ).fetchall()
         names = [" ".join(part for part in creator if part).strip() for creator in creators]
+        tags = [row[0] for row in connection.execute(
+            "SELECT t.name FROM itemTags it JOIN tags t ON t.tagID = it.tagID WHERE it.itemID = ? ORDER BY t.name",
+            (parent_id,),
+        ).fetchall()]
+        collections = [row[0] for row in connection.execute(
+            """
+            WITH RECURSIVE ancestors(collectionID, parentCollectionID, collectionName) AS (
+                SELECT c.collectionID, c.parentCollectionID, c.collectionName
+                FROM collectionItems ci JOIN collections c ON c.collectionID = ci.collectionID
+                WHERE ci.itemID = ?
+                UNION ALL
+                SELECT parent.collectionID, parent.parentCollectionID, parent.collectionName
+                FROM collections parent JOIN ancestors child ON child.parentCollectionID = parent.collectionID
+            )
+            SELECT DISTINCT collectionName FROM ancestors ORDER BY collectionName
+            """,
+            (parent_id,),
+        ).fetchall()]
         year_match = re.search(r"\b(?:19|20)\d{2}\b", fields.get("date", ""))
+        rights = fields.get("rights")
+        if not rights and fields.get("extra"):
+            match = re.search(r"(?im)^\s*(?:license|rights)\s*:\s*(https?://\S+|CC\s+BY\s+4\.0|CC0(?:\s+1\.0)?)\s*$", fields["extra"])
+            rights = match.group(1) if match else None
         return {
             "parent_key": parent_key,
             "title": fields.get("title"),
             "publication_year": year_match.group(0) if year_match else None,
+            "publication_date": fields.get("date"),
             "authors": [name for name in names if name],
+            "journal": fields.get("publicationTitle") or fields.get("proceedingsTitle"),
+            "publisher": fields.get("publisher"),
+            "university": fields.get("university"),
+            "doi": fields.get("DOI"),
+            "url": fields.get("url"),
+            "rights": rights,
+            "abstract": fields.get("abstractNote"),
+            "language": fields.get("language"),
+            "tags": tags,
+            "collections": collections,
+            "podcast_selected": any(tag.casefold() == "podcast" for tag in tags)
+            or any(name.casefold() == "podcast queue" for name in collections),
         }
     finally:
         connection.close()
@@ -112,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     for item in manifest["items"]:
         if item.get("status") != "complete":
             continue
-        if item.get("metadata_finalized"):
+        if item.get("metadata_finalized") and item.get("metadata_schema", 0) >= 2:
             continue
         source = destination_root / item["output_file"]
         metadata = zotero_metadata(args.zotero_db, item["zotero_key"]) or {}
@@ -144,6 +182,19 @@ def main(argv: list[str] | None = None) -> int:
                 "codec": technical["codec"],
                 "bitrate": technical["bitrate"],
                 "metadata_finalized": True,
+                "metadata_schema": 2,
+                "publication_date": metadata.get("publication_date"),
+                "journal": metadata.get("journal"),
+                "publisher": metadata.get("publisher"),
+                "university": metadata.get("university"),
+                "doi": metadata.get("doi"),
+                "url": metadata.get("url"),
+                "rights": metadata.get("rights"),
+                "abstract": metadata.get("abstract"),
+                "bibliographic_language": metadata.get("language"),
+                "tags": metadata.get("tags") or [],
+                "collections": metadata.get("collections") or [],
+                "podcast_selected": bool(metadata.get("podcast_selected")),
             }
         )
         atomic_write_json(manifest_path, manifest)

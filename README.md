@@ -14,6 +14,7 @@ content-addressed: rerunning the same plan and voice reuses verified segments.
 - macOS on Apple Silicon
 - Python 3.11 or newer
 - Built-in `/usr/bin/afconvert` for AAC encoding
+- FFmpeg for two-pass loudness normalization and final-AAC measurement
 - Local storage for the Kokoro-82M BF16 model and Python environment
 
 ## Install
@@ -147,3 +148,70 @@ quality rationale.
 `outputs/`, `work/`, `models/`, `.cache/`, and virtual environments are ignored.
 Do not use `git add -f` on those paths: article Markdown, audio, and model weights
 are intentionally local artifacts. Zotero storage is read-only to the pipeline.
+
+## Podcast automation
+
+The podcast stage builds two truthful sibling editions from a completed bundle:
+`Brief` contains the authors' abstract and, when short and confidently bounded,
+their conclusion; `Full Reading` contains the complete approved speech plan.
+Each has its own spoken introduction, closing, M4A, 3000 px cover, VTT and HTML
+transcripts, Markdown companion transcript, chapters, episode record, and stable
+GUID. The two editions never share a mislabeled audio or transcript.
+
+Copy [podcast.example.toml](podcast.example.toml) outside the repository and
+fill in the private iCloud root, runtime state root, public mirror, HTTPS base
+URL, public owner email, and show identity. Safety defaults are `dry_run = true`
+and `publishing_enabled = false`.
+
+Preview an exact build without writing files or loading Kokoro:
+
+```bash
+"$RUNTIME/venv/bin/zotero-audio" podcast build \
+  "$RUNTIME/full-library/bundles/<bundle>" \
+  --config "$RUNTIME/podcast.toml"
+```
+
+After reviewing the paths, set `dry_run = false`. Private Brief and Full
+Reading files are then created regardless of public eligibility. Put an item in
+the Zotero collection `Podcast Queue`, or add the exact tag `podcast`, to express
+publication intent. Public staging additionally requires a canonical CC BY 4.0,
+CC0 1.0, or Public Domain Mark 1.0 URL in Zotero's Rights field, a paper URL or
+DOI, and `publishing_enabled = true`. Missing, vague, conflicting, NC, ND, and
+embargoed rights stay private.
+
+For automatic runs, save the completed file as
+`/Users/pesh/Sites/zotero-audio-runtime/podcast.toml`; the existing launchd job
+auto-detects it. A different location can be supplied by adding these two
+entries to the plist's `ProgramArguments` array and reinstalling it:
+
+```xml
+<string>--podcast-config</string>
+<string>/Users/pesh/Sites/zotero-audio-runtime/podcast.toml</string>
+```
+
+The generated `public_root` is a static, content-addressed site and object-store
+mirror. Serve or synchronize that directory at `base_url` with public HTTPS,
+HEAD, byte-range requests, correct MIME types, ETag, and Content-Length. Submit
+the resulting `brief/feed.xml` and `full/feed.xml` URLs to Spotify once; future
+eligible episodes arrive through RSS without browser automation. Feed files are
+committed last and unchanged reruns preserve their bytes. Validate the mirror
+or its public origin with:
+
+```bash
+"$RUNTIME/venv/bin/zotero-audio" podcast health --config "$RUNTIME/podcast.toml"
+"$RUNTIME/venv/bin/zotero-audio" podcast health --config "$RUNTIME/podcast.toml" --remote
+```
+
+Markdown is kept as an adjacent companion file rather than stuffed into M4A
+metadata. Podcast clients receive the edition-specific timed VTT through the
+Podcasting 2.0 transcript tag. Final encoded audio must measure from -17 to -15
+LUFS integrated and no higher than -1 dBTP; otherwise neither private delivery
+nor public publication advances.
+
+Artwork follows [DESIGN.md](DESIGN.md). All text is locally typeset. A stable,
+three-shape editorial motif is generated from the title, avoiding image-model
+text, visual artifacts, and a network dependency while keeping every episode
+recognizable as part of one series.
+
+The detailed policy, metadata contract, routing rationale, and one-time Spotify
+setup are in [the podcast automation plan](docs/podcast-automation-plan.md).

@@ -1,4 +1,6 @@
 import shutil
+import math
+import struct
 import wave
 from pathlib import Path
 
@@ -15,12 +17,19 @@ from zotero_audio.audio import (
 from zotero_audio.util import atomic_write_json, json_digest, sha256_file
 
 
-def _write_wav(path: Path, *, channels: int = 1, frames: int = 2400) -> None:
+def _write_wav(path: Path, *, channels: int = 1, frames: int = 2400, tone: bool = False) -> None:
     with wave.open(str(path), "wb") as stream:
         stream.setnchannels(channels)
         stream.setsampwidth(2)
         stream.setframerate(TARGET_SAMPLE_RATE)
-        stream.writeframes(b"\x00\x00" * frames * channels)
+        if tone:
+            samples = b"".join(
+                struct.pack("<h", round(math.sin(2 * math.pi * 220 * index / TARGET_SAMPLE_RATE) * 4_000)) * channels
+                for index in range(frames)
+            )
+            stream.writeframes(samples)
+        else:
+            stream.writeframes(b"\x00\x00" * frames * channels)
 
 
 def test_validate_wav_reports_duration(tmp_path: Path):
@@ -51,7 +60,7 @@ class FakeBackend:
     config = {"engine": "fake", "engine_version": "1", "voice": "test"}
 
     def synthesize(self, text: str, destination: Path) -> None:
-        _write_wav(destination, frames=max(2400, len(text) * 120))
+        _write_wav(destination, frames=max(24_000, len(text) * 120), tone=True)
 
 
 class CountingBackend(FakeBackend):
@@ -60,7 +69,7 @@ class CountingBackend(FakeBackend):
 
     def synthesize(self, text: str, destination: Path) -> None:
         self.calls += 1
-        _write_wav(destination, frames=2400 + self.calls)
+        _write_wav(destination, frames=24_000 + self.calls, tone=True)
 
 
 def test_duplicate_segments_share_one_fresh_render(tmp_path: Path):
@@ -117,14 +126,16 @@ def test_resume_and_deterministic_m4a_assembly(tmp_path: Path):
     assert second_reused == 1
 
     record = next((tmp_path / "audio" / "segments").glob("*.wav"))
-    _write_wav(record, frames=4800)
+    _write_wav(record, frames=48_000, tone=True)
     _, tampered_reused = synthesize_plan(tmp_path, FakeBackend())
     assert tampered_reused == 0
 
-    output, qa = assemble_m4a(tmp_path)
+    chapters = [{"start": 0.0, "title": "Opening"}]
+    output, qa = assemble_m4a(tmp_path, chapters=chapters)
     first_sha = sha256_file(output)
-    output, qa_again = assemble_m4a(tmp_path)
+    output, qa_again = assemble_m4a(tmp_path, chapters=chapters)
     assert sha256_file(output) == first_sha
     assert qa["status"] == qa_again["status"] == "pass"
     assert qa["checks"]["m4a_channels"] == 1
     assert qa["checks"]["m4a_codec"] == "aac"
+    assert qa["checks"]["embedded_chapter_count"] == 1

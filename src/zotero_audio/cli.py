@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from .audio import assemble_m4a, create_backend, synthesize_plan
 from .extract import DEFAULT_ZOTERO_STORAGE, resolve_pdf
 from .models import default_model_dir, install_kokoro_models
 from .pipeline import prepare_bundle
+from .util import load_json
+from .podcast import PodcastConfig, build_intro, build_local_podcast, episode_title, health_check, load_podcast_config
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:
@@ -58,6 +61,34 @@ def build_parser() -> argparse.ArgumentParser:
     assemble = commands.add_parser("assemble", help="Validate segments and encode AAC/M4A")
     assemble.add_argument("bundle", type=Path)
     assemble.add_argument("--bitrate", type=int, default=64_000)
+
+    podcast = commands.add_parser("podcast", help="Build local podcast metadata and policy artifacts")
+    podcast_sub = podcast.add_subparsers(dest="podcast_command", required=True)
+    info = podcast_sub.add_parser("info", help="Print edition-aware title and introduction")
+    info.add_argument("--title", required=True)
+    info.add_argument("--author", action="append", default=[])
+    info.add_argument("--year")
+    info.add_argument("--edition", choices=("brief", "full"), default="brief")
+    info.add_argument("--journal")
+    info.add_argument("--university")
+    info.add_argument("--license-sentence")
+    info.add_argument("--public", action="store_true")
+    build = podcast_sub.add_parser("build", help="Build private paired podcast artifacts")
+    build.add_argument("bundle", type=Path)
+    build.add_argument("--config", type=Path, help="TOML config; see podcast.example.toml")
+    build.add_argument("--private-root", type=Path)
+    build.add_argument("--state-root", type=Path)
+    build.add_argument("--public-root", type=Path)
+    build.add_argument("--base-url")
+    build.add_argument("--selected", action="store_true", help="Explicit publication-intent gate")
+    build.add_argument("--license-json", type=Path, help="Exact-source license evidence record")
+    build.add_argument("--metadata-json", type=Path, help="Optional enriched bibliographic metadata")
+    build.add_argument("--publish", action=argparse.BooleanOptionalAction, default=None)
+    build.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
+    _synthesis_arguments(build)
+    health = podcast_sub.add_parser("health", help="Validate generated feeds and referenced resources")
+    health.add_argument("--config", type=Path, required=True)
+    health.add_argument("--remote", action="store_true", help="Also check the public HTTPS origin")
 
     run = commands.add_parser("run", help="Prepare, synthesize, and assemble one PDF")
     _prepare_arguments(run)
@@ -118,6 +149,45 @@ def main(argv: list[str] | None = None) -> int:
             output, _ = assemble_m4a(args.bundle.expanduser().resolve(), bitrate=args.bitrate)
             print(output)
             return 0
+        if args.command == "podcast" and args.podcast_command == "info":
+            print(episode_title(args.title, args.author, args.year))
+            print(build_intro(args.edition, args.title, args.author, journal=args.journal,
+                              university=args.university, year=args.year,
+                              license_sentence=args.license_sentence, private=not args.public))
+            return 0
+        if args.command == "podcast" and args.podcast_command == "build":
+            license_record = load_json(args.license_json) if args.license_json else None
+            metadata_value = load_json(args.metadata_json) if args.metadata_json else None
+            config = load_podcast_config(args.config) if args.config else None
+            if config is None:
+                if not args.private_root:
+                    raise ValueError("--private-root is required without --config")
+                config = PodcastConfig(
+                    private_root=args.private_root.expanduser().resolve(),
+                    state_root=(args.state_root or args.bundle.parent / "podcast").expanduser().resolve(),
+                    public_root=args.public_root.expanduser().resolve() if args.public_root else None,
+                    base_url=(args.base_url or "https://podcast.example.invalid").rstrip("/"),
+                    publishing_enabled=bool(args.publish),
+                    dry_run=True if args.dry_run is None else args.dry_run,
+                )
+            elif args.dry_run is not None or args.publish is not None:
+                from dataclasses import replace
+                config = replace(
+                    config,
+                    dry_run=config.dry_run if args.dry_run is None else args.dry_run,
+                    publishing_enabled=config.publishing_enabled if args.publish is None else args.publish,
+                )
+            backend = None if config.dry_run else _backend_from_args(args)
+            result = build_local_podcast(
+                args.bundle.expanduser().resolve(), backend=backend, config=config, selected=args.selected,
+                license_record=license_record, metadata=metadata_value,
+            )
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "podcast" and args.podcast_command == "health":
+            result = health_check(load_podcast_config(args.config), remote=args.remote)
+            print(json.dumps(result, indent=2))
+            return 0 if result["status"] == "pass" else 1
         if args.command == "run":
             bundle, prepared_reused = _prepare(args)
             backend = _backend_from_args(args)
