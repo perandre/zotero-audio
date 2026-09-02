@@ -73,6 +73,44 @@ is 900 characters, selected from the included full-paper benchmark.
 Because Kokoro-82M has no Norwegian frontend, Norwegian material is rendered
 with the British-English frontend and `bf_emma`; no system TTS is used.
 
+## Automatic library synchronization
+
+For a zero-click workflow, `auto_sync.py` runs the batch runner incrementally
+and then applies the title, author, year, and Zotero-key metadata. It scans the
+whole local Zotero library, so every new PDF is processed automatically. Source
+and output hashes keep unchanged items out of the synthesis queue, and a lock
+prevents overlapping runs. The Kokoro model is loaded only when a new or changed
+PDF needs audio.
+
+The included macOS `launchd` job checks every five minutes and once at login:
+
+```bash
+/Users/pesh/Sites/zotero-audio/scripts/install_launchd.sh
+```
+
+The supplied plist assumes the paths used by this installation:
+
+- Zotero storage: `/Users/pesh/Zotero/storage`
+- Zotero database: `/Users/pesh/Zotero/zotero.sqlite`
+- Audio destination: `/Users/pesh/Music/Zotero Audio`
+- Runtime and logs: `/Users/pesh/Sites/zotero-audio-runtime/full-library`
+
+Edit `launchd/com.pesh.zotero-audio.plist` before installation if any path is
+different. The job can be inspected with:
+
+```bash
+launchctl print "gui/$(id -u)/com.pesh.zotero-audio"
+tail -f /Users/pesh/Sites/zotero-audio-runtime/full-library/auto-sync.stdout.log
+```
+
+Completed files trigger a macOS notification. Failed or scanned (OCR-required)
+PDFs remain in the batch manifest and trigger an action-required notification;
+the next scheduled run retries them. To stop the automation, unload the plist:
+
+```bash
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pesh.zotero-audio.plist"
+```
+
 Each stage can also be run separately:
 
 ```bash

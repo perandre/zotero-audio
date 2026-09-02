@@ -103,14 +103,16 @@ def retag_atomic(source: Path, destination: Path, metadata: dict[str, Any], key:
         raise
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     manifest_path = args.batch_manifest.expanduser().resolve()
     manifest = load_json(manifest_path)
     destination_root = Path(manifest["destination"])
     final_paths: set[Path] = set()
     for item in manifest["items"]:
         if item.get("status") != "complete":
+            continue
+        if item.get("metadata_finalized"):
             continue
         source = destination_root / item["output_file"]
         metadata = zotero_metadata(args.zotero_db, item["zotero_key"]) or {}

@@ -246,7 +246,9 @@ class MlxKokoroBackend:
                 allow_patterns=[
                     "config.json",
                     "kokoro-v1_0.safetensors",
-                    f"voices/{voice}.safetensors",
+                    # Batch processing may switch between English and British
+                    # English voices after the model is loaded.
+                    "voices/*.safetensors",
                 ],
             )
         ).resolve()

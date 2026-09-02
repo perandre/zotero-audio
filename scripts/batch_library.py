@@ -69,8 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     storage = args.zotero_storage.expanduser().resolve()
     destination = args.destination.expanduser().resolve()
     state_dir = args.state_dir.expanduser().resolve()
@@ -101,12 +101,9 @@ def main() -> int:
             for item in previous.get("items", [])
             if item.get("status") == "complete"
         }
-    backend = MlxKokoroBackend(
-        model_id=args.model,
-        voice=args.voice,
-        speed=args.speed,
-        language="a",
-    )
+    # Delay loading the MLX model until a source actually needs processing.
+    # Automatic runs can then scan and exit cheaply when the library is up to date.
+    backend: MlxKokoroBackend | None = None
     manifest: dict[str, Any] = {
         "schema": "zotero-audio-library-batch/v1",
         "source_root": str(storage),
@@ -123,6 +120,7 @@ def main() -> int:
     for number, pdf in enumerate(pdfs, start=1):
         key = pdf.relative_to(storage).parts[0]
         progress(f"[{number}/{len(pdfs)}] preparing {key}: {pdf.name}")
+        source_sha: str | None = None
         try:
             source_sha = sha256_file(pdf)
             previous = previous_items.get(str(pdf))
@@ -145,6 +143,13 @@ def main() -> int:
             language = detect_language(structure)
             voice = args.norwegian_voice if language == "nb" else args.voice
             language_code = "b" if language == "nb" else "a"
+            if backend is None:
+                backend = MlxKokoroBackend(
+                    model_id=args.model,
+                    voice=args.voice,
+                    speed=args.speed,
+                    language="a",
+                )
             backend.configure(voice=voice, speed=args.speed, language=language_code)
             run_manifest, segment_reused = synthesize_plan(bundle, backend)
             generated = len(run_manifest["segments"]) - segment_reused
@@ -189,6 +194,7 @@ def main() -> int:
                     "status": "failed",
                     "zotero_key": key,
                     "source_path": str(pdf),
+                    "source_sha256": source_sha,
                     "error": f"{type(exc).__name__}: {exc}",
                 }
             )

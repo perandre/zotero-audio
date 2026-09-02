@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pesh.zotero-audio</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/pesh/Sites/zotero-audio-runtime/venv/bin/python</string>
+        <string>/Users/pesh/Sites/zotero-audio/scripts/auto_sync.py</string>
+        <string>--zotero-storage</string>
+        <string>/Users/pesh/Zotero/storage</string>
+        <string>--destination</string>
+        <string>/Users/pesh/Music/Zotero Audio</string>
+        <string>--state-dir</string>
+        <string>/Users/pesh/Sites/zotero-audio-runtime/full-library</string>
+        <string>--zotero-db</string>
+        <string>/Users/pesh/Zotero/zotero.sqlite</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/pesh/Sites/zotero-audio</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HF_HOME</key>
+        <string>/Users/pesh/Sites/zotero-audio-runtime/huggingface</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/pesh/Sites/zotero-audio-runtime/full-library/auto-sync.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/pesh/Sites/zotero-audio-runtime/full-library/auto-sync.stderr.log</string>
+</dict>
+</plist>
