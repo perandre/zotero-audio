@@ -10,7 +10,6 @@ from zotero_audio.audio import (
     TARGET_SAMPLE_RATE,
     assemble_m4a,
     normalize_kokoro_text,
-    split_kokoro_input,
     synthesize_plan,
     validate_wav,
 )
@@ -43,13 +42,6 @@ def test_validate_wav_rejects_non_mono(tmp_path: Path):
     _write_wav(path, channels=2)
     with pytest.raises(ValueError, match="mono"):
         validate_wav(path)
-
-
-def test_kokoro_input_split_preserves_text_and_limit():
-    text = "One short sentence. " + " ".join(["academic"] * 90) + " Final sentence."
-    chunks = split_kokoro_input(text, max_chars=120)
-    assert " ".join(chunks) == text
-    assert all(len(chunk) <= 120 for chunk in chunks)
 
 
 def test_kokoro_text_normalization_speaks_pdf_table_symbols():

@@ -2,12 +2,59 @@ from pathlib import Path
 
 import pytest
 
-from zotero_audio.extract import normalize_speech_text, render_markdown, resolve_pdf
+from zotero_audio.extract import _infer_abstract, _paragraphs, normalize_speech_text, render_markdown, resolve_pdf
 
 
-def test_normalize_removes_soft_hyphen_urls_and_line_wraps():
-    value = "A long-\nterm result\u00ad at https://example.com/test ."
-    assert normalize_speech_text(value) == "A longterm result at"
+def test_normalize_preserves_article_content_and_real_hyphens():
+    value = "A long-\nterm result\u00ad at https://example.com/test www.example.org me@example.org."
+    assert normalize_speech_text(value) == "A long-term result at https://example.com/test www.example.org me@example.org."
+    assert normalize_speech_text("Prior work (1, 2) agrees [3], but the year (2024) remains.") == (
+        "Prior work (1, 2) agrees [3], but the year (2024) remains."
+    )
+    assert normalize_speech_text("organi\u00ad\nsations and com\u00ad\nplexities") == "organisations and complexities"
+
+
+def test_wrapped_sentences_stay_in_the_same_paragraph():
+    paragraphs, _ = _paragraphs("First sentence.\nSecond sentence with organi\u00ad\nsations.\n\nNext paragraph.", set())
+    assert paragraphs == ["First sentence. Second sentence with organisations.", "Next paragraph."]
+
+
+def test_semantic_lines_split_numbered_heading_and_remove_contact_furniture():
+    text = """1. Materials and Methods
+The first sentence wraps
+onto another line. A new paragraph starts here.
+Author affiliations: Example University
+"""
+    paragraphs, omissions = _paragraphs(text, set())
+    assert paragraphs == [
+        "1. Materials and Methods",
+        "The first sentence wraps onto another line. A new paragraph starts here.",
+    ]
+    assert omissions[-1]["reason"] == "publisher-or-contact-furniture"
+
+
+def test_abstract_inference_requires_visible_boundaries():
+    abstract, source = _infer_abstract(
+        "Edited by An Editor\n"
+        "This study reports a careful result across a large representative sample. "
+        "It explains the method, evidence, limitations, and implications in enough detail to be useful. "
+        "The results are robust across all of the planned sensitivity analyses and support the conclusion. "
+        "We also describe why the evidence matters for future work and where caution is required.\n"
+        "topic one | topic two | topic three\nIntroduction\nBody"
+    )
+    assert source == "pdf-editorial-front-matter"
+    assert abstract and abstract.startswith("This study reports")
+
+
+def test_spaced_abstract_heading_skips_adjacent_keywords_and_repairs_soft_wraps():
+    body = (
+        "This study reports a careful result across a large representative sample of organi\u00ad\nsations. "
+        "It explains the method, evidence, limitations, and implications in enough detail to be useful. "
+        "The results are robust across all of the planned sensitivity analyses and support the conclusion."
+    )
+    abstract, source = _infer_abstract("A B S T R A C T\n\nKeywords:\nAI\nTechnology\n\n" + body + "\n\n1. Introduction\nBody")
+    assert abstract == body.replace("\u00ad\n", "")
+    assert source == "pdf-explicit-heading"
 
 
 def test_resolve_zotero_pdf_and_prevent_key_escape(tmp_path: Path):
@@ -40,3 +87,4 @@ def test_markdown_has_page_markers_and_only_included_blocks():
     assert markdown.count("<!-- pdf-page:") == 2
     assert "Included." in markdown
     assert "Omitted." not in markdown
+    assert "authors: []" in markdown

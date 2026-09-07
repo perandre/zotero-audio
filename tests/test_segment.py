@@ -34,3 +34,16 @@ def test_plan_is_stable_and_preserves_page_mapping():
     assert first == second
     assert first["segments"][1]["pdf_pages"] == [2]
     assert first["segments"][1]["source_block_ids"] == ["p0002-b0001"]
+
+
+def test_full_plan_keeps_long_sentence_intact_for_phoneme_budgeting():
+    sentence = "This sentence " + "contains many original words " * 45 + "and ends here."
+    structure = {
+        "document": {"title": "Paper"}, "source": {"sha256": "a" * 64},
+        "structure_sha256": "b" * 64,
+        "blocks": [{"id": "p1", "type": "paragraph", "text": sentence,
+                    "pdf_page": 1, "included_in_reading": True}],
+    }
+    plan = create_speech_plan(structure, max_chars=900)
+    assert plan["segments"][1]["text"] == sentence
+    assert len(plan["segments"]) == 2

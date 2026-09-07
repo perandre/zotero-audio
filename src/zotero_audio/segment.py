@@ -45,12 +45,12 @@ def _hard_split(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def chunk_text(text: str, max_chars: int) -> list[str]:
+def chunk_text(text: str, max_chars: int, *, preserve_sentences: bool = False) -> list[str]:
     if max_chars < 20:
         raise ValueError("max_chars must be at least 20")
     sentences: list[str] = []
     for sentence in split_sentences(text):
-        sentences.extend(_hard_split(sentence, max_chars))
+        sentences.extend([sentence] if preserve_sentences else _hard_split(sentence, max_chars))
     chunks: list[str] = []
     current = ""
     for sentence in sentences:
@@ -86,7 +86,7 @@ def create_speech_plan(structure: dict[str, Any], *, max_chars: int = 900) -> di
             continue
         if block["type"] == "heading":
             current_section = block["text"]
-        for chunk in chunk_text(block["text"], max_chars):
+        for chunk in chunk_text(block["text"], max_chars, preserve_sentences=True):
             kind = "heading" if block["type"] == "heading" else "body"
             spoken = chunk
             if kind == "heading" and not spoken.endswith((".", "!", "?")):
@@ -109,7 +109,7 @@ def create_speech_plan(structure: dict[str, Any], *, max_chars: int = 900) -> di
         "source_sha256": structure["source"]["sha256"],
         "structure_sha256": structure["structure_sha256"],
         "segmentation": {
-            "algorithm": "paragraph-sentence-v1",
+            "algorithm": "paragraph-whole-sentence-v2",
             "max_chars": max_chars,
         },
         "segments": segments,

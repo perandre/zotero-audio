@@ -21,8 +21,14 @@ from typing import Any, Iterable, Protocol
 
 from . import __version__
 from .audio import SpeechBackend, assemble_m4a, synthesize_plan, validate_wav
-from .segment import chunk_text
+from .segment import chunk_text, create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
+from .zotero import (
+    license_record_from_metadata,
+    load_bundle_metadata,
+    merge_document_metadata,
+    normalize_publication_date,
+)
 
 EDITION_BRIEF = "brief"
 EDITION_FULL = "full"
@@ -32,6 +38,7 @@ ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
 PODCAST_NS = "https://podcastindex.org/namespace/1.0"
 ATOM_NS = "http://www.w3.org/2005/Atom"
 CONTENT_NS = "http://purl.org/rss/1.0/modules/content/"
+REMOTE_HEALTH_HEADERS = {"User-Agent": "OpenPaperAudioHealth/1.0"}
 for _prefix, _ns in (("itunes", ITUNES_NS), ("podcast", PODCAST_NS), ("atom", ATOM_NS), ("content", CONTENT_NS)):
     ET.register_namespace(_prefix, _ns)
 
@@ -72,6 +79,7 @@ class PodcastConfig:
     copyright: str = "Open Paper Audio"
     publishing_enabled: bool = False
     dry_run: bool = True
+    r2_bucket: str = ""
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
         "Open Paper Briefs", "Brief editions containing the authors' abstract and, when suitable, conclusion.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
@@ -103,6 +111,7 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         owner_email=str(common.get("owner_email", defaults.owner_email)), category=str(common.get("category", defaults.category)),
         copyright=str(common.get("copyright", defaults.copyright)),
         publishing_enabled=bool(common.get("publishing_enabled", False)), dry_run=bool(common.get("dry_run", True)),
+        r2_bucket=str(common.get("r2_bucket", "")).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
 
 
@@ -136,57 +145,79 @@ def spoken_authors(authors: Iterable[str]) -> str:
     return f"{names[0]} and colleagues"
 
 
+def _spoken_date(value: str) -> str:
+    normalized = normalize_publication_date(value)
+    match = re.fullmatch(r"((?:19|20)\d{2})-(\d{2})-(\d{2})", str(normalized))
+    if match:
+        year, month, day = (int(part) for part in match.groups())
+        try:
+            parsed = datetime(year, month, day)
+        except ValueError:
+            return str(normalized)
+        return f"{parsed.strftime('%B')} {parsed.day}, {parsed.year}"
+
+    partial = re.fullmatch(r"((?:19|20)\d{2})-(\d{2})", str(normalized))
+    if partial:
+        year, month = int(partial.group(1)), int(partial.group(2))
+        if 1 <= month <= 12:
+            return f"{datetime(year, month, 1).strftime('%B')} {year}"
+    return str(normalized).strip()
+
+
+def _date_preposition(value: str) -> str:
+    normalized = normalize_publication_date(value)
+    match = re.fullmatch(r"((?:19|20)\d{2})-(\d{2})-(\d{2})", str(normalized))
+    if not match:
+        return "in"
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        datetime(year, month, day)
+    except ValueError:
+        return "in"
+    return "on"
+
+
 def build_intro(edition: str, title: str, authors: Iterable[str], *, journal: str | None = None,
-                university: str | None = None, publication_date: str | None = None, year: str | int | None = None,
-                brief_contents: str = "the authors' abstract", license_sentence: str | None = None,
-                private: bool = True) -> str:
+                university: str | None = None, publication_date: str | None = None,
+                year: str | int | None = None) -> str:
     if edition not in EDITIONS:
         raise ValueError(f"unknown edition: {edition}")
-    kind = "a brief audio edition" if edition == EDITION_BRIEF else "an audio edition"
+    kind = "a brief of " if edition == EDITION_BRIEF else ""
     affiliation = f", from {university.strip()}" if university and university.strip() else ""
-    parts = [f'You’re listening to {kind} of “{title.strip()},” by {spoken_authors(authors)}{affiliation}.']
+    parts = [f'You’re listening to {kind}“{title.strip()},” by {spoken_authors(authors)}{affiliation}.']
     if journal and publication_date:
-        parts.append(f"Published in {journal} on {publication_date}.")
+        parts.append(f"Published in {journal} {_date_preposition(publication_date)} {_spoken_date(publication_date)}.")
     elif journal and year:
         parts.append(f"Published in {journal} in {year}.")
     elif year:
         parts.append(f"Published in {year}.")
-    if license_sentence and not private:
-        parts.append(license_sentence.rstrip(". ") + ".")
-    if edition == EDITION_BRIEF:
-        linked = "The Full Reading, original paper, transcript, and complete attribution are linked in the show notes."
-        if license_sentence and not private:
-            linked = "The Full Reading, original paper, license, transcript, and complete attribution are linked in the show notes."
-        parts.extend((f"This Brief contains {brief_contents}, not the full paper.", "This edition uses a synthetic voice.", linked))
-    else:
-        linked = "Links to the original paper, transcript, and a complete account of changes are in the show notes."
-        if license_sentence and not private:
-            linked = "Links to the original paper, license, transcript, and a complete account of changes are in the show notes."
-        parts.extend(("This edition uses a synthetic voice.", linked))
     return " ".join(parts)
 
 
 def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict[str, Any]:
-    abstract: list[dict[str, Any]] = []
+    structure_document = structure.get("document", {})
+    metadata_abstract = str(structure_document.get("abstract") or structure_document.get("metadata", {}).get("abstract", "")).strip()
+    abstract: list[dict[str, Any]] = ([{
+        "id": "document-abstract", "type": "body", "role": "abstract", "text": metadata_abstract,
+        "pdf_page": 1, "included_in_reading": True,
+        "provenance": structure_document.get("abstract_source") or "document-metadata",
+    }] if metadata_abstract else [])
+    document_abstract = bool(abstract)
     conclusion: list[dict[str, Any]] = []
     section: str | None = None
     for block in structure.get("blocks", []):
         role = str(block.get("role", "")).casefold()
         text = str(block.get("text", block.get("source_text", ""))).strip()
         heading = text.casefold().rstrip(".: ")
-        if role == "abstract":
+        if role == "abstract" and not document_abstract:
             abstract.append(block); continue
         if role in {"conclusion", "conclusions"}:
             conclusion.append(block); continue
         if block.get("type") == "heading":
             section = "abstract" if heading == "abstract" else "conclusion" if heading in {"conclusion", "conclusions"} else None
         elif block.get("included_in_reading", True) and section:
-            (abstract if section == "abstract" else conclusion).append(block)
-    structure_document = structure.get("document", {})
-    metadata_abstract = str(structure_document.get("abstract") or structure_document.get("metadata", {}).get("abstract", "")).strip()
-    if not abstract and metadata_abstract:
-        abstract = [{"id": "metadata-abstract", "type": "body", "role": "abstract", "text": metadata_abstract,
-                     "pdf_page": 1, "included_in_reading": True, "provenance": "document-metadata"}]
+            if section == "conclusion" or not document_abstract:
+                (abstract if section == "abstract" else conclusion).append(block)
     if not abstract:
         return {"available": False, "reason": "abstract-not-detected", "abstract": [], "conclusion": []}
     word_count = lambda blocks: sum(len(str(item.get("text", "")).split()) for item in blocks)
@@ -240,6 +271,23 @@ def vtt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{ms:03d}"
 
 
+def build_markdown_transcript(plan: dict[str, Any], title: str) -> str:
+    """Render source paragraphs, never arbitrary timed-caption windows."""
+    paragraphs: list[str] = []
+    previous = None
+    for segment in plan["segments"]:
+        kind = segment["kind"]
+        ids = tuple(segment.get("source_block_ids", []))
+        key = (kind, segment.get("section"), ids)
+        text = segment["text"]
+        if paragraphs and key == previous and kind != "heading" and (ids or kind in {"intro", "closing"}):
+            paragraphs[-1] += " " + text
+        else:
+            paragraphs.append(text)
+        previous = key
+    return f"# {title}\n\n" + "\n\n".join(paragraphs) + "\n"
+
+
 def build_transcript(cues: Iterable[dict[str, Any]], destination: Path | None = None) -> str:
     lines = ["WEBVTT", "Kind: captions", "Language: en", ""]
     for index, cue in enumerate(cues, 1):
@@ -290,7 +338,7 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
     metadata = metadata or {}
     errors: list[str] = []
     warnings: list[str] = []
-    document = {**source_plan.get("document", {}), **{k: v for k, v in metadata.items() if v is not None}}
+    document = merge_document_metadata(source_plan.get("document", {}), metadata)
     if not str(document.get("title", "")).strip():
         errors.append("missing-title")
     if not _authors(document, metadata):
@@ -318,7 +366,7 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
             errors.append(code)
     if any(heading.casefold().rstrip(".:") in {"references", "bibliography", "works cited"} for heading in headings):
         errors.append("reference-section-in-spoken-plan")
-    if not extract_brief(structure)["available"]:
+    if not extract_brief({**structure, "document": document})["available"]:
         warnings.append("brief-unavailable-no-confident-abstract")
     return {"schema": "zotero-audio-content-qa/v1", "status": "pass" if not errors else "needs_review",
             "errors": errors, "warnings": warnings, "heading_count": len(meaningful)}
@@ -410,29 +458,32 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                         public: bool = False, max_chars: int = 900) -> dict[str, Any]:
     if edition not in EDITIONS:
         raise ValueError(f"unknown edition: {edition}")
-    metadata = metadata or {}; document = {**source_plan.get("document", {}), **{k: v for k, v in metadata.items() if v is not None}}
+    metadata = metadata or {}; document = merge_document_metadata(source_plan.get("document", {}), metadata)
+    if str(structure.get("document", {}).get("abstract_source", "")).startswith("pdf-"):
+        document["abstract"] = structure["document"]["abstract"]
+        document["abstract_source"] = structure["document"]["abstract_source"]
     structure = {**structure, "document": document}
     authors, title = _authors(document, metadata), str(document.get("title") or "Untitled paper")
     brief = extract_brief(structure)
     if edition == EDITION_BRIEF and not brief["available"]:
         raise RuntimeError("Brief unavailable: no confidently bounded author abstract")
-    license_sentence = f"The source article is licensed under {license_result['name']}" if public and license_result and license_result.get("allowed") else None
     publication_date = document.get("publication_date")
     if str(publication_date or "").strip() == str(document.get("publication_year") or "").strip():
         publication_date = None
     intro = build_intro(edition, title, authors, journal=document.get("journal") or document.get("publication_title"),
                         university=document.get("university"), publication_date=publication_date,
-                        year=document.get("publication_year"),
-                        brief_contents=brief.get("brief_contents", "the authors' abstract"), license_sentence=license_sentence, private=not public)
+                        year=document.get("publication_year"))
     segments: list[dict[str, Any]] = []
     def append(text: str, kind: str, section: str, ids: list[str] | None = None, pages: list[int] | None = None,
                pause: int = 240, transformations: list[str] | None = None) -> None:
-        for value in chunk_text(text, max_chars):
+        for value in chunk_text(text, max_chars, preserve_sentences=True):
             segments.append(_new_segment(value, len(segments) + 1, kind, section, ids=ids, pages=pages,
                                          pause=pause, transformations=transformations))
-    append("Open Paper Audio.", "ident", "Opening", pause=450); append(intro, "intro", "Introduction", pause=700)
+    append(intro, "intro", "Introduction", pause=700)
     if edition == EDITION_FULL:
-        body = list(source_plan.get("segments", []))
+        # Rebuild boundaries from source blocks, including for older cached plans.
+        full_plan = create_speech_plan(structure, max_chars=max_chars) if structure.get("blocks") and structure.get("source") else source_plan
+        body = list(full_plan.get("segments", []))
         if body and body[0].get("kind") == "title":
             body = body[1:]
         for original in body:
@@ -446,16 +497,12 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
             for block in blocks:
                 append(str(block.get("text", "")), "body", heading,
                        [str(block["id"])] if block.get("id") else [], [int(block.get("pdf_page", 1))])
-    changes = "Parenthetical citations and the reference list were omitted; tables and figures remain available in the companion information."
-    companion_contents = "paper, license, transcript, and complete attribution" if license_result and license_result.get("allowed") else "paper, transcript, and complete attribution"
-    append(f"{changes} This audio is a modified format of the source paper. The authors and publisher do not sponsor or endorse this recording. See the companion information for the {companion_contents}.",
-           "closing", "Closing", pause=0, transformations=["changes-disclosed", "non-endorsement"])
     result = {"schema": "zotero-audio-narration-plan/v1", "pipeline_version": __version__, "edition": edition,
               "document": document, "source_sha256": source_plan["source_sha256"],
               "structure_sha256": source_plan.get("structure_sha256"), "source_plan_sha256": source_plan["plan_sha256"],
-              "segmentation": {"algorithm": "podcast-edition-v1", "max_chars": max_chars},
+              "segmentation": {"algorithm": "podcast-whole-sentence-v2", "max_chars": max_chars},
               "brief_contents": brief.get("brief_contents") if edition == EDITION_BRIEF else None,
-              "transformation_notice": changes, "segments": segments}
+              "segments": segments}
     result["plan_sha256"] = json_digest(result)
     return result
 
@@ -513,7 +560,7 @@ def _episode_guid(source_sha: str, key: str, edition: str) -> str:
     return f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, f'zotero-audio:{key}:{source_sha}:{edition}')}"
 
 
-def _show_notes(document: dict[str, Any], authors: list[str], edition: str, license_result: dict[str, Any], changes: str) -> str:
+def _show_notes(document: dict[str, Any], authors: list[str], edition: str, license_result: dict[str, Any]) -> str:
     lines = [str(document.get("abstract") or document.get("metadata", {}).get("abstract") or f"A {edition} audio edition of this paper."),
              "", f"Authors: {', '.join(authors) if authors else 'Not supplied'}"]
     journal = document.get("journal") or document.get("publication_title")
@@ -527,7 +574,7 @@ def _show_notes(document: dict[str, Any], authors: list[str], edition: str, lice
                       f"Episode recording license: Creative Commons Attribution 4.0 — {license_result['episode_license_url']}"))
     elif document.get("url") or document.get("doi"):
         lines.append(f"Read the paper: {document.get('url') or 'https://doi.org/' + str(document['doi'])}")
-    lines.extend(("", "This edition uses a synthetic voice.", f"Changes: {changes}",
+    lines.extend(("", "This edition uses a synthetic voice.",
                   "The authors and publisher do not sponsor or endorse this recording."))
     return "\n".join(lines)
 
@@ -730,7 +777,8 @@ def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, An
             try:
                 import urllib.request
                 feed_url = f"{config.base_url}/{edition}/feed.xml"
-                with urllib.request.urlopen(feed_url, timeout=20) as response:
+                feed_request = urllib.request.Request(feed_url, headers=REMOTE_HEALTH_HEADERS)
+                with urllib.request.urlopen(feed_request, timeout=20) as response:
                     remote_feed = response.read()
                     if response.status != 200 or not remote_feed:
                         raise RuntimeError(f"feed request returned {response.status}")
@@ -751,11 +799,11 @@ def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, An
                     raise RuntimeError("missing length, MIME type, or byte-range support")
                 if remote:
                     import urllib.request
-                    request = urllib.request.Request(url, method="HEAD")
+                    request = urllib.request.Request(url, method="HEAD", headers=REMOTE_HEALTH_HEADERS)
                     with urllib.request.urlopen(request, timeout=20) as response:
-                        if response.status != 200 or not response.headers.get("Content-Length"):
-                            raise RuntimeError(f"HEAD returned {response.status} without Content-Length")
-                    request = urllib.request.Request(url, headers={"Range": "bytes=0-0"})
+                        if response.status != 200:
+                            raise RuntimeError(f"HEAD returned {response.status}")
+                    request = urllib.request.Request(url, headers={**REMOTE_HEALTH_HEADERS, "Range": "bytes=0-0"})
                     with urllib.request.urlopen(request, timeout=20) as response:
                         if response.status not in (200, 206):
                             raise RuntimeError(f"range request returned {response.status}")
@@ -782,7 +830,12 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     if source_manifest.get("status") != "complete" or source_manifest.get("plan_sha256") != source_plan.get("plan_sha256"):
         raise RuntimeError("bundle synthesis is incomplete or stale")
     structure_path = bundle / "structure.json"; structure = load_json(structure_path) if structure_path.is_file() else {"document": source_plan.get("document", {}), "blocks": []}
-    metadata = metadata or {}; document = {**source_plan.get("document", {}), **{k: v for k, v in metadata.items() if v is not None}}
+    discovered = load_bundle_metadata(bundle)
+    metadata = {**discovered, **(metadata or {})}
+    document = merge_document_metadata(source_plan.get("document", {}), metadata)
+    if str(structure.get("document", {}).get("abstract_source", "")).startswith("pdf-"):
+        document["abstract"] = structure["document"]["abstract"]
+        document["abstract_source"] = structure["document"]["abstract_source"]
     structure = {**structure, "document": document}
     authors = _authors(document, metadata); year = str(document.get("publication_year") or "undated"); source_sha = str(source_plan["source_sha256"])
     zotero_key = str(metadata.get("zotero_key") or structure.get("source", {}).get("zotero_key") or bundle.name)
@@ -792,6 +845,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         config = PodcastConfig(private_root.expanduser().resolve(), (state_root or bundle.parent.parent / "podcast").expanduser().resolve(),
                                public_root.expanduser().resolve() if public_root else None, base_url.rstrip("/"),
                                publishing_enabled=publishing_enabled, dry_run=dry_run)
+    if license_record is None:
+        license_record = license_record_from_metadata(document, source_sha)
     license_result = resolve_license(license_record, source_sha256=source_sha); brief = extract_brief(structure)
     content_qa = content_quality_gate(structure, source_plan, metadata)
     edition_names = [EDITION_FULL] + ([EDITION_BRIEF] if brief["available"] else [])
@@ -814,7 +869,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         for edition in edition_names:
             response["editions"][edition] = {"status": "planned", "title": episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"))}
         return response
-    if backend is None: raise RuntimeError("a local speech backend is required to render edition introductions and closings")
+    if backend is None: raise RuntimeError("a local speech backend is required to render edition introductions")
     private_records = {}
     for edition in edition_names:
         stage = config.state_root / "documents" / paper_guid / source_sha / edition
@@ -822,7 +877,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
                                    public=bool(license_result.get("allowed")))
         existing_plan = load_json(stage / "speech-plan.json") if (stage / "speech-plan.json").is_file() else {}
         stage.mkdir(parents=True, exist_ok=True); atomic_write_json(stage / "speech-plan.json", plan); atomic_write_json(stage / "narration-plan.json", plan)
-        atomic_write_text(stage / "narration.md", "\n\n".join(segment["text"] for segment in plan["segments"]) + "\n")
+        atomic_write_text(stage / "narration.md", build_markdown_transcript(plan, str(document.get("title", bundle.name))))
         cached_manifest = load_json(stage / "run-manifest.json") if (stage / "run-manifest.json").is_file() else {}
         cached_qa = load_json(stage / "qa-report.json") if (stage / "qa-report.json").is_file() else {}
         cached_audio = stage / "audio" / f"{stage.name}.m4a"
@@ -855,15 +910,15 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         transcript_html, chapters_path, markdown = artifact_dir / "transcript.html", artifact_dir / "chapters.json", artifact_dir / "transcript.md"
         render_cover(str(document.get("title", bundle.name)), edition=edition, authors=", ".join(authors), year=document.get("publication_year"), destination=cover)
         build_transcript(cues, transcript); build_transcript_html(cues, title, transcript_html, attribution=", ".join(authors)); chapter_json(chapters, chapters_path)
-        atomic_write_text(markdown, f"# {title}\n\n" + "\n\n".join(cue["text"] for cue in cues) + "\n")
+        atomic_write_text(markdown, build_markdown_transcript(plan, title))
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,
                   "paper_title": str(document.get("title", bundle.name)), "authors": authors, "author_label": spoken_authors(authors),
                   "publication_year": document.get("publication_year"), "duration": float(qa["checks"]["m4a_duration_seconds"]),
                   "audio": str(target_audio), "cover": str(cover), "transcript": str(transcript),
                   "transcript_html": str(transcript_html), "chapters": str(chapters_path), "markdown": str(markdown),
-                  "show_notes": _show_notes(document, authors, edition, license_result, plan["transformation_notice"]),
+                  "show_notes": _show_notes(document, authors, edition, license_result),
                   "source_sha256": source_sha, "source_license": license_result, "read_url": license_result.get("read_url") or document.get("url"),
-                  "doi": document.get("doi"), "transformation_notice": plan["transformation_notice"],
+                  "doi": document.get("doi"),
                   "plan_sha256": plan["plan_sha256"], "audio_sha256": sha256_file(target_audio), "loudness": final_loudness}
         atomic_write_json(artifact_dir / "episode.json", record); private_records[edition] = record
         response["editions"][edition] = {"status": "private_ready", **record}

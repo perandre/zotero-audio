@@ -85,9 +85,27 @@ def test_episode_title_and_introductions_are_edition_aware():
     assert episode_title("Paper", ["Smith, Jane", "Nord, Ola"], 2026) == "Paper — Smith & Nord (2026)"
     brief = build_intro("brief", "Paper", ["Jane Smith"], journal="Nature", year=2026)
     full = build_intro("full", "Paper", ["Jane Smith"], journal="Nature", year=2026)
-    assert "brief audio edition" in brief and "not the full paper" in brief
-    assert "brief audio edition" not in full and "an audio edition" in full
+    assert brief == "You’re listening to a brief of “Paper,” by Jane Smith. Published in Nature in 2026."
+    assert full == "You’re listening to “Paper,” by Jane Smith. Published in Nature in 2026."
     assert "Published in Nature in 2026" in brief
+    dated = build_intro("full", "Paper", ["Jane Smith"], journal="Nature", publication_date="2026-04-05")
+    assert "Published in Nature on April 5, 2026" in dated
+    partial = build_intro("full", "Paper", ["Jane Smith"], journal="Nature", publication_date="2026-02-00")
+    assert "Published in Nature in February 2026" in partial
+    assert "2026-02-00" not in partial
+
+
+def test_full_edition_rebuilds_legacy_mid_sentence_boundaries():
+    from zotero_audio.podcast import create_edition_plan
+    structure = _structure()
+    sentence = "The authors " + "preserve these exact original words " * 35 + "through the final sentence."
+    structure["blocks"][1]["text"] = sentence
+    source = _source_plan()
+    source["segments"][2]["text"] = "The authors"
+    plan = create_edition_plan(source, structure, "full")
+    abstract = [s["text"] for s in plan["segments"] if s.get("source_block_ids") == ["a1"]]
+    assert abstract == [sentence]
+    assert any(s["text"] == "Methods." for s in plan["segments"])
 
 
 @pytest.mark.parametrize("record, expected", [
@@ -116,7 +134,7 @@ def test_brief_is_authored_extract_and_plans_are_distinct():
     full_plan = create_edition_plan(source, structure, "full")
     brief_text = " ".join(item["text"] for item in brief_plan["segments"])
     full_text = " ".join(item["text"] for item in full_plan["segments"])
-    assert "not the full paper" in brief_text
+    assert "You’re listening to a brief of" in brief_text
     assert "The full paper explains the method" not in brief_text
     assert "The full paper explains the method" in full_text
     assert brief_plan["plan_sha256"] != full_plan["plan_sha256"]

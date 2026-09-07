@@ -11,18 +11,18 @@ import unicodedata
 import wave
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Callable
 
 from mutagen.mp4 import MP4
 
 from . import __version__
 from .util import atomic_write_json, json_digest, load_json, sha256_file
+from .segment import split_sentences
 
 
 TARGET_SAMPLE_RATE = 24_000
 TARGET_CHANNELS = 1
 TARGET_SAMPLE_WIDTH = 2
-KOKORO_INPUT_CHUNK_CHARS = 160
 KOKORO_SPOKEN_SYMBOLS = {
     "╳": " cross mark ",
     "×": " times ",
@@ -36,6 +36,10 @@ TARGET_LOUDNESS_LUFS = -16.0
 LOUDNESS_MIN_LUFS = -17.0
 LOUDNESS_MAX_LUFS = -15.0
 TRUE_PEAK_MAX_DBTP = -1.0
+# AAC encoding can add inter-sample overshoot that varies with episode length
+# and content. Keep enough working headroom so the final encoded file remains
+# below the -1 dBTP delivery ceiling, including on unusually long episodes.
+AAC_WORKING_TRUE_PEAK_DBTP = -3.5
 
 
 def loudness_is_competitive(integrated_lufs: float, true_peak_dbtp: float, clipped_samples: bool = False) -> bool:
@@ -79,7 +83,7 @@ def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
     if any(str(first.get(key, "")).lower() in {"-inf", "inf", "nan"} for key in ("input_i", "input_tp")):
         raise RuntimeError("Cannot loudness-normalize silent or non-finite audio")
     # Use a lower working ceiling so AAC inter-sample overs remain below -1 dBTP.
-    filter_value = (f"loudnorm=I=-16:TP=-1.5:LRA=11:measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
+    filter_value = (f"loudnorm=I=-16:TP={AAC_WORKING_TRUE_PEAK_DBTP}:LRA=11:measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
                     f"measured_LRA={first['input_lra']}:measured_thresh={first['input_thresh']}:offset={first['target_offset']}:linear=true:print_format=summary")
     destination.parent.mkdir(parents=True, exist_ok=True)
     _run([ffmpeg, "-y", "-i", str(source), "-af", filter_value, "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le", str(destination)])
@@ -95,33 +99,6 @@ class SpeechBackend(Protocol):
     def synthesize(self, text: str, destination: Path) -> dict[str, Any] | None: ...
 
 
-def split_kokoro_input(text: str, max_chars: int = KOKORO_INPUT_CHUNK_CHARS) -> list[str]:
-    """Split before phonemization so no MLX Kokoro chunk can be silently truncated."""
-
-    if max_chars < 80:
-        raise ValueError("Kokoro input chunks must allow at least 80 characters")
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    chunks: list[str] = []
-    current = ""
-    for sentence in sentences:
-        words = sentence.split()
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            if current and len(candidate) > max_chars:
-                chunks.append(current)
-                current = word
-            elif len(word) > max_chars:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(word[index : index + max_chars] for index in range(0, len(word), max_chars))
-            else:
-                current = candidate
-    if current:
-        chunks.append(current)
-    return chunks
-
-
 def normalize_kokoro_text(text: str) -> str:
     """Turn common PDF/table glyphs into words Kokoro can pronounce."""
 
@@ -129,6 +106,29 @@ def normalize_kokoro_text(text: str) -> str:
     for symbol, spoken in KOKORO_SPOKEN_SYMBOLS.items():
         normalized = normalized.replace(symbol, spoken)
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def plan_kokoro_utterances(text: str, phonemize: Callable[[str], str], limit: int = 510) -> list[dict[str, Any]]:
+    """Keep sentences intact; measure phonemes before allowing any inference."""
+    def fit(value: str) -> list[dict[str, Any]]:
+        phonemes = phonemize(value)
+        if not phonemes:
+            raise ValueError("Kokoro produced no phonemes for nonempty text")
+        if len(phonemes) <= limit:
+            return [{"text": value, "phonemes": phonemes, "phoneme_count": len(phonemes)}]
+        # Prefer punctuation between clauses, then a word boundary as a last resort.
+        boundaries = [m.end() for m in re.finditer(r"[,;:—]\s+", value)]
+        if not boundaries:
+            boundaries = [m.end() for m in re.finditer(r"\s+", value)]
+        if not boundaries:
+            raise ValueError("Single word exceeds Kokoro phoneme limit; refusing to truncate")
+        boundary = min(boundaries, key=lambda index: abs(index - len(value) / 2))
+        return fit(value[:boundary].strip()) + fit(value[boundary:].strip())
+
+    utterances = [part for sentence in split_sentences(text) for part in fit(sentence)]
+    if " ".join(item["text"] for item in utterances) != text.strip():
+        raise ValueError("Kokoro utterance planning changed the input text")
+    return utterances
 
 
 def _require_executable(path_or_name: str) -> str:
@@ -340,9 +340,9 @@ class MlxKokoroBackend:
             "sample_rate": TARGET_SAMPLE_RATE,
             "device": "Apple Silicon GPU",
             "input_chunking": {
-                "algorithm": "sentence-word-v1",
-                "max_chars": KOKORO_INPUT_CHUNK_CHARS,
-                "purpose": "prevent MLX Kokoro phoneme-limit truncation",
+                "algorithm": "sentence-phoneme-verified-v2",
+                "max_phonemes": min(510, self.model.context_length - 2),
+                "purpose": "preserve sentence prosody and reject truncation",
             },
             "text_normalization": "nfkc-spoken-symbols-v1",
             "determinism": "cached segments are exact; fresh MLX synthesis may differ at the sample level",
@@ -355,22 +355,34 @@ class MlxKokoroBackend:
         results = []
         chunk_records: list[dict[str, Any]] = []
         normalized_text = normalize_kokoro_text(text)
-        for chunk in split_kokoro_input(normalized_text):
+        pipeline = self.model._get_pipeline(self.config["language"])
+        if self.config["language"] not in {"a", "b"}:
+            raise ValueError("Verified phoneme planning currently supports English only")
+        def phonemize(value: str) -> str:
+            _, tokens = pipeline.g2p(value)
+            return "".join((token.phonemes or "").replace("ɾ", "T") +
+                           (" " if token.whitespace else "") for token in tokens).strip()
+        utterances = plan_kokoro_utterances(normalized_text, phonemize,
+                                          self.config["input_chunking"]["max_phonemes"])
+        for utterance in utterances:
             generated = list(
-                self.model.generate(
-                    text=chunk,
+                pipeline.generate_from_tokens(
+                    utterance["phonemes"],
                     voice=self.config["voice"],
                     speed=self.config["speed"],
-                    lang_code=self.config["language"],
                 )
             )
             results.extend(generated)
             frames = sum(len(np.asarray(result.audio).reshape(-1)) for result in generated)
-            chunk_records.append({"text": chunk, "duration_seconds": round(frames / TARGET_SAMPLE_RATE, 6)})
+            if frames <= 0 or any(not np.isfinite(np.asarray(result.audio)).all() for result in generated):
+                raise RuntimeError("Kokoro returned empty or non-finite utterance audio")
+            if len(generated) != 1 or generated[0].phonemes != utterance["phonemes"]:
+                raise RuntimeError("Kokoro altered or split the verified phoneme input")
+            chunk_records.append({**utterance, "duration_seconds": round(frames / TARGET_SAMPLE_RATE, 6)})
         if not results:
             excerpt = normalized_text[:120]
             raise RuntimeError(f"Kokoro MLX returned no audio for text: {excerpt!r}")
-        sample_rates = {int(result.sample_rate) for result in results}
+        sample_rates = {int(self.model.config.sample_rate)}
         if sample_rates != {TARGET_SAMPLE_RATE}:
             raise RuntimeError(f"Kokoro MLX returned unexpected sample rates: {sorted(sample_rates)}")
         samples = np.concatenate([np.asarray(result.audio).reshape(-1) for result in results])
