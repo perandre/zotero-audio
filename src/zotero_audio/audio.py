@@ -33,6 +33,10 @@ KOKORO_SPOKEN_SYMBOLS = {
 }
 # Podcast delivery gate: integrated loudness is measured after AAC encoding.
 TARGET_LOUDNESS_LUFS = -16.0
+# Short AAC episodes can measure a few tenths quieter after chapter metadata
+# is embedded. Keep the normalization target slightly above the delivery
+# center so those episodes remain inside the documented delivery window.
+NORMALIZATION_TARGET_LUFS = -15.5
 LOUDNESS_MIN_LUFS = -17.0
 LOUDNESS_MAX_LUFS = -15.0
 TRUE_PEAK_MAX_DBTP = -1.0
@@ -83,7 +87,7 @@ def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
     if any(str(first.get(key, "")).lower() in {"-inf", "inf", "nan"} for key in ("input_i", "input_tp")):
         raise RuntimeError("Cannot loudness-normalize silent or non-finite audio")
     # Use a lower working ceiling so AAC inter-sample overs remain below -1 dBTP.
-    filter_value = (f"loudnorm=I=-16:TP={AAC_WORKING_TRUE_PEAK_DBTP}:LRA=11:measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
+    filter_value = (f"loudnorm=I={NORMALIZATION_TARGET_LUFS}:TP={AAC_WORKING_TRUE_PEAK_DBTP}:LRA=11:measured_I={first['input_i']}:measured_TP={first['input_tp']}:"
                     f"measured_LRA={first['input_lra']}:measured_thresh={first['input_thresh']}:offset={first['target_offset']}:linear=true:print_format=summary")
     destination.parent.mkdir(parents=True, exist_ok=True)
     _run([ffmpeg, "-y", "-i", str(source), "-af", filter_value, "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le", str(destination)])

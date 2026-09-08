@@ -334,13 +334,28 @@ def loudness_pass(measurement: dict[str, Any]) -> bool:
 
 
 def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
-                         metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+                         metadata: dict[str, Any] | None = None,
+                         *, edition: str = "both") -> dict[str, Any]:
     """Conservative listener-readiness gate for known PDF failure modes."""
+    if edition not in {"both", *EDITIONS}:
+        raise ValueError(f"unknown edition: {edition}")
     metadata = metadata or {}
     errors: list[str] = []
     warnings: list[str] = []
     if structure.get("extraction", {}).get("errors"):
-        errors.append("unresolved-pdf-extraction-errors")
+        if edition == EDITION_BRIEF:
+            brief = extract_brief({**structure, "document": merge_document_metadata(
+                source_plan.get("document", {}), metadata)})
+            brief_pages = {
+                int(block.get("pdf_page", 1)) for block in (*brief.get("abstract", []), *brief.get("conclusion", []))
+                if str(block.get("pdf_page", "")).isdigit()
+            }
+            extraction_errors = structure["extraction"]["errors"]
+            if any(not error.get("pdf_page") or int(error["pdf_page"]) in brief_pages
+                   for error in extraction_errors if isinstance(error, dict)):
+                errors.append("unresolved-pdf-extraction-errors")
+        else:
+            errors.append("unresolved-pdf-extraction-errors")
     document = merge_document_metadata(source_plan.get("document", {}), metadata)
     if not str(document.get("title", "")).strip():
         errors.append("missing-title")
@@ -354,9 +369,14 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
     if not headings:
         headings = [str(segment.get("text", "")) for segment in source_plan.get("segments", []) if segment.get("kind") == "heading"]
     meaningful = [heading for heading in headings if heading.casefold().rstrip(".:") not in {"references", "bibliography", "works cited"}]
-    if len(meaningful) < 2:
+    brief = extract_brief({**structure, "document": document})
+    if edition != EDITION_BRIEF and len(meaningful) < 2:
         errors.append("page-flat-or-missing-section-structure")
-    spoken = "\n".join(str(segment.get("text", "")) for segment in source_plan.get("segments", [])[1:])
+    if edition == EDITION_BRIEF:
+        spoken = "\n".join(str(block.get("text", "")) for block in (
+            *brief.get("abstract", []), *brief.get("conclusion", [])))
+    else:
+        spoken = "\n".join(str(segment.get("text", "")) for segment in source_plan.get("segments", [])[1:])
     checks = (
         (r"\bhttps?://|\bwww\.", "raw-url-in-spoken-text"),
         (r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "email-in-spoken-text"),
@@ -369,7 +389,7 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
             errors.append(code)
     if any(heading.casefold().rstrip(".:") in {"references", "bibliography", "works cited"} for heading in headings):
         errors.append("reference-section-in-spoken-plan")
-    if not extract_brief({**structure, "document": document})["available"]:
+    if not brief["available"]:
         warnings.append("brief-unavailable-no-confident-abstract")
     return {"schema": "zotero-audio-content-qa/v1", "status": "pass" if not errors else "needs_review",
             "errors": errors, "warnings": warnings, "heading_count": len(meaningful)}
@@ -918,7 +938,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     if license_record is None:
         license_record = license_record_from_metadata(document, source_sha)
     license_result = resolve_license(license_record, source_sha256=source_sha); brief = extract_brief(structure)
-    content_qa = content_quality_gate(structure, source_plan, metadata)
+    content_qa = content_quality_gate(structure, source_plan, metadata, edition=edition)
     edition_names = [EDITION_FULL] + ([EDITION_BRIEF] if brief["available"] else [])
     if edition != "both":
         if edition not in edition_names:

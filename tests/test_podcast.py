@@ -196,6 +196,25 @@ def test_content_gate_rejects_page_flat_and_unsafe_spoken_text():
     assert "numeric-citation-marker-in-spoken-text" in qa["errors"]
 
 
+def test_brief_gate_scopes_quality_checks_to_brief_content():
+    source = _source_plan()
+    source["segments"] = [
+        source["segments"][0],
+        {**source["segments"][1], "text": "The full reading contains x@example.org and [1]."},
+    ]
+    structure = {
+        "document": {
+            "title": "Listening to Evidence",
+            "author": "Ada Smith",
+            "abstract": "The authors found a careful result.",
+        },
+        "blocks": [],
+    }
+    qa = content_quality_gate(structure, source, edition="brief")
+    assert qa["status"] == "pass"
+    assert qa["errors"] == []
+
+
 def test_transcript_and_chapter_validation():
     vtt = build_transcript([{"start": 0, "end": 1.25, "text": "A & B --> result"}])
     assert "00:00:00.000 --> 00:00:01.250" in vtt
