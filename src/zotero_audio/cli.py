@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument("--university")
     info.add_argument("--license-sentence")
     info.add_argument("--public", action="store_true")
-    build = podcast_sub.add_parser("build", help="Build private paired podcast artifacts")
+    build = podcast_sub.add_parser("build", aliases=["rebuild"], help="Build either or both podcast editions; rebuild re-extracts the PDF")
     build.add_argument("bundle", type=Path)
     build.add_argument("--config", type=Path, help="TOML config; see podcast.example.toml")
     build.add_argument("--private-root", type=Path)
@@ -83,6 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--selected", action="store_true", help="Explicit publication-intent gate")
     build.add_argument("--license-json", type=Path, help="Exact-source license evidence record")
     build.add_argument("--metadata-json", type=Path, help="Optional enriched bibliographic metadata")
+    build.add_argument("--edition", choices=("brief", "full", "both"), default="both")
+    build.add_argument("--sync", action="store_true", help="Upload verified artifacts to configured R2 after publishing")
     build.add_argument("--publish", action=argparse.BooleanOptionalAction, default=None)
     build.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     _synthesis_arguments(build)
@@ -155,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                               university=args.university, year=args.year,
                               license_sentence=args.license_sentence, private=not args.public))
             return 0
-        if args.command == "podcast" and args.podcast_command == "build":
+        if args.command == "podcast" and args.podcast_command in {"build", "rebuild"}:
             license_record = load_json(args.license_json) if args.license_json else None
             metadata_value = load_json(args.metadata_json) if args.metadata_json else None
             config = load_podcast_config(args.config) if args.config else None
@@ -177,11 +179,24 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=config.dry_run if args.dry_run is None else args.dry_run,
                     publishing_enabled=config.publishing_enabled if args.publish is None else args.publish,
                 )
+            if args.sync and not config.dry_run and (not config.public_root or not config.r2_bucket):
+                raise ValueError("Public root and R2 bucket are required for --sync")
+            bundle = args.bundle.expanduser().resolve()
+            if args.podcast_command == "rebuild" and not config.dry_run:
+                from .zotero import load_bundle_metadata
+                structure = load_json(bundle / "structure.json")
+                bundle, _, _, _ = prepare_bundle(
+                    Path(structure["source"]["path"]), zotero_key=structure["source"].get("zotero_key"),
+                    output_root=bundle.parent, include_references=structure["extraction"].get("include_references", False),
+                    max_chars=900, force=True, metadata={**load_bundle_metadata(bundle), **(metadata_value or {})})
             backend = None if config.dry_run else _backend_from_args(args)
             result = build_local_podcast(
-                args.bundle.expanduser().resolve(), backend=backend, config=config, selected=args.selected,
-                license_record=license_record, metadata=metadata_value,
+                bundle, backend=backend, config=config, selected=args.selected,
+                license_record=license_record, metadata=metadata_value, edition=args.edition,
             )
+            if args.sync and result.get("published"):
+                from .publish_sync import sync_public
+                sync_public(config, result["public_editions"])
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "podcast" and args.podcast_command == "health":

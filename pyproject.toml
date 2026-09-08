@@ -12,6 +12,7 @@ dependencies = [
   "mutagen>=1.47,<2",
   "Pillow>=11,<13",
   "pypdf>=6.0,<7",
+  "pymupdf4llm==1.28.2",
 ]
 
 [project.optional-dependencies]

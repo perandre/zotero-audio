@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import shutil
-import subprocess
 import unicodedata
 from collections import Counter
 from importlib import metadata
@@ -169,7 +167,7 @@ def _paragraphs(text: str, omitted_edges: set[str]) -> tuple[list[str], list[dic
             flush()
             omissions.append({"text": cleaned_line, "reason": "publisher-or-contact-furniture"})
             continue
-        if _heading_level(cleaned_line) is not None or cleaned_line.casefold().rstrip(":") == "significance":
+        if (not current and _heading_level(cleaned_line) is not None) or cleaned_line.casefold().rstrip(":") == "significance":
             flush()
             groups.extend(_numbered_heading_parts(cleaned_line))
             continue
@@ -292,25 +290,12 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
 
     raw_pages: list[str] = []
     extraction_errors: list[dict[str, Any]] = []
-    executable = shutil.which("pdftotext")
-    if executable:
-        result = subprocess.run([executable, "-enc", "UTF-8", str(pdf), "-"],
-                                capture_output=True, text=True, check=True)
-        raw_pages = result.stdout.split("\f")
-        if not raw_pages[-1].strip():
-            raw_pages.pop()
-        if len(raw_pages) != len(reader.pages):
-            raise RuntimeError("Poppler page count differs from PDF; extraction needs review")
-        version = subprocess.run([executable, "-v"], capture_output=True, text=True, check=True)
-        engine, engine_version = "poppler-pdftotext", version.stderr.splitlines()[0]
-    else:
-        engine, engine_version = "pypdf", _package_version("pypdf")
-        for page_number, page in enumerate(reader.pages, start=1):
-            try:
-                raw_pages.append(page.extract_text() or "")
-            except Exception as exc:
-                raw_pages.append("")
-                extraction_errors.append({"pdf_page": page_number, "error": type(exc).__name__})
+    from .layout import extract_layout
+    raw_pages, layout_records = extract_layout(pdf)
+    engine, engine_version = "pymupdf4llm-layout-original-spans", _package_version("pymupdf4llm")
+    for page_number, records in enumerate(layout_records, 1):
+        if records[-1]["raw_text"]:
+            extraction_errors.append({"pdf_page": page_number, "error": "unassigned-layout-text"})
     if not any(page.strip() for page in raw_pages):
         raise RuntimeError(
             "No extractable text was found. The PDF may require OCR; use an OCR/Marker preprocessing path."
@@ -418,6 +403,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
                 "raw_text_sha256": sha256_text(raw_text),
                 "block_ids": page_block_ids,
                 "omissions": omissions,
+                "layout": layout_records[page_number - 1] if layout_records else [],
             }
         )
 
@@ -431,7 +417,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
     if inferred_abstract and not metadata_fields.get("abstract"):
         document["abstract"] = inferred_abstract
         document["abstract_source"] = abstract_source
-    rights, rights_source = _inferred_license(raw_pages)
+    rights, rights_source = _inferred_license(["\n".join(r["raw_text"] for r in records) for records in layout_records])
     if rights and not metadata_fields.get("rights"):
         document["rights"] = rights
         document["rights_source"] = rights_source
@@ -440,6 +426,29 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
         document["abstract"] = inferred_abstract
         document["abstract_source"] = abstract_source
 
+    # Join continuations across layout boxes/columns/pages, retaining both IDs.
+    previous = None
+    for block in blocks:
+        if not block["included_in_reading"]:
+            continue
+        if (previous and previous["type"] == block["type"] == "paragraph"
+                and (not re.search(r"[.!?][\"”’)]?$", previous["text"])
+                     or previous["text"].count("(") > previous["text"].count(")"))
+                and re.match(r"[a-z\d]", block["text"])):
+            previous["text"] += " " + block["text"]
+            previous["text_sha256"] = sha256_text(previous["text"])
+            previous.setdefault("source_block_ids", [previous["id"]]).append(block["id"])
+            previous.setdefault("pdf_pages", [previous["pdf_page"]]).append(block["pdf_page"])
+            block["included_in_reading"] = False
+            block["omission_reason"] = "continuation-merged"
+        else:
+            previous = block
+
+    expected_sections = [number for records in layout_records for number in records[-1].get("expected_sections", [])]
+    actual_sections = [match.group(1) for block in blocks if block["included_in_reading"] and block["type"] == "heading"
+                       if (match := re.match(r"^(\d+(?:\.\d+)*)", block["text"]))]
+    if len(expected_sections) >= 3 and actual_sections != expected_sections:
+        extraction_errors.append({"error": "heading-order-mismatch", "expected": expected_sections, "actual": actual_sections})
     source_sha = sha256_file(pdf)
     structure: dict[str, Any] = {
         "schema": "zotero-audio-structure/v1",
@@ -454,7 +463,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
         "extraction": {
             "engine": engine,
             "engine_version": engine_version,
-            "algorithm": "reading-order-paragraphs-v3",
+            "algorithm": "layout-original-spans-v4",
             "include_references": include_references,
             "errors": extraction_errors,
         },

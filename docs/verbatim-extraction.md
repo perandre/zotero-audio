@@ -4,11 +4,12 @@ Article wording must never be paraphrased or rewritten. Headings remain spoken.
 Text normalization repairs whitespace and discretionary soft hyphens; it preserves
 real hyphens, citations, URLs, numbers, and the authors' grammar and punctuation.
 
-When installed, Poppler's `pdftotext` supplies reading-order text and paragraph
-boundaries (`brew install poppler` on macOS). The extractor records the engine and
-version. Without Poppler it falls back to pypdf, which may have weaker layout
-results. Neither engine guarantees correct table separation or reading order for
-every PDF; new full readings still need content review.
+PyMuPDF4LLM identifies page layout; the extractor reads original PDF spans rather
+than rewriting article text. It orders columns around full-width blocks, excludes
+classified tables and page furniture, and retains region provenance for audit.
+Unassigned body text or a mismatch with numbered PDF bookmarks blocks publication.
+No extractor guarantees correct layout for every PDF; full readings still need
+content review.
 
 Confidently bounded PDF abstracts take precedence over bibliographic abstract
 metadata, which can contain stale extraction artifacts. Markdown transcripts are
@@ -25,6 +26,17 @@ Optional `--metadata` and `--zotero-key` arguments supply bibliographic metadata
 provenance. The output includes `brief.md`, extracted `article.md`, `structure.json`,
 and the brief speech plan. Compare the brief to the PDF page before audio synthesis.
 Existing published audio and transcripts require a separate rebuild to adopt changes.
+
+Brief and Full use one synthesis, assembly, quality-check, and publishing pipeline:
+
+```sh
+zotero-audio podcast rebuild /absolute/path/bundle --config /absolute/path/podcast.toml --edition both --selected --publish --no-dry-run --sync
+```
+
+Use `--edition brief` or `--edition full` to replace only that edition. `rebuild`
+re-extracts the PDF; `build` uses the prepared extraction and resumes cached audio.
+`--sync` uploads artifacts to R2 before uploading feeds. A dry run does not
+re-extract or synthesize; it evaluates the existing prepared bundle.
 
 ## Speech continuity
 

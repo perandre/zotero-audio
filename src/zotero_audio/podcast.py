@@ -338,6 +338,8 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
     metadata = metadata or {}
     errors: list[str] = []
     warnings: list[str] = []
+    if structure.get("extraction", {}).get("errors"):
+        errors.append("unresolved-pdf-extraction-errors")
     document = merge_document_metadata(source_plan.get("document", {}), metadata)
     if not str(document.get("title", "")).strip():
         errors.append("missing-title")
@@ -508,6 +510,8 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
 
 
 def _seed_source_audio(source_bundle: Path, target_bundle: Path, plan: dict[str, Any], backend: SpeechBackend) -> None:
+    if not (source_bundle / "run-manifest.json").is_file():
+        return
     source_manifest = load_json(source_bundle / "run-manifest.json")
     config_digest = json_digest(backend.config)
     if source_manifest.get("synthesis_config_sha256") != config_digest:
@@ -694,7 +698,10 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
     for edition, private in private_records.items():
         prefix = f"episodes/{paper_guid}/{source_sha[:16]}/{edition}"; previous = existing.get((private["guid"], source_sha), {})
         paired_edition = EDITION_FULL if edition == EDITION_BRIEF else EDITION_BRIEF
-        pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/" if paired_edition in private_records else None
+        has_pair = paired_edition in private_records or any(
+            value.get("edition") == paired_edition and value.get("source_sha256") == source_sha
+            for value in existing.values())
+        pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/" if has_pair else None
         record = {**private, "revision": source_sha, "pub_date": previous.get("pub_date", published_at),
                   "audio_url": _artifact_url(publisher, Path(private["audio"]), prefix),
                   "image_url": _artifact_url(publisher, Path(private["cover"]), prefix),
@@ -823,12 +830,12 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
                         public_root: Path | None = None, base_url: str = "https://podcast.example.invalid",
                         selected: bool = False, license_record: dict[str, Any] | None = None,
                         metadata: dict[str, Any] | None = None, dry_run: bool = True,
-                        publishing_enabled: bool = False) -> dict[str, Any]:
+                        publishing_enabled: bool = False, edition: str = "both") -> dict[str, Any]:
     """Build distinct Brief/Full editions, archive privately, then optionally publish."""
     from .cover import render_cover
-    bundle = bundle.expanduser().resolve(); source_plan = load_json(bundle / "speech-plan.json"); source_manifest = load_json(bundle / "run-manifest.json")
-    if source_manifest.get("status") != "complete" or source_manifest.get("plan_sha256") != source_plan.get("plan_sha256"):
-        raise RuntimeError("bundle synthesis is incomplete or stale")
+    if edition not in {"both", *EDITIONS}:
+        raise ValueError(f"Unknown edition: {edition}")
+    bundle = bundle.expanduser().resolve(); source_plan = load_json(bundle / "speech-plan.json")
     structure_path = bundle / "structure.json"; structure = load_json(structure_path) if structure_path.is_file() else {"document": source_plan.get("document", {}), "blocks": []}
     discovered = load_bundle_metadata(bundle)
     metadata = {**discovered, **(metadata or {})}
@@ -850,6 +857,10 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     license_result = resolve_license(license_record, source_sha256=source_sha); brief = extract_brief(structure)
     content_qa = content_quality_gate(structure, source_plan, metadata)
     edition_names = [EDITION_FULL] + ([EDITION_BRIEF] if brief["available"] else [])
+    if edition != "both":
+        if edition not in edition_names:
+            raise RuntimeError("Requested brief has no confidently bounded abstract")
+        edition_names = [edition]
     planned_state = publication_state(selected=selected, private_ready=content_qa["status"] == "pass",
                                       license_record=license_record, source_sha256=source_sha)
     response: dict[str, Any] = {"schema": "zotero-audio-podcast-build/v1", "paper_guid": paper_guid,
@@ -925,7 +936,11 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     state_record = {"schema": "zotero-audio-paper-publication/v1", "paper_guid": paper_guid, "zotero_key": zotero_key,
                     "source_sha256": source_sha, "state": planned_state, "license": license_result,
                     "editions": {key: {"guid": value["guid"], "audio_sha256": value["audio_sha256"]} for key, value in private_records.items()}}
-    state_path = config.state_root / "documents" / paper_guid / source_sha / "episode.json"; atomic_write_json(state_path, state_record)
+    state_path = config.state_root / "documents" / paper_guid / source_sha / "episode.json"
+    if state_path.is_file():
+        old_state = load_json(state_path)
+        state_record["editions"] = {**old_state.get("editions", {}), **state_record["editions"]}
+    atomic_write_json(state_path, state_record)
     if planned_state == "public_ready" and config.publishing_enabled:
         public_records, changed = _publish(config, paper_guid, source_sha, private_records, license_result)
         response.update({"published": True, "feed_changed": changed, "public_editions": public_records, "state": "published"})

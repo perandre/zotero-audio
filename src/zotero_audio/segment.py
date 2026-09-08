@@ -98,8 +98,8 @@ def create_speech_plan(structure: dict[str, Any], *, max_chars: int = 900) -> di
                     "section": current_section,
                     "text": spoken,
                     "text_sha256": sha256_text(spoken),
-                    "source_block_ids": [block["id"]],
-                    "pdf_pages": [block["pdf_page"]],
+                    "source_block_ids": block.get("source_block_ids", [block["id"]]),
+                    "pdf_pages": sorted(set(block.get("pdf_pages", [block["pdf_page"]]))),
                     "pause_after_ms": 500 if kind == "heading" else 240,
                 }
             )

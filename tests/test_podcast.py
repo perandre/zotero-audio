@@ -264,6 +264,23 @@ def test_dry_run_writes_nothing(tmp_path: Path):
     assert not (tmp_path / "private").exists()
 
 
+@pytest.mark.parametrize("edition", ["brief", "full"])
+def test_shared_build_accepts_prepared_unsynthesized_source(tmp_path: Path, monkeypatch, edition):
+    _stub_media(monkeypatch)
+    bundle = _bundle(tmp_path)
+    (bundle / "run-manifest.json").unlink()
+    result = build_local_podcast(bundle, tmp_path / "private", backend=Backend(),
+                                 dry_run=False, edition=edition)
+    assert set(result["editions"]) == {edition}
+    assert Path(result["editions"][edition]["markdown"]).is_file()
+
+
+def test_extraction_failure_blocks_publication(tmp_path: Path):
+    structure = _structure()
+    structure["extraction"] = {"errors": [{"error": "unassigned-layout-text"}]}
+    assert podcast_module.content_quality_gate(structure, _source_plan())["status"] == "needs_review"
+
+
 def test_end_to_end_private_public_and_idempotent_feed(tmp_path: Path, monkeypatch):
     _stub_media(monkeypatch); bundle = _bundle(tmp_path)
     config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state",
