@@ -18,6 +18,8 @@ from finalize_library_metadata import main as finalize_main
 from zotero_audio.audio import MlxKokoroBackend
 from zotero_audio.podcast import EDITIONS, build_local_podcast, health_check, load_podcast_config
 from zotero_audio.util import json_digest
+from zotero_audio.runtime import configure_tool_path
+from zotero_audio.notifications import report_failure
 
 
 DEFAULT_STORAGE = Path.home() / "Zotero" / "storage"
@@ -85,10 +87,12 @@ def _notify(message: str, *, title: str = "Zotero Audio") -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configure_tool_path()
     storage = args.zotero_storage.expanduser().resolve()
     destination = args.destination.expanduser().resolve()
     state_dir = args.state_dir.expanduser().resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
+    notification_state = state_dir / "notification-state.json"
     lock_path = state_dir / "automatic-sync.lock"
 
     with lock_path.open("w", encoding="utf-8") as lock:
@@ -191,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 except Exception as exc:
                     print(f"Podcast artifact generation failed (audio retained): {type(exc).__name__}: {exc}")
+                    result = 1
             health_path = podcast_config.state_root / "health-report.json"
             public_ready = podcast_config.public_root is not None and podcast_config.public_root.is_dir()
             if podcast_config.publishing_enabled and not podcast_config.dry_run and podcast_config.r2_bucket and public_ready:
@@ -207,8 +212,11 @@ def main(argv: list[str] | None = None) -> int:
                     detail = (sync_result.stderr or sync_result.stdout).strip()
                     print(f"Podcast R2 sync failed: {detail}")
                     result = 1
-                    if args.notify:
-                        _notify("Podcast public mirror sync failed", title="Zotero Audio — action required")
+                    report_failure(notification_state, "public-sync", detail.splitlines()[-1] if detail else f"exit {sync_result.returncode}",
+                                   "Podcast public mirror sync failed. See the Zotero Audio sync log.",
+                                   lambda message: _notify(message, title="Zotero Audio — action required"), enabled=args.notify)
+                else:
+                    report_failure(notification_state, "public-sync", None, "", _notify)
             health_due = not health_path.is_file() or time.time() - health_path.stat().st_mtime >= 86_400
             feed_ready = (podcast_config.public_root is not None and
                           any((podcast_config.public_root / edition / "feed.xml").is_file() for edition in EDITIONS))
@@ -217,10 +225,13 @@ def main(argv: list[str] | None = None) -> int:
                     health = health_check(podcast_config, remote=True)
                     if health["status"] != "pass":
                         raise RuntimeError("; ".join(health["failures"][:3]))
+                    report_failure(notification_state, "feed-health", None, "", _notify)
                 except Exception as exc:
                     print(f"Podcast health check failed: {type(exc).__name__}: {exc}")
-                    if args.notify:
-                        _notify("Podcast feed health check needs attention", title="Zotero Audio — action required")
+                    result = 1
+                    report_failure(notification_state, "feed-health", str(exc),
+                                   "Podcast feed health check needs attention",
+                                   lambda message: _notify(message, title="Zotero Audio — action required"), enabled=args.notify)
 
         after = _load_manifest(manifest_path)
         new_count = len(_complete_keys(after) - _complete_keys(before))

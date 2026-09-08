@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from .util import atomic_write_json, load_json, sha256_file
+from .runtime import configure_tool_path
 
 
 def sync_public(config, records: list[dict]) -> None:
@@ -32,7 +34,8 @@ def sync_public(config, records: list[dict]) -> None:
 
 
 def upload_keys(public_root: Path, bucket: str, state_path: Path, keys) -> None:
-    npx = shutil.which("npx")
+    configure_tool_path()
+    npx = shutil.which(os.environ.get("ZOTERO_AUDIO_NPX", "npx"))
     if not npx:
         raise RuntimeError("npx is required for R2 publishing")
     for key in sorted(keys, key=lambda value: (value.endswith("/feed.xml"), value)):
