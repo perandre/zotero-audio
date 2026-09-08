@@ -171,13 +171,23 @@ Preview an exact build without writing files or loading Kokoro:
   --config "$RUNTIME/podcast.toml"
 ```
 
+For Zotero-backed bundles, parent-item metadata is automatic. Title, ordered
+authors, publication data, journal, DOI/URL, abstract, language, rights, tags,
+and collection membership are captured in `metadata.json` beside the bundle
+and reused by direct podcast commands. `--metadata-json` is only an explicit
+override. New extractions also use conservative semantic line reconstruction,
+remove contact/URL furniture from narration, omit references and visual grids,
+and retain a PDF-page provenance map.
+
 After reviewing the paths, set `dry_run = false`. Private Brief and Full
 Reading files are then created regardless of public eligibility. Put an item in
 the Zotero collection `Podcast Queue`, or add the exact tag `podcast`, to express
 publication intent. Public staging additionally requires a canonical CC BY 4.0,
-CC0 1.0, or Public Domain Mark 1.0 URL in Zotero's Rights field, a paper URL or
-DOI, and `publishing_enabled = true`. Missing, vague, conflicting, NC, ND, and
-embargoed rights stay private.
+CC0 1.0, or Public Domain Mark 1.0 record, a paper URL or DOI, and
+`publishing_enabled = true`. The preferred source is Zotero's Rights field (or
+a strictly parsed Rights/License line in Extra). An exact allowlisted statement
+embedded in the checksum-bound source PDF is also accepted and recorded as PDF
+evidence. Missing, vague, conflicting, NC, ND, and embargoed rights stay private.
 
 For automatic runs, save the completed file as
 `/Users/pesh/Sites/zotero-audio-runtime/podcast.toml`; the existing launchd job
@@ -190,9 +200,11 @@ entries to the plist's `ProgramArguments` array and reinstalling it:
 ```
 
 The generated `public_root` is a static, content-addressed site and object-store
-mirror. Serve or synchronize that directory at `base_url` with public HTTPS,
-HEAD, byte-range requests, correct MIME types, ETag, and Content-Length. Submit
-the resulting `brief/feed.xml` and `full/feed.xml` URLs to Spotify once; future
+mirror. For the Cloudflare setup, set `r2_bucket` in the podcast section and
+the existing automatic job uploads new or changed files to that R2 bucket using
+the logged-in Wrangler profile. The bucket's public custom domain is the
+configured `base_url`; no Worker is required for these static files. Submit the
+resulting `brief/feed.xml` and `full/feed.xml` URLs to Spotify once; future
 eligible episodes arrive through RSS without browser automation. Feed files are
 committed last and unchanged reruns preserve their bytes. Validate the mirror
 or its public origin with:

@@ -95,6 +95,43 @@ def test_episode_title_and_introductions_are_edition_aware():
     assert "2026-02-00" not in partial
 
 
+def test_show_notes_render_safe_links_and_omit_unrequested_disclosures():
+    document = {
+        "abstract": "An abstract.",
+        "journal": "International Journal of Information Management",
+        "publication_date": "2026-02",
+        "doi": "10.1016/j.ijinfomgt.2025.102982",
+    }
+    license_result = {
+        "allowed": True,
+        "name": "Creative Commons Attribution 4.0 International",
+        "read_url": "https://doi.org/10.1016/j.ijinfomgt.2025.102982",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "episode_license_url": "https://creativecommons.org/licenses/by/4.0/",
+    }
+    notes = podcast_module._show_notes(document, ["Laurie Hughes", "Fern Davies"], "brief", license_result)
+    assert "Episode recording license" not in notes
+    assert "synthetic voice" not in notes
+
+    pair_url = "https://feed.mere.no/papers/example/full/"
+    rendered = podcast_module._show_notes_html(notes + f"\nPaired edition: {pair_url}", edition="brief")
+    assert '<a href="https://doi.org/10.1016/j.ijinfomgt.2025.102982">https://doi.org/10.1016/j.ijinfomgt.2025.102982</a>' in rendered
+    assert '<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>' in rendered
+    assert f'<a href="{pair_url}">Full episode</a>' in rendered
+    assert f">{pair_url}</a>" not in rendered
+
+    page = podcast_module._episode_page({
+        "title": "Paper",
+        "edition": "brief",
+        "image_url": "https://audio.example/cover.png",
+        "audio_url": "https://audio.example/audio.m4a",
+        "transcript_url": "https://audio.example/transcript.vtt",
+        "show_notes": notes + f"\nPaired edition: {pair_url}",
+    })
+    assert '<footer class="episode-footer"' in page
+    assert '<a href="https://audio.example/transcript.vtt">Timed transcript</a>' in page
+
+
 def test_full_edition_rebuilds_legacy_mid_sentence_boundaries():
     from zotero_audio.podcast import create_edition_plan
     structure = _structure()

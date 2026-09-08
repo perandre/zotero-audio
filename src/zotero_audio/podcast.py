@@ -53,6 +53,7 @@ LICENSE_ALIASES = {
     "cc0 1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
     "public domain mark 1.0": "https://creativecommons.org/publicdomain/mark/1.0/",
 }
+HTTP_URL_RE = re.compile(r"https?://[^\s<]+", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -574,13 +575,53 @@ def _show_notes(document: dict[str, Any], authors: list[str], edition: str, lice
         lines.append(f"Publication date: {document.get('publication_date') or document.get('publication_year')}")
     if license_result.get("allowed"):
         lines.extend((f"Read the paper: {license_result['read_url']}",
-                      f"Source license: {license_result['name']} — {license_result['license_url']}",
-                      f"Episode recording license: Creative Commons Attribution 4.0 — {license_result['episode_license_url']}"))
+                      f"Source license: {license_result['name']} — {license_result['license_url']}"))
     elif document.get("url") or document.get("doi"):
         lines.append(f"Read the paper: {document.get('url') or 'https://doi.org/' + str(document['doi'])}")
-    lines.extend(("", "This edition uses a synthetic voice.",
-                  "The authors and publisher do not sponsor or endorse this recording."))
+    lines.extend(("", "The authors and publisher do not sponsor or endorse this recording."))
     return "\n".join(lines)
+
+
+def _safe_url(value: str) -> str | None:
+    """Return an http(s) URL suitable for an HTML href, or None."""
+    candidate = value.strip()
+    parsed = urllib.parse.urlsplit(candidate)
+    return candidate if parsed.scheme in {"http", "https"} and parsed.netloc else None
+
+
+def _show_notes_html(show_notes: str, *, edition: str | None = None) -> str:
+    """Render plain-text show notes as escaped paragraphs with safe links."""
+    paragraphs: list[str] = []
+    for line in show_notes.splitlines():
+        if not line.strip():
+            continue
+        paired = re.match(r"^\s*Paired edition:\s*(https?://\S+)\s*$", line, re.IGNORECASE)
+        if paired:
+            pair_url = _safe_url(paired.group(1))
+            if pair_url:
+                pair_title = "Full episode" if edition != EDITION_FULL else "Brief episode"
+                paragraphs.append(f'<p><a href="{html.escape(pair_url, quote=True)}">{pair_title}</a></p>')
+                continue
+
+        rendered: list[str] = []
+        cursor = 0
+        for match in HTTP_URL_RE.finditer(line):
+            raw_url = match.group(0)
+            trailing = ""
+            while raw_url and raw_url[-1] in ".,;:!?)]}":
+                trailing = raw_url[-1] + trailing
+                raw_url = raw_url[:-1]
+            rendered.append(html.escape(line[cursor:match.start()]))
+            safe_url = _safe_url(raw_url)
+            if safe_url:
+                rendered.append(f'<a href="{html.escape(safe_url, quote=True)}">{html.escape(raw_url)}</a>')
+            else:
+                rendered.append(html.escape(raw_url))
+            rendered.append(html.escape(trailing))
+            cursor = match.end()
+        rendered.append(html.escape(line[cursor:]))
+        paragraphs.append(f"<p>{''.join(rendered)}</p>")
+    return "".join(paragraphs)
 
 
 def _copy_if_changed(source: Path, destination: Path) -> None:
@@ -633,9 +674,10 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         absent = [key for key in needed if not episode.get(key)]
         if absent: raise ValueError(f"episode {episode.get('guid', '?')} lacks {', '.join(absent)}")
         item = ET.SubElement(channel, "item")
+        notes_html = _show_notes_html(str(episode.get("show_notes", "")), edition=episode.get("edition"))
         for tag, value in (("title", episode["title"]), ("link", episode["page_url"]),
-                           ("description", episode.get("show_notes", ""))): ET.SubElement(item, tag).text = str(value)
-        ET.SubElement(item, f"{{{CONTENT_NS}}}encoded").text = str(episode.get("show_notes", ""))
+                           ("description", notes_html)): ET.SubElement(item, tag).text = str(value)
+        ET.SubElement(item, f"{{{CONTENT_NS}}}encoded").text = notes_html
         ET.SubElement(item, "guid", {"isPermaLink": "false"}).text = str(episode["guid"])
         ET.SubElement(item, "pubDate").text = _rfc2822(episode["pub_date"])
         ET.SubElement(item, "enclosure", {"url": str(episode["audio_url"]), "length": str(episode["bytes"]), "type": "audio/mp4"})
@@ -668,12 +710,33 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
 
 
 def _episode_page(record: dict[str, Any]) -> str:
-    notes = "".join(f"<p>{html.escape(line)}</p>" if line else "" for line in record["show_notes"].splitlines())
-    return ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{html.escape(record['title'])}</title><style>body{{max-width:64rem;margin:4rem auto;padding:0 1.25rem;background:#f2efe6;color:#16212b;font:18px/1.55 Georgia,serif}}img{{width:min(100%,28rem);border:5px solid #16212b}}audio{{display:block;width:100%;margin:2rem 0}}a{{color:#2f5bd3}}</style>"
-            f"<main><small>OPEN PAPER AUDIO · {record['edition'].upper()}</small><h1>{html.escape(record['title'])}</h1>"
-            f"<img src=\"{html.escape(record['image_url'])}\" alt=\"Cover for {html.escape(record['title'])}\"><audio controls preload=\"metadata\" src=\"{html.escape(record['audio_url'])}\"></audio>"
-            f"{notes}<p><a href=\"{html.escape(record['transcript_url'])}\">Timed transcript</a></p></main></html>\n")
+    notes = _show_notes_html(str(record["show_notes"]), edition=record.get("edition"))
+    title = html.escape(str(record["title"]))
+    image_url = html.escape(str(record["image_url"]), quote=True)
+    audio_url = html.escape(str(record["audio_url"]), quote=True)
+    transcript_url = html.escape(str(record["transcript_url"]), quote=True)
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            f"<title>{title}</title><style>"
+            ":root{color-scheme:light;--page:#f2efe6;--surface:#faf8f2;--ink:#16212b;--muted:#5c665f;--line:#c9c1b2;--link:#2f5bd3}"
+            "*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:18px/1.55 Georgia,serif}"
+            ".page-shell{max-width:64rem;margin:0 auto;padding:clamp(2rem,7vw,5rem) clamp(1.25rem,4vw,3rem) 3rem}"
+            ".episode{background:var(--surface);border:1px solid var(--line);border-radius:1.25rem;padding:clamp(1.25rem,4vw,3rem);box-shadow:0 1rem 3rem rgba(22,33,43,.07)}"
+            ".episode-header{border-bottom:1px solid var(--line);padding-bottom:1.75rem;margin-bottom:2rem}"
+            ".eyebrow,.footer-label{color:var(--muted);font:700 .72rem/1.3 Helvetica,sans-serif;letter-spacing:.14em;text-transform:uppercase}"
+            "h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.08;margin:.75rem 0 1.5rem;max-width:18ch}"
+            ".cover{display:block;width:min(100%,28rem);height:auto;border:5px solid var(--ink);border-radius:.2rem}"
+            "audio{display:block;width:100%;margin:2rem 0 0}a{color:var(--link);text-decoration-thickness:.09em;text-underline-offset:.15em}"
+            ".show-notes{max-width:68ch}.show-notes h2{font-size:1.35rem;margin:0 0 1rem}.show-notes p{margin:0 0 1rem}.show-notes p:last-child{margin-bottom:0}"
+            ".episode-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-top:2rem;padding:1rem 1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--surface);box-shadow:0 .5rem 1.5rem rgba(22,33,43,.04)}"
+            ".episode-footer p{margin:0}.episode-footer a{font-weight:700}.footer-label{font-size:.65rem;letter-spacing:.1em}"
+            "@media(max-width:36rem){.episode-footer{align-items:flex-start;flex-direction:column}}"
+            "@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}"
+            "</style></head><body><main class=\"page-shell\"><article class=\"episode\">"
+            f"<header class=\"episode-header\"><div class=\"eyebrow\">Open Paper Audio · {html.escape(str(record['edition']).upper())}</div><h1>{title}</h1>"
+            f"<img class=\"cover\" src=\"{image_url}\" alt=\"Cover for {title}\"><audio controls preload=\"metadata\" src=\"{audio_url}\"></audio></header>"
+            f"<section class=\"show-notes\" aria-labelledby=\"show-notes-title\"><h2 id=\"show-notes-title\">Show notes</h2>{notes}</section></article>"
+            f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p><a href=\"{transcript_url}\">Timed transcript</a></footer>"
+            "</main></body></html>\n")
 
 
 def _write_site(config: PodcastConfig, manifest: dict[str, Any]) -> None:

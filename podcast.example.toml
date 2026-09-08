@@ -22,6 +22,8 @@ copyright = "Open Paper Audio"
 # Safety defaults: preview only, with no public-tree or feed mutation.
 dry_run = true
 publishing_enabled = false
+# Optional Cloudflare R2 bucket for the automatic public-mirror sync.
+r2_bucket = ""
 
 [shows.brief]
 title = "Open Paper Briefs"

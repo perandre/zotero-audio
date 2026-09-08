@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import json
 import subprocess
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any
 from batch_library import main as batch_main
 from finalize_library_metadata import main as finalize_main
 from zotero_audio.audio import MlxKokoroBackend
-from zotero_audio.podcast import build_local_podcast, health_check, load_podcast_config
+from zotero_audio.podcast import EDITIONS, build_local_podcast, health_check, load_podcast_config
 from zotero_audio.util import json_digest
 
 
@@ -108,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         batch_args = [
             "--zotero-storage",
             str(storage),
+            "--zotero-db",
+            str(args.zotero_db.expanduser().resolve()),
             "--destination",
             str(destination),
             "--state-dir",
@@ -127,8 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         ]
         result = batch_main(batch_args)
 
-        # Metadata enrichment is deliberately after the verified AAC is copied.
-        # If Zotero is busy, the next scheduled run retries this lightweight step.
+        # New bundles receive Zotero metadata before narration. This pass also
+        # upgrades older manifests and writes a bundle-local metadata snapshot.
         if manifest_path.is_file():
             try:
                 finalize_main(["--zotero-db", str(args.zotero_db.expanduser().resolve()), "--batch-manifest", str(manifest_path)])
@@ -189,8 +192,27 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:
                     print(f"Podcast artifact generation failed (audio retained): {type(exc).__name__}: {exc}")
             health_path = podcast_config.state_root / "health-report.json"
+            public_ready = podcast_config.public_root is not None and podcast_config.public_root.is_dir()
+            if podcast_config.publishing_enabled and not podcast_config.dry_run and podcast_config.r2_bucket and public_ready:
+                sync_script = Path(__file__).with_name("sync_public_r2.py")
+                sync_result = subprocess.run(
+                    [sys.executable, str(sync_script), "--root", str(podcast_config.public_root),
+                     "--bucket", podcast_config.r2_bucket,
+                     "--state-file", str(podcast_config.state_root / "r2-sync-manifest.json")],
+                    check=False, text=True, capture_output=True,
+                )
+                if sync_result.stdout:
+                    print(sync_result.stdout, end="")
+                if sync_result.returncode:
+                    detail = (sync_result.stderr or sync_result.stdout).strip()
+                    print(f"Podcast R2 sync failed: {detail}")
+                    result = 1
+                    if args.notify:
+                        _notify("Podcast public mirror sync failed", title="Zotero Audio — action required")
             health_due = not health_path.is_file() or time.time() - health_path.stat().st_mtime >= 86_400
-            if podcast_config.publishing_enabled and health_due:
+            feed_ready = (podcast_config.public_root is not None and
+                          any((podcast_config.public_root / edition / "feed.xml").is_file() for edition in EDITIONS))
+            if podcast_config.publishing_enabled and health_due and feed_ready:
                 try:
                     health = health_check(podcast_config, remote=True)
                     if health["status"] != "pass":

@@ -358,15 +358,16 @@ and display both licenses separately.
 
 ### Proving the license
 
-The configured Zotero library currently has DOI and URL values but no populated
-`rights` fields, so local metadata alone cannot yet drive this gate. Extend the
-metadata reader and resolve evidence in this order:
+The metadata reader resolves evidence in this order:
 
 1. Canonical license URI in Zotero `rights` or a strictly parsed `Extra` field.
-2. Crossref license metadata for the DOI, including `content-version`, start
+2. An exact allowlisted license statement embedded in the checksum-bound source
+   PDF. This is stored as source-text evidence, never generalized to another
+   manuscript version.
+3. Crossref license metadata for the DOI, including `content-version`, start
    date, and license URL.
-3. A licensed OA location from Unpaywall as a discovery source.
-4. Publisher or repository landing-page metadata for the exact public copy.
+4. A licensed OA location from Unpaywall as a discovery source.
+5. Publisher or repository landing-page metadata for the exact public copy.
 
 Crossref exposes deposited license metadata and distinguishes version of record,
 accepted manuscript, and TDM licenses. Unpaywall describes licenses per OA
@@ -680,18 +681,13 @@ dynamics. See [Apple Podcasts audio requirements](https://podcasters.apple.com/s
 Use edition-specific introductions generated from the same verified metadata.
 For the Brief:
 
-> You're listening to a brief audio edition of "{title}," by {spoken_authors}.
-> {publication_sentence} {source_license_sentence} This Brief contains
-> {brief_contents}, not the full paper. This edition uses a synthetic voice.
-> The Full Reading, original paper, license, transcript, and complete
-> attribution are linked in the show notes.
+> You're listening to a brief of "{title}," by {spoken_authors}.
+> {publication_sentence}
 
 For the Full Reading:
 
-> You're listening to an audio edition of "{title}," by {spoken_authors}.
-> {publication_sentence} {source_license_sentence} This edition uses a
-> synthetic voice. Links to the original paper, license, transcript, and a
-> complete account of changes are in the show notes.
+> You're listening to "{title}," by {spoken_authors}.
+> {publication_sentence}
 
 Build this from complete sentence components rather than interpolating empty
 fields. The result should follow these rules:
@@ -700,16 +696,10 @@ fields. The result should follow these rules:
 - four or more authors: speak the first author followed by "and colleagues";
 - retain the complete author list in the show notes, transcript metadata, and
   attribution statement;
-- render `brief_contents` as either "the authors' abstract" or "the authors'
-  abstract and conclusion," matching the sections actually included;
 - render the publication component naturally as "Published in {journal} on
   {full_date}," "Published in {journal} in {year}," or "Published in {year}";
-- render the license component as, for example, "The source article is licensed
-  under Creative Commons Attribution 4.0" only from the verified license record
-  for the exact source version;
-- omit the spoken license sentence from a private edition when the source
-  license is missing or unresolved; a public edition cannot reach this point
-  without a verified allowlisted license;
+- keep the source license, synthetic-voice disclosure, links, and account of
+  changes in the show notes rather than the spoken introduction;
 - never speak placeholders such as "unknown journal" or "date unavailable";
 - use "show notes" as two words.
 

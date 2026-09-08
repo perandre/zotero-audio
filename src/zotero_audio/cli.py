@@ -11,6 +11,7 @@ from .models import default_model_dir, install_kokoro_models
 from .pipeline import prepare_bundle
 from .util import load_json
 from .podcast import PodcastConfig, build_intro, build_local_podcast, episode_title, health_check, load_podcast_config
+from .zotero import DEFAULT_ZOTERO_DB, zotero_metadata
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:
@@ -18,6 +19,8 @@ def _source_arguments(parser: argparse.ArgumentParser) -> None:
     source.add_argument("--pdf", help="Path to a local PDF")
     source.add_argument("--zotero-key", help="Zotero attachment key under storage/<key>/")
     parser.add_argument("--zotero-storage", type=Path, default=DEFAULT_ZOTERO_STORAGE)
+    parser.add_argument("--zotero-db", type=Path, default=DEFAULT_ZOTERO_DB,
+                        help="Read parent-item metadata from the local Zotero database")
 
 
 def _prepare_arguments(parser: argparse.ArgumentParser) -> None:
@@ -71,8 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument("--edition", choices=("brief", "full"), default="brief")
     info.add_argument("--journal")
     info.add_argument("--university")
-    info.add_argument("--license-sentence")
-    info.add_argument("--public", action="store_true")
     build = podcast_sub.add_parser("build", aliases=["rebuild"], help="Build either or both podcast editions; rebuild re-extracts the PDF")
     build.add_argument("bundle", type=Path)
     build.add_argument("--config", type=Path, help="TOML config; see podcast.example.toml")
@@ -119,6 +120,9 @@ def _backend_from_args(args: argparse.Namespace):
 
 def _prepare(args: argparse.Namespace) -> tuple[Path, bool]:
     pdf = resolve_pdf(args.pdf, args.zotero_key, args.zotero_storage)
+    metadata = None
+    if args.zotero_key and args.zotero_db.expanduser().is_file():
+        metadata = zotero_metadata(args.zotero_db, args.zotero_key)
     bundle, _, _, reused = prepare_bundle(
         pdf,
         zotero_key=args.zotero_key,
@@ -126,6 +130,7 @@ def _prepare(args: argparse.Namespace) -> tuple[Path, bool]:
         include_references=args.include_references,
         max_chars=args.max_chars,
         force=args.force,
+        metadata=metadata,
     )
     return bundle, reused
 
@@ -154,8 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "podcast" and args.podcast_command == "info":
             print(episode_title(args.title, args.author, args.year))
             print(build_intro(args.edition, args.title, args.author, journal=args.journal,
-                              university=args.university, year=args.year,
-                              license_sentence=args.license_sentence, private=not args.public))
+                              university=args.university, year=args.year))
             return 0
         if args.command == "podcast" and args.podcast_command in {"build", "rebuild"}:
             license_record = load_json(args.license_json) if args.license_json else None
