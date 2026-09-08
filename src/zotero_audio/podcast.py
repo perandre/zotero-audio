@@ -764,7 +764,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         has_pair = paired_edition in private_records or any(
             value.get("edition") == paired_edition and value.get("source_sha256") == source_sha
             for value in existing.values())
-        pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/" if has_pair else None
+        pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/index.html" if has_pair else None
         record = {**private, "revision": source_sha, "pub_date": previous.get("pub_date", published_at),
                   "audio_url": _artifact_url(publisher, Path(private["audio"]), prefix),
                   "image_url": _artifact_url(publisher, Path(private["cover"]), prefix),
@@ -773,7 +773,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
                   "chapters_url": _artifact_url(publisher, Path(private["chapters"]), prefix),
                   "markdown_url": _artifact_url(publisher, Path(private["markdown"]), prefix),
                   "episode_license_url": license_result["episode_license_url"],
-                  "page_url": f"{config.base_url}/papers/{paper_guid}/{edition}/", "bytes": Path(private["audio"]).stat().st_size}
+                  "page_url": f"{config.base_url}/papers/{paper_guid}/{edition}/index.html", "bytes": Path(private["audio"]).stat().st_size}
         if pair_url:
             record["paired_url"] = pair_url
             record["show_notes"] = record["show_notes"] + f"\nPaired edition: {pair_url}"
