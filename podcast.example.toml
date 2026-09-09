@@ -10,7 +10,7 @@ public_root = "/Users/you/Sites/zotero-audio-runtime/podcast/public"
 [podcast]
 base_url = "https://audio.example.org"
 site_title = "1 More Paper"
-site_description = "Careful audio editions of openly licensed research papers."
+site_description = "1 More Paper turns openly licensed research papers into carefully produced audio editions: a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading of the paper's approved prose."
 language = "en"
 author = "1 More Paper"
 owner_name = "Your Name"

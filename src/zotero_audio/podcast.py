@@ -195,7 +195,9 @@ class PodcastConfig:
     public_root: Path | None = None
     base_url: str = "https://podcast.example.invalid"
     site_title: str = PODCAST_NAME
-    site_description: str = "Careful audio editions of openly licensed research papers."
+    site_description: str = ("1 More Paper turns openly licensed research papers into carefully produced audio editions: "
+                             "a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading "
+                             "of the paper's approved prose.")
     language: str = "en"
     author: str = PODCAST_NAME
     owner_name: str = PODCAST_NAME
@@ -1009,13 +1011,36 @@ def _episode_page(record: dict[str, Any]) -> str:
             "</main></body></html>\n")
 
 
-def _write_site(config: PodcastConfig, manifest: dict[str, Any]) -> None:
+def _write_site(config: PodcastConfig, manifest: dict[str, Any], *, cover_url: str | None = None) -> None:
     episodes = sorted(manifest.get("episodes", []), key=lambda item: _date(item["pub_date"]), reverse=True)
     cards = "".join(f'<article><img src="{html.escape(item["image_url"])}" alt=""><div><small>{item["edition"].upper()}</small><h2><a href="{html.escape(item["page_url"])}">{html.escape(item["title"])}</a></h2><p>{html.escape(item["author_label"])}</p></div></article>' for item in episodes)
-    page = ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{html.escape(config.site_title)}</title><style>body{{margin:0;background:#f2efe6;color:#16212b;font:18px/1.5 Georgia,serif}}main{{max-width:72rem;margin:auto;padding:6vw}}header{{border-bottom:6px solid #16212b}}article{{display:grid;grid-template-columns:9rem 1fr;gap:1.5rem;padding:1.5rem 0;border-bottom:1px solid #16212b55}}img{{width:100%}}a{{color:inherit;text-decoration-color:#2f5bd3}}small{{font:700 12px Helvetica,sans-serif;letter-spacing:.14em}}</style>"
-            f"<main><header><small>{html.escape(PODCAST_NAME)}</small><h1>{html.escape(config.site_title)}</h1><p>{html.escape(config.site_description)}</p>"
-            '<p><a href="brief/feed.xml">Brief RSS</a> · <a href="full/feed.xml">Full Reading RSS</a></p></header>' + cards + "</main></html>\n")
+    escaped_title = html.escape(config.site_title)
+    escaped_description = html.escape(config.site_description)
+    cover = (f'<img class="site-cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(PODCAST_NAME)} cover" '
+             'width="1254" height="1254">' if cover_url else "")
+    page = ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            f"<meta name=\"description\" content=\"{escaped_description}\"><title>{escaped_title}</title><style>"
+            ":root{color-scheme:light;--page:#f2efe6;--surface:#faf8f2;--ink:#16212b;--muted:#5c665f;--line:#c9c1b2;--accent:#2f5bd3;--accent-soft:#e5ebfa}"
+            "*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:18px/1.55 Georgia,serif}"
+            ".site-shell{max-width:76rem;margin:0 auto;padding:clamp(1.5rem,5vw,4rem) clamp(1.25rem,5vw,4rem) 4rem}"
+            ".site-header{display:grid;grid-template-columns:minmax(0,1fr) minmax(15rem,24rem);gap:clamp(2rem,8vw,7rem);align-items:center;padding:clamp(2rem,7vw,6rem) 0 clamp(3rem,7vw,6rem);border-bottom:6px solid var(--ink)}"
+            ".eyebrow{font:700 .72rem/1.3 Helvetica,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase}"
+            ".eyebrow{color:var(--muted)}h1{max-width:9ch;margin:.75rem 0 1.25rem;font-size:clamp(3.25rem,9vw,7rem);line-height:.88;letter-spacing:-.04em}"
+            ".intro{max-width:54ch;margin:0;color:var(--muted);font-size:clamp(1.05rem,1.7vw,1.3rem);line-height:1.5}"
+            ".edition-links{display:grid;gap:.75rem;margin:2rem 0 0;max-width:34rem}.edition-link{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:4.5rem;padding:1rem 1.25rem;border:1px solid var(--ink);background:var(--surface);color:var(--ink);text-decoration:none;transition:background 150ms ease,color 150ms ease,transform 150ms ease}.edition-link:hover{background:var(--ink);color:var(--surface);transform:translateY(-2px)}.edition-link:focus-visible,.episode a:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.edition-name{font-size:1.25rem;font-weight:700}.edition-detail{color:var(--muted);font-size:.92rem}.edition-link:hover .edition-detail{color:var(--surface)}"
+            ".cover-wrap{max-width:24rem;justify-self:end}.site-cover{display:block;width:100%;height:auto;border:5px solid var(--ink)}"
+            ".episodes{padding-top:clamp(2.5rem,6vw,5rem)}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;border-bottom:2px solid var(--ink);padding-bottom:.75rem}.section-heading h2{margin:0;font-size:clamp(1.5rem,3vw,2.25rem);line-height:1.1}.rss-links{display:flex;flex-wrap:wrap;gap:.75rem 1.25rem;margin:0;font:700 .82rem/1.4 Helvetica,Arial,sans-serif}.rss-links a{color:var(--accent);text-underline-offset:.15em}"
+            ".episode{display:grid;grid-template-columns:7rem 1fr;gap:1.5rem;padding:1.5rem 0;border-bottom:1px solid var(--line)}.episode img{width:100%;height:auto}.episode small{color:var(--muted);font:700 .72rem/1.3 Helvetica,Arial,sans-serif;letter-spacing:.14em}.episode h3{margin:.45rem 0 .25rem;font-size:clamp(1.2rem,2vw,1.65rem);line-height:1.1}.episode h3 a{color:inherit;text-decoration-thickness:.08em;text-decoration-color:var(--accent);text-underline-offset:.12em}.episode p{margin:0;color:var(--muted)}"
+            "footer{padding-top:3rem;color:var(--muted);font-size:.9rem}"
+            "@media(max-width:48rem){.site-header{grid-template-columns:1fr}.cover-wrap{order:-1;max-width:18rem;justify-self:start}.section-heading{align-items:flex-start;flex-direction:column}.rss-links{font-size:.78rem}}"
+            "@media(max-width:30rem){h1{font-size:clamp(3rem,18vw,4.25rem)}.episode{grid-template-columns:5.5rem 1fr;gap:1rem}.edition-link{align-items:flex-start;flex-direction:column;gap:.35rem}}"
+            "@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}"
+            "</style></head><body><main class=\"site-shell\"><header class=\"site-header\"><div class=\"hero-copy\">"
+            f"<div class=\"eyebrow\">{html.escape(PODCAST_NAME)}</div><h1>{escaped_title}</h1><p class=\"intro\">{escaped_description}</p>"
+            '<nav class="edition-links" aria-label="Podcast editions"><a class="edition-link" href="brief/feed.xml"><span class="edition-name">Brief</span><span class="edition-detail">Abstract + conclusion · RSS</span></a><a class="edition-link" href="full/feed.xml"><span class="edition-name">Full Reading</span><span class="edition-detail">Approved prose · RSS</span></a></nav>'
+            f"</div><div class=\"cover-wrap\">{cover}</div></header>"
+            '<section class="episodes" aria-labelledby="episodes-title"><div class="section-heading"><h2 id="episodes-title">Latest episodes</h2><p class="rss-links"><a href="brief/feed.xml">Brief RSS</a><a href="full/feed.xml">Full Reading RSS</a></p></div>'
+            + cards + '</section><footer>1 More Paper · audio editions for careful reading and listening.</footer></main></body></html>\n')
     atomic_write_text(config.public_root / "index.html", page)  # type: ignore[operator]
 
 
@@ -1063,7 +1088,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         atomic_write_text(stage, build_rss(_show(config, show_config, images[edition]), episodes)); ET.fromstring(stage.read_text(encoding="utf-8"))
         feed_stages.append((edition, stage))
     # Build the site before the canonical feeds; feeds are the final commit.
-    _write_site(config, manifest)
+    _write_site(config, manifest, cover_url=images.get(EDITION_FULL) or images.get(EDITION_BRIEF))
     rollback = config.state_root / "feed-transaction-backup"
     rollback.mkdir(parents=True, exist_ok=True)
     backups: dict[str, Path | None] = {}

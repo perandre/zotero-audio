@@ -339,6 +339,22 @@ def test_local_publisher_is_immutable_and_rejects_traversal(tmp_path: Path):
         publisher.put(source, "episodes/hash/source.bin", "application/octet-stream")
 
 
+def test_homepage_has_cover_description_and_edition_links(tmp_path: Path):
+    config = PodcastConfig(
+        private_root=tmp_path / "private",
+        state_root=tmp_path / "state",
+        public_root=tmp_path / "public",
+        site_description="A short description of the show.",
+    )
+    podcast_module._write_site(config, {"episodes": []}, cover_url="https://audio.example/show-cover.png")
+    page = (tmp_path / "public" / "index.html").read_text(encoding="utf-8")
+    assert "A short description of the show." in page
+    assert 'alt="1 More Paper cover"' in page
+    assert 'href="brief/feed.xml"' in page
+    assert 'href="full/feed.xml"' in page
+    assert 'class="edition-links"' in page
+
+
 def test_config_preserves_safe_defaults(tmp_path: Path):
     config_file = tmp_path / "podcast.toml"
     config_file.write_text(f'[paths]\nprivate_root="{tmp_path}/private"\nstate_root="{tmp_path}/state"\n[podcast]\n', encoding="utf-8")
@@ -444,6 +460,10 @@ def test_end_to_end_private_public_and_idempotent_feed(tmp_path: Path, monkeypat
     assert first["state"] == "published" and first["published"] and first["feed_changed"]
     assert Path(first["editions"]["brief"]["audio"]).read_bytes() != Path(first["editions"]["full"]["audio"]).read_bytes()
     assert "The full paper explains the method" not in Path(first["editions"]["brief"]["markdown"]).read_text()
+    homepage = (tmp_path / "public" / "index.html").read_text(encoding="utf-8")
+    full_image_url = next(item["image_url"] for item in first["public_editions"] if item["edition"] == "full")
+    assert full_image_url in homepage
+    assert 'href="brief/feed.xml"' in homepage and 'href="full/feed.xml"' in homepage
     feed = tmp_path / "public" / "brief" / "feed.xml"; before = hashlib.sha256(feed.read_bytes()).hexdigest()
     second = build_local_podcast(bundle, backend=Backend(), config=config, selected=True, license_record=_license(),
                                  metadata={"zotero_key": "ABCD1234", "authors": ["Ada Smith", "Nils Jones"],
