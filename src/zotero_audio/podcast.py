@@ -61,6 +61,57 @@ LICENSE_ALIASES = {
     "public domain mark 1.0": "https://creativecommons.org/publicdomain/mark/1.0/",
 }
 HTTP_URL_RE = re.compile(r"https?://[^\s<]+", re.IGNORECASE)
+SPOKEN_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b[.,;:]?")
+SPOKEN_WEB_RE = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
+SPOKEN_CITATION_RE = re.compile(
+    r"(?:\[(?:\d{1,3}(?:\s*[,;–-]\s*\d{1,3})*)\]|"
+    r"\((?:refs?[.]?\s*)?\d{1,3}(?:\s*[,;–-]\s*\d{1,3})*\))"
+)
+
+
+def sanitize_spoken_text(value: str) -> tuple[str, list[str]]:
+    """Remove PDF artifacts that should not be read aloud.
+
+    The extracted article remains unchanged. This policy only applies to the
+    spoken podcast narration, where raw links, contact addresses, and numeric
+    citation markers are distracting and not useful to listeners.
+    """
+    text = str(value)
+    transformations: list[str] = []
+
+    def replace_citations(match: re.Match[str]) -> str:
+        transformations.append("omit-numeric-citation-marker")
+        return ""
+
+    def replace_email(match: re.Match[str]) -> str:
+        transformations.append("replace-email-address")
+        raw = match.group(0)
+        trailing = ""
+        while raw and raw[-1] in ".,;:":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        return "the email address" + trailing
+
+    def replace_web(match: re.Match[str]) -> str:
+        transformations.append("replace-web-link")
+        raw = match.group(0)
+        trailing = ""
+        while raw and raw[-1] in ".,;:!?)]}":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        return "the linked source" + trailing
+
+    text = SPOKEN_CITATION_RE.sub(replace_citations, text)
+    text = SPOKEN_EMAIL_RE.sub(replace_email, text)
+    # PDF text extraction occasionally inserts a space after the URL scheme or
+    # around a wrapped domain; join those pieces before replacing the link.
+    text = re.sub(r"(?i)(https?://)\s+", r"\1", text)
+    text = re.sub(r"(?i)(https?://[A-Za-z0-9.-]+)\s+(?=[A-Za-z]{2,}(?:[/\s]|$))", r"\1", text)
+    text = SPOKEN_WEB_RE.sub(replace_web, text)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text, transformations
 
 
 @dataclass(frozen=True)
@@ -342,7 +393,7 @@ def loudness_pass(measurement: dict[str, Any]) -> bool:
 
 def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
                          metadata: dict[str, Any] | None = None,
-                         *, edition: str = "both") -> dict[str, Any]:
+                         *, edition: str = "both", sanitize_spoken_artifacts: bool = False) -> dict[str, Any]:
     """Conservative listener-readiness gate for known PDF failure modes."""
     if edition not in {"both", *EDITIONS}:
         raise ValueError(f"unknown edition: {edition}")
@@ -384,6 +435,12 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
             *brief.get("abstract", []), *brief.get("conclusion", [])))
     else:
         spoken = "\n".join(str(segment.get("text", "")) for segment in source_plan.get("segments", [])[1:])
+    if sanitize_spoken_artifacts:
+        raw_spoken = spoken
+        clean_segments = [sanitize_spoken_text(line)[0] for line in spoken.splitlines()]
+        spoken = "\n".join(clean_segments)
+        if spoken != raw_spoken:
+            warnings.append("spoken-artifact-cleanup-applied")
     checks = (
         (r"\bhttps?://|\bwww\.", "raw-url-in-spoken-text"),
         (r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "email-in-spoken-text"),
@@ -525,8 +582,24 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                 continue
             append(heading + ".", "heading", heading, pause=500)
             for block in blocks:
-                append(str(block.get("text", "")), "body", heading,
-                       [str(block["id"])] if block.get("id") else [], [int(block.get("pdf_page", 1))])
+                spoken_text, transformations = sanitize_spoken_text(str(block.get("text", "")))
+                if spoken_text:
+                    append(spoken_text, "body", heading,
+                           [str(block["id"])] if block.get("id") else [], [int(block.get("pdf_page", 1))],
+                           transformations=transformations)
+    if edition == EDITION_FULL:
+        sanitized_segments: list[dict[str, Any]] = []
+        for segment in segments:
+            spoken_text, transformations = sanitize_spoken_text(str(segment["text"]))
+            if not spoken_text:
+                continue
+            sanitized_segments.append({
+                **segment,
+                "text": spoken_text,
+                "text_sha256": sha256_text(spoken_text),
+                "transformations": list(segment.get("transformations", [])) + transformations,
+            })
+        segments = [{**segment, "ordinal": index} for index, segment in enumerate(sanitized_segments, 1)]
     result = {"schema": "zotero-audio-narration-plan/v1", "pipeline_version": __version__, "edition": edition,
               "document": document, "source_sha256": source_plan["source_sha256"],
               "structure_sha256": source_plan.get("structure_sha256"), "source_plan_sha256": source_plan["plan_sha256"],
@@ -945,7 +1018,9 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     if license_record is None:
         license_record = license_record_from_metadata(document, source_sha)
     license_result = resolve_license(license_record, source_sha256=source_sha); brief = extract_brief(structure)
-    content_qa = content_quality_gate(structure, source_plan, metadata, edition=edition)
+    content_qa = content_quality_gate(
+        structure, source_plan, metadata, edition=edition, sanitize_spoken_artifacts=True
+    )
     edition_names = [EDITION_FULL] + ([EDITION_BRIEF] if brief["available"] else [])
     if edition != "both":
         if edition not in edition_names:

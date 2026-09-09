@@ -28,6 +28,7 @@ from zotero_audio.podcast import (
     loudness_pass,
     publication_state,
     resolve_license,
+    sanitize_spoken_text,
 )
 from zotero_audio.util import atomic_write_json, json_digest, load_json
 
@@ -195,6 +196,27 @@ def test_content_gate_rejects_page_flat_and_unsafe_spoken_text():
     assert "page-flat-or-missing-section-structure" in qa["errors"]
     assert "email-in-spoken-text" in qa["errors"]
     assert "numeric-citation-marker-in-spoken-text" in qa["errors"]
+
+
+def test_spoken_artifact_cleanup_preserves_source_and_clears_gate_errors():
+    cleaned, transformations = sanitize_spoken_text(
+        "See [1, 2] at https://example.org/paper or contact x@example.org."
+    )
+    assert cleaned == "See at the linked source or contact the email address."
+    assert transformations == [
+        "omit-numeric-citation-marker",
+        "replace-email-address",
+        "replace-web-link",
+    ]
+    source = _source_plan()
+    source["segments"] = [
+        source["segments"][0],
+        {**source["segments"][2], "text": "See [1] at https://example.org."},
+    ]
+    structure = _structure()
+    qa = content_quality_gate(structure, source, sanitize_spoken_artifacts=True)
+    assert qa["status"] == "pass"
+    assert qa["warnings"] == ["spoken-artifact-cleanup-applied"]
 
 
 def test_brief_gate_scopes_quality_checks_to_brief_content():
