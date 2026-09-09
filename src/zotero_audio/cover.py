@@ -2,13 +2,43 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import textwrap
 from pathlib import Path
 
+from .branding import PODCAST_NAME
 from .util import atomic_write_json, atomic_write_text, sha256_file, sha256_text
 
-DESIGN_VERSION = "open-paper-audio/v1"
+DESIGN_VERSION = "1-more-paper/v1"
+PODCAST_COVER_PATH = Path(__file__).resolve().parent / "assets" / "1_more_paper_cover.png"
 PALETTE = {"paper": "#F2EFE6", "ink": "#16212B", "brief": "#2F5BD3", "full": "#D9553F"}
+
+
+def copy_podcast_cover(destination: Path) -> Path:
+    """Copy the user-supplied podcast cover to a generated artifact path."""
+    if destination.suffix.casefold() != ".png":
+        raise ValueError("podcast cover destination must be .png")
+    if not PODCAST_COVER_PATH.is_file():
+        raise FileNotFoundError(f"podcast cover asset is missing: {PODCAST_COVER_PATH}")
+
+    from PIL import Image
+
+    with Image.open(PODCAST_COVER_PATH) as image:
+        if image.width != image.height:
+            raise ValueError("podcast cover must be square")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.resolve() != PODCAST_COVER_PATH.resolve() and (
+        not destination.is_file() or sha256_file(destination) != sha256_file(PODCAST_COVER_PATH)
+    ):
+        shutil.copyfile(PODCAST_COVER_PATH, destination)
+    with Image.open(destination) as image:
+        width, height, mode = image.width, image.height, image.mode
+    atomic_write_json(destination.with_suffix(".artwork.json"), {
+        "schema": "zotero-audio-artwork/v1", "design_version": DESIGN_VERSION,
+        "generation": "user-supplied-static", "source": PODCAST_COVER_PATH.name,
+        "width": width, "height": height, "mode": mode, "sha256": sha256_file(destination),
+    })
+    return destination
 
 
 def _font_path(serif: bool) -> Path:
@@ -83,7 +113,7 @@ def render_cover(title: str, *, edition: str = "brief", authors: str = "", year:
     band_font = ImageFont.truetype(str(sans_path), px(44))
     meta_font = ImageFont.truetype(str(sans_path), px(40))
     draw.rectangle((px(16), px(16), size - px(16), size - px(16)), outline=ink, width=px(16))
-    draw.text((px(144), px(130)), "OPEN PAPER AUDIO", fill=ink, font=series_font)
+    draw.text((px(144), px(130)), PODCAST_NAME, fill=ink, font=series_font)
     draw.rectangle((px(144), px(250), px(720 if edition == "full" else 570), px(360)), fill=accent)
     draw.text((px(180), px(278)), "FULL READING" if edition == "full" else "BRIEF", fill=PALETTE["paper"], font=band_font)
     for index, line in enumerate(lines):
@@ -140,7 +170,7 @@ def _svg(title: str, edition: str, authors: str, year: str | int | None, size: i
     label = "FULL READING" if edition == "full" else "BRIEF"
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
             f'<rect width="100%" height="100%" fill="{PALETTE["paper"]}"/><rect x="{p(16)}" y="{p(16)}" width="{size-p(32)}" height="{size-p(32)}" fill="none" stroke="{PALETTE["ink"]}" stroke-width="{p(16)}"/>'
-            f'<text x="{p(144)}" y="{p(180)}" font-family="Helvetica,Arial,sans-serif" font-size="{p(42)}" letter-spacing="{p(7)}" fill="{PALETTE["ink"]}">OPEN PAPER AUDIO</text>'
+            f'<text x="{p(144)}" y="{p(180)}" font-family="Helvetica,Arial,sans-serif" font-size="{p(42)}" letter-spacing="{p(7)}" fill="{PALETTE["ink"]}">{PODCAST_NAME}</text>'
             f'<rect x="{p(144)}" y="{p(250)}" width="{p(576 if edition=="full" else 426)}" height="{p(110)}" fill="{accent}"/><text x="{p(180)}" y="{p(325)}" font-family="Helvetica,Arial,sans-serif" font-size="{p(44)}" fill="{PALETTE["paper"]}">{label}</text>'
             f'<g font-family="Georgia,serif" font-size="{p(112)}" font-weight="600" fill="{PALETTE["ink"]}">{title_nodes}</g>'
             f'<circle cx="{x}" cy="{y}" r="{p(420)}" fill="{PALETTE["ink"]}"/><path d="M{x-p(360)} {y-p(120)} L{x+p(310)} {y-p(350)} L{x+p(370)} {y-p(100)} L{x-p(300)} {y+p(130)}Z" fill="{accent}"/><circle cx="{x+p(255)}" cy="{y+p(210)}" r="{p(95)}" fill="{PALETTE["paper"]}"/>'

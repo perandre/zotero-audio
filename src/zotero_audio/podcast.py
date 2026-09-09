@@ -29,6 +29,7 @@ from .audio import (
     validate_wav,
 )
 from .segment import chunk_text, create_speech_plan
+from .branding import PODCAST_NAME
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import (
     license_record_from_metadata,
@@ -49,7 +50,7 @@ ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
 PODCAST_NS = "https://podcastindex.org/namespace/1.0"
 ATOM_NS = "http://www.w3.org/2005/Atom"
 CONTENT_NS = "http://purl.org/rss/1.0/modules/content/"
-REMOTE_HEALTH_HEADERS = {"User-Agent": "OpenPaperAudioHealth/1.0"}
+REMOTE_HEALTH_HEADERS = {"User-Agent": "OneMorePaperHealth/1.0"}
 for _prefix, _ns in (("itunes", ITUNES_NS), ("podcast", PODCAST_NS), ("atom", ATOM_NS), ("content", CONTENT_NS)):
     ET.register_namespace(_prefix, _ns)
 
@@ -192,22 +193,22 @@ class PodcastConfig:
     state_root: Path
     public_root: Path | None = None
     base_url: str = "https://podcast.example.invalid"
-    site_title: str = "Open Paper Audio"
+    site_title: str = PODCAST_NAME
     site_description: str = "Careful audio editions of openly licensed research papers."
     language: str = "en"
-    author: str = "Open Paper Audio"
-    owner_name: str = "Open Paper Audio"
+    author: str = PODCAST_NAME
+    owner_name: str = PODCAST_NAME
     owner_email: str = "podcast@example.invalid"
     category: str = "Science"
-    copyright: str = "Open Paper Audio"
+    copyright: str = PODCAST_NAME
     publishing_enabled: bool = False
     dry_run: bool = True
     r2_bucket: str = ""
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
-        "Open Paper Briefs", "Brief editions containing the authors' abstract and, when suitable, conclusion.",
+        PODCAST_NAME, "Brief editions containing the authors' abstract and, when suitable, conclusion.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
     full_show: ShowConfig = field(default_factory=lambda: ShowConfig(
-        "Open Paper Full Readings", "Full readings of openly licensed research papers.",
+        PODCAST_NAME, "Full readings of openly licensed research papers.",
         "full", "119266cf-33b9-5795-bcc2-0e81e72291ef"))
 
 
@@ -943,7 +944,7 @@ def _episode_page(record: dict[str, Any]) -> str:
             "@media(max-width:36rem){.episode-footer{align-items:flex-start;flex-direction:column}}"
             "@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}"
             "</style></head><body><main class=\"page-shell\"><article class=\"episode\">"
-            f"<header class=\"episode-header\"><div class=\"eyebrow\">Open Paper Audio · {html.escape(str(record['edition']).upper())}</div><h1>{title}</h1>"
+            f"<header class=\"episode-header\"><div class=\"eyebrow\">{html.escape(PODCAST_NAME)} · {html.escape(str(record['edition']).upper())}</div><h1>{title}</h1>"
             f"<img class=\"cover\" src=\"{image_url}\" alt=\"Cover for {title}\"><audio controls preload=\"metadata\" src=\"{audio_url}\"></audio></header>"
             f"<section class=\"show-notes\" aria-labelledby=\"show-notes-title\"><h2 id=\"show-notes-title\">Show notes</h2>{notes}</section></article>"
             f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p><a href=\"{transcript_url}\">Timed transcript</a></footer>"
@@ -955,14 +956,14 @@ def _write_site(config: PodcastConfig, manifest: dict[str, Any]) -> None:
     cards = "".join(f'<article><img src="{html.escape(item["image_url"])}" alt=""><div><small>{item["edition"].upper()}</small><h2><a href="{html.escape(item["page_url"])}">{html.escape(item["title"])}</a></h2><p>{html.escape(item["author_label"])}</p></div></article>' for item in episodes)
     page = ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{html.escape(config.site_title)}</title><style>body{{margin:0;background:#f2efe6;color:#16212b;font:18px/1.5 Georgia,serif}}main{{max-width:72rem;margin:auto;padding:6vw}}header{{border-bottom:6px solid #16212b}}article{{display:grid;grid-template-columns:9rem 1fr;gap:1.5rem;padding:1.5rem 0;border-bottom:1px solid #16212b55}}img{{width:100%}}a{{color:inherit;text-decoration-color:#2f5bd3}}small{{font:700 12px Helvetica,sans-serif;letter-spacing:.14em}}</style>"
-            f"<main><header><small>OPEN PAPER AUDIO</small><h1>{html.escape(config.site_title)}</h1><p>{html.escape(config.site_description)}</p>"
+            f"<main><header><small>{html.escape(PODCAST_NAME)}</small><h1>{html.escape(config.site_title)}</h1><p>{html.escape(config.site_description)}</p>"
             '<p><a href="brief/feed.xml">Brief RSS</a> · <a href="full/feed.xml">Full Reading RSS</a></p></header>' + cards + "</main></html>\n")
     atomic_write_text(config.public_root / "index.html", page)  # type: ignore[operator]
 
 
 def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_records: dict[str, dict[str, Any]],
              license_result: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
-    from .cover import render_cover
+    from .cover import copy_podcast_cover
     if not config.public_root: raise ValueError("public_root is required when publishing is enabled")
     if config.base_url.endswith(".invalid"): raise ValueError("replace the placeholder base_url before publishing")
     publisher = LocalPublisher(config.public_root, config.base_url); manifest_path = config.state_root / "publication-manifest.json"
@@ -995,7 +996,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
     images = {}
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
-        render_cover(show_config.title, edition=edition, authors=config.author, destination=stage); images[edition] = _artifact_url(publisher, stage, "shows")
+        copy_podcast_cover(stage); images[edition] = _artifact_url(publisher, stage, "shows")
     feed_stages: list[tuple[str, Path]] = []
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         episodes = [item for item in manifest["episodes"] if item["edition"] == edition]
@@ -1107,7 +1108,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
                         publishing_enabled: bool = False, edition: str = "both",
                         narration_max_chars: int = 900) -> dict[str, Any]:
     """Build distinct Brief/Full editions, archive privately, then optionally publish."""
-    from .cover import render_cover
+    from .cover import copy_podcast_cover
     if edition not in {"both", *EDITIONS}:
         raise ValueError(f"Unknown edition: {edition}")
     bundle = bundle.expanduser().resolve(); source_plan = load_json(bundle / "speech-plan.json")
@@ -1188,7 +1189,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
             rendered, _ = synthesize_plan(stage, backend)
         cues, chapters, _ = _timing(plan, rendered)
         if not reusable:
-            audio, qa = assemble_m4a(stage, chapters=chapters)
+            audio, qa = assemble_m4a(stage, chapters=chapters, album=PODCAST_NAME)
         final_loudness = qa.get("checks", {}).get("loudness", {})
         if not loudness_pass(final_loudness): raise RuntimeError(f"{edition} failed the podcast loudness gate")
         if cues[-1]["end"] > qa["checks"]["m4a_duration_seconds"] + 0.25: raise RuntimeError(f"{edition} transcript exceeds encoded audio duration")
@@ -1198,7 +1199,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         target_audio = private_dir / f"{safe} - {'Brief' if edition == EDITION_BRIEF else 'Full Reading'} [{zotero_key}].m4a"; artifact_dir = target_audio.with_suffix(""); artifact_dir.mkdir(parents=True, exist_ok=True)
         _copy_if_changed(audio, target_audio); cover, transcript = artifact_dir / "cover.png", artifact_dir / "transcript.vtt"
         transcript_html, chapters_path, markdown = artifact_dir / "transcript.html", artifact_dir / "chapters.json", artifact_dir / "transcript.md"
-        render_cover(str(document.get("title", bundle.name)), edition=edition, authors=", ".join(authors), year=document.get("publication_year"), destination=cover)
+        copy_podcast_cover(cover)
         build_transcript(cues, transcript); build_transcript_html(cues, title, transcript_html, attribution=", ".join(authors)); chapter_json(chapters, chapters_path)
         atomic_write_text(markdown, build_markdown_transcript(plan, title))
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,

@@ -701,7 +701,8 @@ def _embed_m4a_chapters(path: Path, chapters: list[dict[str, Any]], duration_sec
 
 
 def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
-                 chapters: list[dict[str, Any]] | None = None) -> tuple[Path, dict[str, Any]]:
+                 chapters: list[dict[str, Any]] | None = None,
+                 album: str = "Zotero Audio") -> tuple[Path, dict[str, Any]]:
     plan = load_json(bundle / "speech-plan.json")
     manifest = load_json(bundle / "run-manifest.json")
     if manifest["plan_sha256"] != plan["plan_sha256"]:
@@ -725,7 +726,7 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
             final_path,
             title=document["title"],
             artist=document.get("author"),
-            album="Zotero Audio",
+            album=album,
             comment=(
                 f"source-sha256={plan['source_sha256']}; plan-sha256={plan['plan_sha256']}; "
                 f"pipeline=zotero-audio/{__version__}"

@@ -302,10 +302,10 @@ def test_episode_timing_starts_after_opening_sound():
 
 
 def _show():
-    return {"title": "Open Paper Briefs", "description": "Brief papers", "link": "https://audio.example/",
+    return {"title": "1 More Paper", "description": "Brief papers", "link": "https://audio.example/",
             "image_url": "https://audio.example/show.png", "feed_url": "https://audio.example/brief/feed.xml",
-            "owner_email": "podcast@example.org", "owner_name": "Owner", "author": "Open Paper Audio",
-            "category": "Science", "copyright": "2026 Open Paper Audio", "guid": "show-guid"}
+            "owner_email": "podcast@example.org", "owner_name": "Owner", "author": "1 More Paper",
+            "category": "Science", "copyright": "2026 1 More Paper", "guid": "show-guid"}
 
 
 def _episode():
@@ -344,6 +344,7 @@ def test_config_preserves_safe_defaults(tmp_path: Path):
     config_file.write_text(f'[paths]\nprivate_root="{tmp_path}/private"\nstate_root="{tmp_path}/state"\n[podcast]\n', encoding="utf-8")
     config = load_podcast_config(config_file)
     assert config.dry_run and not config.publishing_enabled and config.public_root is None
+    assert config.site_title == config.author == config.brief_show.title == config.full_show.title == "1 More Paper"
 
 
 def _bundle(tmp_path: Path) -> Path:
@@ -377,7 +378,7 @@ def _stub_media(monkeypatch):
         atomic_write_json(stage / "run-manifest.json", manifest)
         return manifest, 0
 
-    def assemble(stage, *, chapters=None):
+    def assemble(stage, *, chapters=None, album="Zotero Audio"):
         plan = load_json(stage / "speech-plan.json"); audio = stage / "audio" / f"{stage.name}.m4a"
         audio.parent.mkdir(parents=True, exist_ok=True); audio.write_bytes(plan["edition"].encode() * 20)
         duration = episode_stinger_duration() + len(plan["segments"]) + sum(item["pause_after_ms"] for item in plan["segments"]) / 1000
@@ -389,13 +390,13 @@ def _stub_media(monkeypatch):
         atomic_write_json(stage / "qa-report.json", qa)
         return audio, qa
 
-    def cover(title, *, destination, **kwargs):
-        destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes((kwargs.get("edition", "brief") + title).encode())
+    def cover(destination):
+        destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(b"1 More Paper cover")
         return destination
 
     monkeypatch.setattr(podcast_module, "synthesize_plan", synthesize)
     monkeypatch.setattr(podcast_module, "assemble_m4a", assemble)
-    monkeypatch.setattr(cover_module, "render_cover", cover)
+    monkeypatch.setattr(cover_module, "copy_podcast_cover", cover)
 
 
 def test_dry_run_writes_nothing(tmp_path: Path):

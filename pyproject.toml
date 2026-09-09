@@ -37,7 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-zotero_audio = ["assets/*.mp3"]
+zotero_audio = ["assets/*.mp3", "assets/*.png"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
