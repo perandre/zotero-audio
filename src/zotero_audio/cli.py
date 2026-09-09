@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .audio import assemble_m4a, create_backend, synthesize_plan
+from .audio import DEFAULT_ENGLISH_VOICE, assemble_m4a, create_backend, synthesize_plan
 from .extract import DEFAULT_ZOTERO_STORAGE, resolve_pdf
 from .models import default_model_dir, install_kokoro_models
 from .pipeline import prepare_bundle
@@ -38,7 +38,8 @@ def _synthesis_arguments(parser: argparse.ArgumentParser) -> None:
         default="kokoro-mlx",
         help="Kokoro runtime; MLX BF16 is the quality default",
     )
-    parser.add_argument("--voice", help="Kokoro voice preset; defaults to af_heart")
+    parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE,
+                        help=f"Kokoro voice preset; defaults to {DEFAULT_ENGLISH_VOICE}")
     parser.add_argument("--speed", type=float, default=1.0, help="Kokoro speed multiplier")
     parser.add_argument("--language", default="a", help="Kokoro language code (a=US English, b=British English)")
     parser.add_argument("--mlx-model", default="mlx-community/Kokoro-82M-bf16")

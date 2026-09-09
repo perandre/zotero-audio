@@ -23,6 +23,7 @@ from .segment import split_sentences
 TARGET_SAMPLE_RATE = 24_000
 TARGET_CHANNELS = 1
 TARGET_SAMPLE_WIDTH = 2
+DEFAULT_ENGLISH_VOICE = "am_michael"
 KOKORO_SPOKEN_SYMBOLS = {
     "╳": " cross mark ",
     "×": " times ",
@@ -294,7 +295,7 @@ class MlxKokoroBackend:
         self,
         *,
         model_id: str = "mlx-community/Kokoro-82M-bf16",
-        voice: str = "af_heart",
+        voice: str = DEFAULT_ENGLISH_VOICE,
         speed: float = 1.0,
         language: str = "a",
     ) -> None:
@@ -424,7 +425,7 @@ def create_backend(
     if engine == "kokoro-mlx":
         return MlxKokoroBackend(
             model_id=mlx_model,
-            voice=voice or "af_heart",
+            voice=voice or DEFAULT_ENGLISH_VOICE,
             speed=speed,
             language=language,
         )
@@ -432,7 +433,7 @@ def create_backend(
         return KokoroBackend(
             model=model,
             voices=voices,
-            voice=voice or "af_heart",
+            voice=voice or DEFAULT_ENGLISH_VOICE,
             speed=speed,
             language=language,
         )

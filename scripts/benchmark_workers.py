@@ -13,7 +13,7 @@ from queue import Empty
 from pathlib import Path
 from typing import Any
 
-from zotero_audio.audio import MlxKokoroBackend, validate_wav
+from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, MlxKokoroBackend, validate_wav
 from zotero_audio.pipeline import prepare_bundle
 from zotero_audio.util import atomic_write_json
 
@@ -189,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--segment-chars", type=int, nargs="+", default=[600, 900, 1200])
     parser.add_argument("--timeout-minutes", type=float, default=45)
     parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
-    parser.add_argument("--voice", default="af_heart")
+    parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE)
     parser.add_argument("--language", default="a")
     parser.add_argument("--include-references", action="store_true")
     return parser

@@ -15,7 +15,7 @@ from typing import Any
 
 from batch_library import main as batch_main
 from finalize_library_metadata import main as finalize_main
-from zotero_audio.audio import MlxKokoroBackend
+from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, MlxKokoroBackend
 from zotero_audio.podcast import EDITIONS, build_local_podcast, health_check, load_podcast_config
 from zotero_audio.util import json_digest
 from zotero_audio.runtime import configure_tool_path
@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_RUNTIME / "full-library")
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
-    parser.add_argument("--voice", default="af_heart")
+    parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE)
     parser.add_argument("--norwegian-voice", default="bf_emma")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--max-chars", type=int, default=900)

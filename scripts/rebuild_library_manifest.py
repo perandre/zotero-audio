@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from zotero_audio.audio import inspect_m4a
+from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, inspect_m4a
 from zotero_audio.util import atomic_write_json, load_json, sha256_file
 
 
@@ -30,6 +30,7 @@ def main() -> int:
         if bundle is None or len(outputs) != 1:
             raise RuntimeError(f"Expected one bundle and output for {key}")
         plan = load_json(bundle / "speech-plan.json")
+        run_manifest = load_json(bundle / "run-manifest.json")
         output = outputs[0]
         technical = inspect_m4a(output)
         language = "nb" if key == "WSQ3WHDC" else "en"
@@ -42,7 +43,11 @@ def main() -> int:
                 "title": plan["document"]["title"],
                 "language": language,
                 "kokoro_language_code": "b" if language == "nb" else "a",
-                "voice": "bf_emma" if language == "nb" else "af_heart",
+                # Preserve the voice actually used for an existing output;
+                # rebuilding a manifest must not relabel historical audio.
+                "voice": run_manifest.get("synthesis_config", {}).get(
+                    "voice", "bf_emma" if language == "nb" else DEFAULT_ENGLISH_VOICE
+                ),
                 "segments": len(plan["segments"]),
                 "output_file": output.name,
                 "output_sha256": sha256_file(output),

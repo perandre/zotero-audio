@@ -8,7 +8,7 @@ import resource
 import time
 from pathlib import Path
 
-from zotero_audio.audio import MlxKokoroBackend, encode_wav_to_m4a, validate_wav
+from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, MlxKokoroBackend, encode_wav_to_m4a, validate_wav
 from zotero_audio.util import atomic_write_json, sha256_file
 
 
@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/kokoro-benchmark"))
     parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
-    parser.add_argument("--voice", default="af_heart")
+    parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE)
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--language", default="a")
     return parser

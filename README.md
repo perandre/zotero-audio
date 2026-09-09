@@ -69,7 +69,7 @@ segment caches under the ignored state directory:
 The batch runner keeps one BF16 Kokoro model loaded for the run and writes
 progress to the local batch log. It writes only completed M4As to the
 destination; extraction, segmentation, PCM, manifests, and caches stay under
-`RUNTIME`. English defaults to `af_heart`; the operational segmentation default
+`RUNTIME`. English defaults to `am_michael`; the operational segmentation default
 is 900 characters, selected from the included full-paper benchmark.
 Because Kokoro-82M has no Norwegian frontend, Norwegian material is rendered
 with the British-English frontend and `bf_emma`; no system TTS is used.

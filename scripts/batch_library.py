@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from zotero_audio.audio import MlxKokoroBackend, assemble_m4a, inspect_m4a, synthesize_plan
+from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, MlxKokoroBackend, assemble_m4a, inspect_m4a, synthesize_plan
 from zotero_audio.extract import extract_pdf
 from zotero_audio.pipeline import prepare_bundle
 from zotero_audio.util import atomic_write_json, load_json, sha256_file
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-name", default="batch-manifest.json")
     parser.add_argument("--keys", help="Optional comma-separated Zotero attachment keys")
     parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
-    parser.add_argument("--voice", default="af_heart")
+    parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE)
     parser.add_argument("--norwegian-voice", default="bf_emma")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--max-chars", type=int, default=900)

@@ -4,10 +4,14 @@ Evaluation date: 2026-09-01. Target: MacBook Air M2 with 16 GB unified memory.
 
 ## Decision
 
-The default is **Kokoro-82M BF16 through MLX-Audio** using `af_heart` for
+The default is **Kokoro-82M BF16 through MLX-Audio** using `am_michael` for
 English. It keeps the neural model at BF16 precision, runs locally on Apple
 Silicon, and is faster on the target machine than the quantized ONNX path.
 Only the Kokoro engines are supported; selecting an unknown engine fails.
+
+The target-machine measurements below predate this default-voice change and
+retain `af_heart` as the benchmark voice; they describe backend performance,
+not the current voice preference.
 
 Kokoro-82M does not provide a Norwegian language frontend. For Norwegian source
 material the pipeline uses Kokoro's British-English frontend and `bf_emma`, so
