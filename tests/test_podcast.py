@@ -7,6 +7,7 @@ import pytest
 
 import zotero_audio.cover as cover_module
 import zotero_audio.podcast as podcast_module
+from zotero_audio.audio import episode_stinger_duration, episode_stinger_metadata
 from zotero_audio.podcast import (
     ITUNES_NS,
     PODCAST_NS,
@@ -224,6 +225,15 @@ def test_transcript_and_chapter_validation():
     assert chapter_json([{"start": 0, "title": "Opening"}, {"start": 4.2, "title": "Abstract"}])["version"] == "1.2.0"
 
 
+def test_episode_timing_starts_after_opening_sound():
+    plan = {"segments": [{"ordinal": 1, "section": "Introduction", "pause_after_ms": 0}]}
+    manifest = {"segments": [{"ordinal": 1, "duration_seconds": 1.0, "chunks": [{"text": "Start", "duration_seconds": 1.0}]}]}
+    cues, chapters, total = podcast_module._timing(plan, manifest)
+    assert cues[0]["start"] == pytest.approx(episode_stinger_duration())
+    assert chapters[0]["start"] == pytest.approx(episode_stinger_duration())
+    assert total == pytest.approx(episode_stinger_duration() + 1.0)
+
+
 def _show():
     return {"title": "Open Paper Briefs", "description": "Brief papers", "link": "https://audio.example/",
             "image_url": "https://audio.example/show.png", "feed_url": "https://audio.example/brief/feed.xml",
@@ -297,9 +307,10 @@ def _stub_media(monkeypatch):
     def assemble(stage, *, chapters=None):
         plan = load_json(stage / "speech-plan.json"); audio = stage / "audio" / f"{stage.name}.m4a"
         audio.parent.mkdir(parents=True, exist_ok=True); audio.write_bytes(plan["edition"].encode() * 20)
-        duration = len(plan["segments"]) + sum(item["pause_after_ms"] for item in plan["segments"]) / 1000
+        duration = episode_stinger_duration() + len(plan["segments"]) + sum(item["pause_after_ms"] for item in plan["segments"]) / 1000
         qa = {"status": "pass", "checks": {"m4a_duration_seconds": duration,
               "embedded_chapter_count": len(chapters or []),
+              "episode_stinger": episode_stinger_metadata(),
               "loudness": {"integrated_lufs": -16.0, "true_peak_dbtp": -1.2, "clipped_samples": False}},
               "output": {"sha256": hashlib.sha256(audio.read_bytes()).hexdigest()}}
         atomic_write_json(stage / "qa-report.json", qa)

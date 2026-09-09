@@ -20,7 +20,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Protocol
 
 from . import __version__
-from .audio import SpeechBackend, assemble_m4a, synthesize_plan, validate_wav
+from .audio import (
+    SpeechBackend,
+    assemble_m4a,
+    episode_stinger_duration,
+    episode_stinger_metadata,
+    synthesize_plan,
+    validate_wav,
+)
 from .segment import chunk_text, create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import (
@@ -562,7 +569,7 @@ def _seed_source_audio(source_bundle: Path, target_bundle: Path, plan: dict[str,
 
 
 def _timing(plan: dict[str, Any], manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
-    records = {int(record["ordinal"]): record for record in manifest.get("segments", [])}; cues, chapters = [], []; cursor = 0.0; last = None
+    records = {int(record["ordinal"]): record for record in manifest.get("segments", [])}; cues, chapters = [], []; cursor = episode_stinger_duration(); last = None
     for segment in plan["segments"]:
         record = records.get(int(segment["ordinal"])); duration = float(record["duration_seconds"]) if record else 0
         if duration <= 0:
@@ -983,6 +990,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
             and cached_qa.get("status") == "pass"
             and cached_audio.is_file()
             and cached_qa.get("output", {}).get("sha256") == sha256_file(cached_audio)
+            and cached_qa.get("checks", {}).get("episode_stinger", {}).get("sha256") == episode_stinger_metadata()["sha256"]
             and loudness_pass(cached_qa.get("checks", {}).get("loudness", {}))
         )
         if reusable:

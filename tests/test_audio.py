@@ -9,6 +9,7 @@ import pytest
 from zotero_audio.audio import (
     TARGET_SAMPLE_RATE,
     assemble_m4a,
+    episode_stinger_metadata,
     normalize_kokoro_text,
     synthesize_plan,
     validate_wav,
@@ -131,3 +132,5 @@ def test_resume_and_deterministic_m4a_assembly(tmp_path: Path):
     assert qa["checks"]["m4a_channels"] == 1
     assert qa["checks"]["m4a_codec"] == "aac"
     assert qa["checks"]["embedded_chapter_count"] == 1
+    assert qa["checks"]["episode_stinger"]["sha256"] == episode_stinger_metadata()["sha256"]
+    assert qa["checks"]["expected_duration_seconds"] > 1.8

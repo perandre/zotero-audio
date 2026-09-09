@@ -157,6 +157,10 @@ their conclusion; `Full Reading` contains the complete approved speech plan.
 Each has its own spoken introduction, closing, M4A, 3000 px cover, VTT and HTML
 transcripts, Markdown companion transcript, chapters, episode record, and stable
 GUID. The two editions never share a mislabeled audio or transcript.
+Newly assembled episodes begin with the short CC0 `bells_1` sound from
+[Freesound](https://freesound.org/people/LSpec/sounds/867760/) immediately
+before the spoken introduction. Transcript cues and chapters begin after the
+sound so they remain aligned with the narration.
 
 Copy [podcast.example.toml](podcast.example.toml) outside the repository and
 fill in the private iCloud root, runtime state root, public mirror, HTTPS base

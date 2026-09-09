@@ -13,6 +13,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Protocol, Callable
 
+from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 
 from . import __version__
@@ -45,11 +46,38 @@ TRUE_PEAK_MAX_DBTP = -1.0
 # and content. Keep enough working headroom so the final encoded file remains
 # below the -1 dBTP delivery ceiling, including on unusually long episodes.
 AAC_WORKING_TRUE_PEAK_DBTP = -3.5
+EPISODE_STINGER_SOURCE_URL = "https://freesound.org/people/LSpec/sounds/867760/"
+EPISODE_STINGER_LICENSE = "CC0 1.0 Universal"
+EPISODE_STINGER_SHA256 = "dbf2f44dbaff2dbb44000a47a494a593ca520d0b311e82008a3e3edef89f7983"
+EPISODE_STINGER_PATH = Path(__file__).resolve().parent / "assets" / "bells_1.mp3"
 
 
 def loudness_is_competitive(integrated_lufs: float, true_peak_dbtp: float, clipped_samples: bool = False) -> bool:
     """Return whether a spoken episode meets the documented delivery gate."""
     return LOUDNESS_MIN_LUFS <= integrated_lufs <= LOUDNESS_MAX_LUFS and true_peak_dbtp <= TRUE_PEAK_MAX_DBTP and not clipped_samples
+
+
+def episode_stinger_metadata() -> dict[str, Any]:
+    """Return the verified audio stinger metadata used at episode start."""
+    if not EPISODE_STINGER_PATH.is_file():
+        raise RuntimeError(f"Missing episode stinger asset: {EPISODE_STINGER_PATH}")
+    sha256 = sha256_file(EPISODE_STINGER_PATH)
+    if sha256 != EPISODE_STINGER_SHA256:
+        raise RuntimeError(f"Episode stinger checksum mismatch: {EPISODE_STINGER_PATH}")
+    duration = float(MP3(str(EPISODE_STINGER_PATH)).info.length)
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(f"Episode stinger has invalid duration: {EPISODE_STINGER_PATH}")
+    return {
+        "name": "bells_1",
+        "source_url": EPISODE_STINGER_SOURCE_URL,
+        "license": EPISODE_STINGER_LICENSE,
+        "sha256": sha256,
+        "duration_seconds": duration,
+    }
+
+
+def episode_stinger_duration() -> float:
+    return float(episode_stinger_metadata()["duration_seconds"])
 
 
 def measure_loudness(path: Path) -> dict[str, Any]:
@@ -229,6 +257,29 @@ def validate_wav(path: Path) -> dict[str, Any]:
         raise ValueError(f"WAV contains no frames: {path}")
     info["duration_seconds"] = round(info["frames"] / info["sample_rate"], 6)
     return info
+
+
+def _render_episode_stinger(destination: Path) -> dict[str, Any]:
+    """Decode the bundled stinger into the pipeline's canonical PCM format."""
+    ffmpeg = _require_executable("ffmpeg")
+    episode_stinger_metadata()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _run([
+        ffmpeg,
+        "-y",
+        "-i",
+        str(EPISODE_STINGER_PATH),
+        "-map",
+        "0:a:0",
+        "-ar",
+        str(TARGET_SAMPLE_RATE),
+        "-ac",
+        str(TARGET_CHANNELS),
+        "-c:a",
+        "pcm_s16le",
+        str(destination),
+    ])
+    return validate_wav(destination)
 
 
 class KokoroBackend:
@@ -546,12 +597,17 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
     return manifest, reused
 
 
-def _concatenate_pcm(bundle: Path, plan: dict[str, Any], manifest: dict[str, Any], destination: Path) -> None:
+def _concatenate_pcm(bundle: Path, plan: dict[str, Any], manifest: dict[str, Any], destination: Path,
+                     prefix_audio: Path | None = None) -> None:
     records = {record["ordinal"]: record for record in manifest["segments"]}
     with wave.open(str(destination), "wb") as output:
         output.setnchannels(TARGET_CHANNELS)
         output.setsampwidth(TARGET_SAMPLE_WIDTH)
         output.setframerate(TARGET_SAMPLE_RATE)
+        if prefix_audio is not None:
+            validate_wav(prefix_audio)
+            with wave.open(str(prefix_audio), "rb") as stream:
+                output.writeframes(stream.readframes(stream.getnframes()))
         for segment in plan["segments"]:
             record = records.get(segment["ordinal"])
             if not record or record["text_sha256"] != segment["text_sha256"]:
@@ -650,9 +706,12 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
     audio_dir = bundle / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     final_path = audio_dir / f"{bundle.name}.m4a"
+    stinger = episode_stinger_metadata()
     with tempfile.TemporaryDirectory(prefix="zotero-audio-assemble-", dir=audio_dir) as temporary:
+        stinger_wav = Path(temporary) / "episode-stinger.wav"
+        rendered_stinger = _render_episode_stinger(stinger_wav)
         combined = Path(temporary) / "combined.wav"
-        _concatenate_pcm(bundle, plan, manifest, combined)
+        _concatenate_pcm(bundle, plan, manifest, combined, prefix_audio=stinger_wav)
         normalized = Path(temporary) / "normalized.wav"
         normalization = normalize_wav_loudness(combined, normalized)
         combined = normalized
@@ -681,7 +740,7 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
     final = MP4(final_path)
     expected_audio_seconds = sum(record["duration_seconds"] for record in manifest["segments"])
     expected_pause_seconds = sum(segment["pause_after_ms"] for segment in plan["segments"][:-1]) / 1000
-    expected_total = expected_audio_seconds + expected_pause_seconds
+    expected_total = rendered_stinger["duration_seconds"] + expected_audio_seconds + expected_pause_seconds
     duration = final_info["duration_seconds"]
     duration_delta = abs(duration - expected_total)
     tag_names = sorted(final.tags.keys()) if final.tags else []
@@ -713,6 +772,10 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
             "m4a_tags": tag_names,
             "required_tags_present": required_tags.issubset(tag_names),
             "embedded_chapter_count": embedded_chapter_count,
+            "episode_stinger": {
+                **stinger,
+                "rendered_duration_seconds": rendered_stinger["duration_seconds"],
+            },
             "normalization": normalization,
             "loudness": loudness,
         },

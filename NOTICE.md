@@ -14,3 +14,11 @@ Zotero attachment resolution, page markers, source SHA-256 recording, and
 explicit omission metadata. This repository reimplements those product concepts
 inside a staged, resumable standalone pipeline. No source PDF, generated article
 Markdown, model weight, or generated audio is copied into this repository.
+
+## Episode opening sound
+
+`src/zotero_audio/assets/bells_1.mp3` is the `bells_1` sound by LSpec,
+downloaded from [Freesound](https://freesound.org/people/LSpec/sounds/867760/)
+under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+The source asset is tracked by SHA-256 in `zotero_audio.audio` so generated
+episodes retain a verifiable effect provenance record.
