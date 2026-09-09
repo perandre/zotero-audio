@@ -167,6 +167,15 @@ def test_sanitize_spoken_text_omits_keyword_and_publisher_furniture():
     assert "repair-fused-word" in repair_transformations
 
 
+def test_cleanup_preserves_prose_without_complete_publisher_boundaries():
+    for text in (
+        "An envelope model describes the results. ©2026 Copyright reserved. The findings continue.",
+        "©2026 Copyright reserved. The findings continue.",
+        "TRUST-AI: The Second European Workshop on Trustworthy AI. We studied participants in Bremen, Germany.",
+    ):
+        assert sanitize_spoken_text(text)[0] == text
+
+
 def test_full_edition_rebuilds_legacy_mid_sentence_boundaries():
     from zotero_audio.podcast import create_edition_plan
     structure = _structure()

@@ -75,13 +75,14 @@ SPOKEN_CITATION_RE = re.compile(
 )
 SPOKEN_KEYWORD_LIST_RE = re.compile(r"(?i)^\s*(?:keywords?|key\s+words?)\s*:?(?=\s|$)")
 SPOKEN_WORKSHOP_FURNITURE_RE = re.compile(
-    r"(?is)\bTRUST-AI:\s*The Second European Workshop on Trustworthy AI\..*?"
-    r"\bBremen,\s*Germany\.\s*"
+    r"(?is)\bTRUST-AI:\s*The Second European Workshop on Trustworthy AI\."
+    r"\s*Organized as part of[^\n]{0,500}?\bBremen,\s*Germany\.\s*"
+    r"(?=/envel[^\s]*\s*\()"
 )
 SPOKEN_MALFORMED_AUTHOR_RE = re.compile(r"(?i)(?:^|\s)/?envel[^\s]*")
 SPOKEN_ORCID_RE = re.compile(r"(?i)/?orcid(?:\d{4}-){3}\d{3,4}")
 SPOKEN_COPYRIGHT_RE = re.compile(
-    r"(?is)©\s*\d{4}\s+Copyright.*?(?:CC\s*BY\s*\d(?:\.\d)?\s*\)?[.?!]?|$)"
+    r"(?is)©\s*\d{4}\s+Copyright[^\n]{0,500}?CC\s*BY\s*\d(?:\.\d)?\s*\)?[.?!]?"
 )
 SPOKEN_FUSED_WORD_RE = re.compile(
     r"(?i)\b(?:retrievalaugmented|human-inthe-loop|domainspecific|crosssection)\b"
@@ -119,18 +120,19 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
     # Some proceedings place the author envelope and licensing block in the
     # same extracted span. It has no spoken value and can contain malformed
     # glyphs, author fragments, ORCID identifiers, and publisher boilerplate.
+    text, count = SPOKEN_WORKSHOP_FURNITURE_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-publisher-front-matter")
     if SPOKEN_MALFORMED_AUTHOR_RE.search(text) and (
         SPOKEN_ORCID_RE.search(text) or SPOKEN_COPYRIGHT_RE.search(text)
     ):
         text, count = re.subn(
-            r"(?is)(?:^|\s)/?envel[^\s]*.*?(?=©\s*\d{4}\b)", " ", text
+            r"(?i)/envel[^\s]*\s*\([^()\n]{1,100}\)\s*"
+            r"(?:/orcid(?:\d{4}-){3}\d{3,4}\s*)?(?=©\s*\d{4}\b)", " ", text
         )
         if count:
             transformations.append("omit-publisher-front-matter")
 
-    text, count = SPOKEN_WORKSHOP_FURNITURE_RE.subn(" ", text)
-    if count:
-        transformations.append("omit-publisher-front-matter")
     text, count = SPOKEN_COPYRIGHT_RE.subn(" ", text)
     if count:
         transformations.append("omit-publisher-front-matter")

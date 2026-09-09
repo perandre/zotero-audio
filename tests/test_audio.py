@@ -93,6 +93,13 @@ def test_duplicate_segments_share_one_fresh_render(tmp_path: Path):
 
 @pytest.mark.skipif(shutil.which("/usr/bin/afconvert") is None, reason="requires macOS Core Audio")
 def test_resume_and_deterministic_m4a_assembly(tmp_path: Path):
+    class EpisodeBackend(FakeBackend):
+        def synthesize(self, text: str, destination: Path) -> None:
+            # Exercise loudness normalization with sustained program audio;
+            # a one-second tone is dominated by the opening effect.
+            _write_wav(destination, frames=10 * TARGET_SAMPLE_RATE, tone=True)
+
+    backend = EpisodeBackend()
     plan = {
         "schema": "zotero-audio-speech-plan/v1",
         "document": {"title": "Test", "author": "Tester", "publication_year": "2026"},
@@ -113,14 +120,14 @@ def test_resume_and_deterministic_m4a_assembly(tmp_path: Path):
     }
     plan["plan_sha256"] = json_digest(plan)
     atomic_write_json(tmp_path / "speech-plan.json", plan)
-    _, first_reused = synthesize_plan(tmp_path, FakeBackend())
-    _, second_reused = synthesize_plan(tmp_path, FakeBackend())
+    _, first_reused = synthesize_plan(tmp_path, backend)
+    _, second_reused = synthesize_plan(tmp_path, backend)
     assert first_reused == 0
     assert second_reused == 1
 
     record = next((tmp_path / "audio" / "segments").glob("*.wav"))
     _write_wav(record, frames=48_000, tone=True)
-    _, tampered_reused = synthesize_plan(tmp_path, FakeBackend())
+    _, tampered_reused = synthesize_plan(tmp_path, backend)
     assert tampered_reused == 0
 
     chapters = [{"start": 0.0, "title": "Opening"}]

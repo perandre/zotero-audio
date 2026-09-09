@@ -7,6 +7,10 @@
 # Downloaded models and local caches
 /.cache/
 /models/
+/.wrangler/
+
+# Local bibliography import
+/PHDDS90223-supplementary.ris
 
 # Python
 /.venv/
