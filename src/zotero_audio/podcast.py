@@ -71,9 +71,37 @@ SPOKEN_CITATION_RE = re.compile(
     r"(?:\[(?:\d{1,3}(?:\s*[,;–-]\s*\d{1,3})*)\]|"
     r"\((?:refs?[.]?\s*)?\d{1,3}(?:\s*[,;–-]\s*\d{1,3})*\))"
 )
+SPOKEN_KEYWORD_LIST_RE = re.compile(r"(?i)^\s*(?:keywords?|key\s+words?)\s*:?(?=\s|$)")
+SPOKEN_WORKSHOP_FURNITURE_RE = re.compile(
+    r"(?is)\bTRUST-AI:\s*The Second European Workshop on Trustworthy AI\..*?"
+    r"\bBremen,\s*Germany\.\s*"
+)
+SPOKEN_MALFORMED_AUTHOR_RE = re.compile(r"(?i)(?:^|\s)/?envel[^\s]*")
+SPOKEN_ORCID_RE = re.compile(r"(?i)/?orcid(?:\d{4}-){3}\d{3,4}")
+SPOKEN_COPYRIGHT_RE = re.compile(
+    r"(?is)©\s*\d{4}\s+Copyright.*?(?:CC\s*BY\s*\d(?:\.\d)?\s*\)?[.?!]?|$)"
+)
+SPOKEN_FUSED_WORD_RE = re.compile(
+    r"(?i)\b(?:retrievalaugmented|human-inthe-loop|domainspecific|crosssection)\b"
+)
+SPOKEN_FUSED_WORD_FIXES = {
+    "retrievalaugmented": "retrieval-augmented",
+    "human-inthe-loop": "human-in-the-loop",
+    "domainspecific": "domain-specific",
+    "crosssection": "cross-section",
+}
 
 
-def sanitize_spoken_text(value: str) -> tuple[str, list[str]]:
+def _looks_like_keyword_list(value: str, section: str | None = None) -> bool:
+    """Recognize unlabeled keyword rows flattened out of a PDF front matter."""
+    if str(section or "").casefold().rstrip(".:") not in {"abstract", "summary"}:
+        return False
+    text = str(value).strip()
+    separators = text.count(",") + text.count("·") + text.count(";")
+    return len(text.split()) <= 30 and separators >= 2 and not re.search(r"[.!?](?:\s|$)", text)
+
+
+def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str, list[str]]:
     """Remove PDF artifacts that should not be read aloud.
 
     The extracted article remains unchanged. This policy only applies to the
@@ -82,6 +110,38 @@ def sanitize_spoken_text(value: str) -> tuple[str, list[str]]:
     """
     text = str(value)
     transformations: list[str] = []
+
+    if SPOKEN_KEYWORD_LIST_RE.match(text) or _looks_like_keyword_list(text, section):
+        return "", ["omit-keyword-list"]
+
+    # Some proceedings place the author envelope and licensing block in the
+    # same extracted span. It has no spoken value and can contain malformed
+    # glyphs, author fragments, ORCID identifiers, and publisher boilerplate.
+    if SPOKEN_MALFORMED_AUTHOR_RE.search(text) and (
+        SPOKEN_ORCID_RE.search(text) or SPOKEN_COPYRIGHT_RE.search(text)
+    ):
+        text, count = re.subn(
+            r"(?is)(?:^|\s)/?envel[^\s]*.*?(?=©\s*\d{4}\b)", " ", text
+        )
+        if count:
+            transformations.append("omit-publisher-front-matter")
+
+    text, count = SPOKEN_WORKSHOP_FURNITURE_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-publisher-front-matter")
+    text, count = SPOKEN_COPYRIGHT_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-publisher-front-matter")
+    text, count = SPOKEN_ORCID_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-orcid-identifier")
+
+    def replace_fused_word(match: re.Match[str]) -> str:
+        transformations.append("repair-fused-word")
+        replacement = SPOKEN_FUSED_WORD_FIXES[match.group(0).casefold()]
+        return replacement[:1].upper() + replacement[1:] if match.group(0)[:1].isupper() else replacement
+
+    text = SPOKEN_FUSED_WORD_RE.sub(replace_fused_word, text)
 
     def replace_citations(match: re.Match[str]) -> str:
         transformations.append("omit-numeric-citation-marker")
@@ -260,11 +320,39 @@ def build_intro(edition: str, title: str, authors: Iterable[str], *, journal: st
 def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict[str, Any]:
     structure_document = structure.get("document", {})
     metadata_abstract = str(structure_document.get("abstract") or structure_document.get("metadata", {}).get("abstract", "")).strip()
+    structured_abstract: list[dict[str, Any]] = []
+    in_abstract = False
+    for block in structure.get("blocks", []):
+        text = str(block.get("text", block.get("source_text", ""))).strip()
+        heading = text.casefold().rstrip(".: ")
+        if block.get("type") == "heading":
+            if heading == "abstract":
+                in_abstract = True
+                continue
+            if in_abstract:
+                break
+        if in_abstract and block.get("included_in_reading", True):
+            if _looks_like_keyword_list(text, "Abstract") or SPOKEN_KEYWORD_LIST_RE.match(text):
+                break
+            if text:
+                structured_abstract.append(block)
+    # A page-flat extractor can append keywords, author contact details, and
+    # the start of the introduction to an otherwise valid abstract metadata
+    # value. Prefer the clearly bounded block sequence in that case.
+    abstract_has_front_matter = bool(re.search(
+        r"(?i)\bkeywords?\b|https?://|www\.|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|"
+        r"\b(?:\d+(?:\.\d+)*[.)]?\s+)?introduction\b|/orcid|copyright for this paper",
+        metadata_abstract,
+    ))
+    if abstract_has_front_matter and structured_abstract:
+        metadata_abstract = ""
     abstract: list[dict[str, Any]] = ([{
         "id": "document-abstract", "type": "body", "role": "abstract", "text": metadata_abstract,
         "pdf_page": 1, "included_in_reading": True,
         "provenance": structure_document.get("abstract_source") or "document-metadata",
     }] if metadata_abstract else [])
+    if not abstract and structured_abstract:
+        abstract = structured_abstract
     document_abstract = bool(abstract)
     conclusion: list[dict[str, Any]] = []
     section: str | None = None
@@ -449,6 +537,8 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
         (r"\bhttps?://|\bwww\.", "raw-url-in-spoken-text"),
         (r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "email-in-spoken-text"),
         (r"\[(?:\d+[ ,;–-]*){1,8}\]", "numeric-citation-marker-in-spoken-text"),
+        (r"(?i)\b(?:TRUST-AI:|orcid\d|copyright for this paper|use permitted under creative commons|ceur workshop proceedings)\b",
+         "publisher-furniture-in-spoken-text"),
         (r"\ufffd", "unicode-replacement-character"),
         (r"\b[A-Za-z]{55,}\b", "probable-fused-word"),
     )
@@ -586,7 +676,9 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                 continue
             append(heading + ".", "heading", heading, pause=500)
             for block in blocks:
-                spoken_text, transformations = sanitize_spoken_text(str(block.get("text", "")))
+                spoken_text, transformations = sanitize_spoken_text(
+                    str(block.get("text", "")), section=heading
+                )
                 if spoken_text:
                     append(spoken_text, "body", heading,
                            [str(block["id"])] if block.get("id") else [], [int(block.get("pdf_page", 1))],
@@ -594,7 +686,9 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
     if edition == EDITION_FULL:
         sanitized_segments: list[dict[str, Any]] = []
         for segment in segments:
-            spoken_text, transformations = sanitize_spoken_text(str(segment["text"]))
+            spoken_text, transformations = sanitize_spoken_text(
+                str(segment["text"]), section=segment.get("section")
+            )
             if not spoken_text:
                 continue
             sanitized_segments.append({

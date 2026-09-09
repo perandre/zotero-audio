@@ -217,6 +217,21 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
         return None, None
 
     collected: list[str] = []
+
+    def boundary_prefix(line: str) -> tuple[str | None, bool]:
+        """Split a flattened keyword/section boundary from abstract prose."""
+        keyword = re.search(r"(?i)(?<!\w)(?:keywords?|key\s+words?)\s*:?(?=\s|$)", line)
+        if keyword and (keyword.start() == 0 or line[:keyword.start()].rstrip().endswith((".", ";", ":"))):
+            prefix = line[:keyword.start()].strip()
+            return (prefix or None), True
+        introduction = re.search(
+            r"(?i)(?<!\w)(?:\d+(?:\.\d+)*[.)]?\s+)?introduction\b", line
+        )
+        if introduction and (introduction.start() == 0 or line[:introduction.start()].rstrip().endswith((".", ";", ":"))):
+            prefix = line[:introduction.start()].strip()
+            return (prefix or None), True
+        return None, False
+
     for line in lines[start:]:
         lowered = line.casefold().rstrip(":")
         if (
@@ -224,6 +239,11 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
             or line.count("|") >= 2
             or (collected and _heading_level(line) is not None)
         ):
+            break
+        prefix, is_boundary = boundary_prefix(line)
+        if is_boundary:
+            if prefix:
+                collected.append(prefix)
             break
         if FURNITURE_RE.match(line):
             break

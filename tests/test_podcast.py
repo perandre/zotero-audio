@@ -135,6 +135,38 @@ def test_show_notes_render_safe_links_and_omit_unrequested_disclosures():
     assert '<a href="https://audio.example/transcript.vtt">Timed transcript</a>' in page
 
 
+def test_sanitize_spoken_text_omits_keyword_and_publisher_furniture():
+    keyword_text, keyword_transformations = sanitize_spoken_text(
+        "Trustworthy Artificial Intelligence (T-AI), Generative AI assistants, "
+        "Knowledge graphs, Agentic AI, Industrial troubleshooting, Manufacturing",
+        section="Abstract",
+    )
+    assert keyword_text == ""
+    assert "omit-keyword-list" in keyword_transformations
+
+    raw = (
+        "This paper treats trustworthiness as a design concern. "
+        "TRUST-AI: The Second European Workshop on Trustworthy AI. "
+        "Organized as part of the International Joint Conference on Artificial Intelligence - "
+        "IJCAI/ECAI 2026. August 2026, Bremen, Germany. "
+        "/envel⌢pe-⌢ (R. Jadhav) /orcid0000-0001-8669-2420 "
+        "©2026 Copyright for this paper by its authors. Use permitted under Creative Commons "
+        "License Attribution 4.0 International (CC BY 4.0). "
+        "The architecture continues with human validation."
+    )
+    cleaned, transformations = sanitize_spoken_text(raw)
+    assert cleaned == "This paper treats trustworthiness as a design concern. The architecture continues with human validation."
+    assert "TRUST-AI" not in cleaned
+    assert "orcid" not in cleaned.casefold()
+    assert "omit-publisher-front-matter" in transformations
+
+    repaired, repair_transformations = sanitize_spoken_text(
+        "Retrievalaugmented generation supports human-inthe-loop review of the domainspecific graph and crosssection links."
+    )
+    assert repaired == "Retrieval-augmented generation supports human-in-the-loop review of the domain-specific graph and cross-section links."
+    assert "repair-fused-word" in repair_transformations
+
+
 def test_full_edition_rebuilds_legacy_mid_sentence_boundaries():
     from zotero_audio.podcast import create_edition_plan
     structure = _structure()
@@ -178,6 +210,18 @@ def test_brief_is_authored_extract_and_plans_are_distinct():
     assert "The full paper explains the method" not in brief_text
     assert "The full paper explains the method" in full_text
     assert brief_plan["plan_sha256"] != full_plan["plan_sha256"]
+
+
+def test_brief_replaces_contaminated_abstract_metadata_with_bounded_blocks():
+    structure = _structure()
+    structure["document"]["abstract"] = (
+        "The authors found a careful result. Keywords AI governance 1 Introduction "
+        "contact@example.org https://example.org"
+    )
+    brief = extract_brief(structure)
+    abstract_text = " ".join(block["text"] for block in brief["abstract"])
+    assert abstract_text == "The authors found a careful result."
+    assert "contact@example.org" not in abstract_text
 
 
 def test_missing_abstract_disables_only_brief():

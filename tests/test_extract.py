@@ -57,6 +57,19 @@ def test_spaced_abstract_heading_skips_adjacent_keywords_and_repairs_soft_wraps(
     assert source == "pdf-explicit-heading"
 
 
+def test_abstract_inference_stops_at_inline_keywords_and_introduction_boundary():
+    body = (
+        "This study reports a careful result across a large representative sample. "
+        "It explains the method, evidence, limitations, and implications in enough detail to be useful. "
+        "The results are robust across all of the planned sensitivity analyses and support the conclusion."
+    )
+    abstract, source = _infer_abstract(
+        "Abstract\n" + body + "\nKeywords Artificial intelligence · Responsible AI 1 Introduction\nBody"
+    )
+    assert abstract == body
+    assert source == "pdf-explicit-heading"
+
+
 def test_resolve_zotero_pdf_and_prevent_key_escape(tmp_path: Path):
     storage = tmp_path / "storage"
     item = storage / "ABC123"
