@@ -80,12 +80,18 @@ def episode_stinger_duration() -> float:
     return float(episode_stinger_metadata()["duration_seconds"])
 
 
-def measure_loudness(path: Path) -> dict[str, Any]:
+def measure_loudness(
+    path: Path,
+    *,
+    target_lufs: float = TARGET_LOUDNESS_LUFS,
+    target_peak: float = TRUE_PEAK_MAX_DBTP,
+) -> dict[str, Any]:
     """Measure integrated loudness and true peak with FFmpeg's BS.1770 filter."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg: raise RuntimeError("FFmpeg is required for podcast loudness measurement")
     result = subprocess.run(
-        [ffmpeg, "-hide_banner", "-i", str(path), "-af", "loudnorm=I=-16:TP=-1:LRA=11:print_format=json", "-f", "null", "-"],
+        [ffmpeg, "-hide_banner", "-i", str(path), "-af",
+         f"loudnorm=I={target_lufs}:TP={target_peak}:LRA=11:print_format=json", "-f", "null", "-"],
         capture_output=True,
         text=True,
         check=False,
@@ -112,7 +118,9 @@ def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
     """Two-pass loudnorm to a WAV; returns measured post-normalization values."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg: raise RuntimeError("FFmpeg is required for two-pass loudness normalization")
-    first = measure_loudness(source)["raw"]
+    first = measure_loudness(
+        source, target_lufs=NORMALIZATION_TARGET_LUFS, target_peak=AAC_WORKING_TRUE_PEAK_DBTP
+    )["raw"]
     if any(str(first.get(key, "")).lower() in {"-inf", "inf", "nan"} for key in ("input_i", "input_tp")):
         raise RuntimeError("Cannot loudness-normalize silent or non-finite audio")
     # Use a lower working ceiling so AAC inter-sample overs remain below -1 dBTP.

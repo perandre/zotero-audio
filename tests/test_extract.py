@@ -101,3 +101,32 @@ def test_markdown_has_page_markers_and_only_included_blocks():
     assert "Included." in markdown
     assert "Omitted." not in markdown
     assert "authors: []" in markdown
+
+
+def test_inline_spaced_abstract_marker_is_treated_as_a_visible_boundary():
+    body = (
+        "This study reports a careful result across a large representative sample. "
+        "It explains the method, evidence, limitations, and implications in enough detail to be useful. "
+        "The results are robust across all of the planned sensitivity analyses and support the conclusion."
+    )
+    abstract, source = _infer_abstract(
+        "Title and authors A R T I C L E I N F O A B S T R A C T " + body + " Keywords: AI"
+    )
+    assert abstract == body
+    assert source == "pdf-explicit-heading"
+
+
+def test_publisher_front_matter_without_abstract_heading_is_bounded():
+    abstract = (
+        "Artificial intelligence is increasingly used in software engineering workflows. "
+        "This study examines the psychological costs of adoption through interviews with software professionals. "
+        "The findings identify accountability anxiety, identity disruption, meaning erosion, and uncertainty distress. "
+        "The study contributes a human-centered account of organizational AI transition."
+    )
+    page = (
+        "The Paper Title\nAuthors Name, University\n" + abstract +
+        "\nCCS Concepts: Artificial intelligence.\nACM Reference Format:\n1 Introduction"
+    )
+    found, source = _infer_abstract(page)
+    assert found == abstract
+    assert source == "pdf-implicit-front-matter"

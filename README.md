@@ -204,6 +204,22 @@ For automatic runs, save the completed file as
 auto-detects it. A different location can be supplied by adding these two
 entries to the plist's `ProgramArguments` array and reinstalling it:
 
+To rebuild the Brief edition independently for every PDF, including sources
+whose Full Reading needs review, run the resumable library pass below. The
+`--select-all` flag records this invocation as explicit publication intent; the
+normal license and content gates still prevent unsafe or unverified sources
+from entering the public feed. Outcomes are recorded in
+`brief-library-manifest.json` under the runtime directory.
+
+```bash
+"$RUNTIME/venv/bin/python" "$REPO/scripts/build_library_briefs.py" \
+  --zotero-storage "$HOME/Zotero/storage" \
+  --zotero-db "$HOME/Zotero/zotero.sqlite" \
+  --state-dir "$RUNTIME/full-library" \
+  --podcast-config "$RUNTIME/podcast.toml" \
+  --select-all
+```
+
 ```xml
 <string>--podcast-config</string>
 <string>/Users/pesh/Sites/zotero-audio-runtime/podcast.toml</string>

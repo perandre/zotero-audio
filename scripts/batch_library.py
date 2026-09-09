@@ -111,8 +111,15 @@ def main(argv: list[str] | None = None) -> int:
         progress(f"Zotero metadata unavailable; PDF metadata fallback will be used: {exc}")
 
     previous_items: dict[str, dict[str, Any]] = {}
+    previous_records: dict[str, dict[str, Any]] = {}
     if manifest_path.exists() and not args.force:
         previous = load_json(manifest_path)
+        source_paths = {str(path) for path in pdfs}
+        previous_records = {
+            item["source_path"]: item
+            for item in previous.get("items", [])
+            if item.get("source_path") in source_paths
+        }
         previous_items = {
             item["source_path"]: item
             for item in previous.get("items", [])
@@ -131,9 +138,16 @@ def main(argv: list[str] | None = None) -> int:
         "workers": 1,
         "speed": args.speed,
         "pdf_count": len(pdfs),
-        "items": [],
+        "items": list(previous_records.values()),
     }
     failures = 0
+
+    def replace_item(source_path: str, item: dict[str, Any]) -> None:
+        manifest["items"] = [
+            existing for existing in manifest["items"]
+            if existing.get("source_path") != source_path
+        ]
+        manifest["items"].append(item)
 
     def metadata_with_pdf_rights(pdf: Path, metadata: dict[str, Any] | None,
                                  structure: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -163,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 existing_output = destination / previous["output_file"]
                 if existing_output.is_file() and sha256_file(existing_output) == previous["output_sha256"]:
-                    manifest["items"].append(previous)
+                    replace_item(str(pdf), previous)
                     atomic_write_json(manifest_path, manifest)
                     progress(f"[{number}/{len(pdfs)}] verified existing {existing_output.name}")
                     continue
@@ -180,25 +194,32 @@ def main(argv: list[str] | None = None) -> int:
                 existing_bundle = existing_bundles[0]
                 existing_structure = load_json(existing_bundle / "structure.json")
                 existing_run = load_json(existing_bundle / "run-manifest.json")
-                existing_qa = load_json(existing_bundle / "qa-report.json")
                 existing_source_sha = str(existing_structure.get("source", {}).get("sha256", ""))
-                existing_output_name = Path(str(existing_qa.get("output", {}).get("path", ""))).name
-                existing_output = destination / existing_output_name
-                if not existing_output.is_file():
-                    matching_outputs = [
-                        path for path in destination.glob("*.m4a")
-                        if path.name.endswith(f"[{key}].m4a")
-                    ]
-                    if len(matching_outputs) == 1:
-                        existing_output = matching_outputs[0]
+                existing_qa_path = existing_bundle / "qa-report.json"
+                existing_qa = load_json(existing_qa_path) if existing_qa_path.is_file() else {}
+                if existing_source_sha == source_sha and existing_run.get("status") == "complete":
+                    existing_output_name = Path(str(existing_qa.get("output", {}).get("path", ""))).name
+                    existing_output = (
+                        existing_bundle / str(existing_qa.get("output", {}).get("path", ""))
+                        if existing_qa.get("output", {}).get("path") else
+                        existing_bundle / "audio" / f"{existing_bundle.name}.m4a"
+                    )
+                    if existing_qa.get("status") != "pass" or not existing_output.is_file():
+                        existing_output, existing_qa = assemble_m4a(existing_bundle)
                         existing_output_name = existing_output.name
-                if (
-                    existing_source_sha == source_sha
-                    and existing_run.get("status") == "complete"
-                    and existing_qa.get("status") == "pass"
-                    and existing_output_name
-                    and existing_output.is_file()
-                ):
+                    delivered_output = destination / existing_output_name
+                    if not delivered_output.is_file():
+                        matching_outputs = [
+                            path for path in destination.glob("*.m4a")
+                            if path.name.endswith(f"[{key}].m4a")
+                        ]
+                        if len(matching_outputs) == 1:
+                            delivered_output = matching_outputs[0]
+                            existing_output_name = delivered_output.name
+                    if existing_qa.get("status") == "pass" and existing_output.is_file():
+                        if delivered_output != destination / existing_output_name or not delivered_output.is_file():
+                            delivered_output = destination / existing_output_name
+                        copy_atomic(existing_output, delivered_output)
                     output_info = inspect_m4a(existing_output)
                     existing_plan = load_json(existing_bundle / "speech-plan.json")
                     language = detect_language(existing_structure)
@@ -215,8 +236,8 @@ def main(argv: list[str] | None = None) -> int:
                         "segments_generated": 0,
                         "segments_reused": len(existing_plan.get("segments", [])),
                         "prepared_reused": True,
-                        "output_file": existing_output.name,
-                        "output_sha256": sha256_file(existing_output),
+                        "output_file": delivered_output.name,
+                        "output_sha256": sha256_file(delivered_output),
                         **output_info,
                     }
                     if zotero_item:
@@ -227,9 +248,9 @@ def main(argv: list[str] | None = None) -> int:
                             existing_bundle / "metadata.json",
                             bundle_metadata_snapshot(metadata_value, attachment_key=key, source_sha256=source_sha),
                         )
-                    manifest["items"].append(item)
+                    replace_item(str(pdf), item)
                     atomic_write_json(manifest_path, manifest)
-                    progress(f"[{number}/{len(pdfs)}] reused verified existing {existing_output.name}")
+                    progress(f"[{number}/{len(pdfs)}] reused verified existing {delivered_output.name}")
                     continue
 
             bundle, structure, plan, prepared_reused = prepare_bundle(
@@ -290,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
                     bundle / "metadata.json",
                     bundle_metadata_snapshot(metadata_value, attachment_key=key, source_sha256=source_sha),
                 )
-            manifest["items"].append(item)
+            replace_item(str(pdf), item)
             atomic_write_json(manifest_path, manifest)
             progress(
                 f"[{number}/{len(pdfs)}] wrote {delivered.name} "
@@ -298,23 +319,23 @@ def main(argv: list[str] | None = None) -> int:
             )
         except Exception as exc:
             failures += 1
-            manifest["items"].append(
+            replace_item(str(pdf),
                 {
                     "status": "failed",
                     "zotero_key": key,
                     "source_path": str(pdf),
                     "source_sha256": source_sha,
                     "error": f"{type(exc).__name__}: {exc}",
-                }
-            )
+                })
             atomic_write_json(manifest_path, manifest)
             progress(f"[{number}/{len(pdfs)}] FAILED {key}: {type(exc).__name__}: {exc}")
 
+    manifest["items"] = sorted(manifest["items"], key=lambda item: str(item.get("source_path", "")))
     manifest["complete_count"] = sum(item["status"] == "complete" for item in manifest["items"])
-    manifest["failure_count"] = failures
+    manifest["failure_count"] = sum(item["status"] == "failed" for item in manifest["items"])
     atomic_write_json(manifest_path, manifest)
     progress(
-        f"Batch complete: {manifest['complete_count']}/{len(pdfs)} files; {failures} failures; "
+        f"Batch complete: {manifest['complete_count']}/{len(pdfs)} files; {manifest['failure_count']} failures; "
         f"manifest {manifest_path}",
         announce=True,
     )

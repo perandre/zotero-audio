@@ -241,6 +241,14 @@ def test_missing_abstract_disables_only_brief():
         create_edition_plan(_source_plan(), structure, "brief")
 
 
+def test_overlong_pdf_abstract_is_not_treated_as_a_brief():
+    structure = _structure()
+    structure["blocks"] = structure["blocks"][2:]
+    structure["document"]["abstract"] = " ".join(["word"] * 1501)
+    brief = extract_brief(structure)
+    assert not brief["available"] and brief["reason"] == "abstract-not-detected"
+
+
 def test_content_gate_rejects_page_flat_and_unsafe_spoken_text():
     source = _source_plan()
     source["segments"] = [source["segments"][0], {**source["segments"][2], "text": "Email x@example.org and see [1]."}]

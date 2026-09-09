@@ -382,6 +382,12 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
     }] if metadata_abstract else [])
     if not abstract and structured_abstract:
         abstract = structured_abstract
+    # Keep the Brief bounded even when PDF metadata or a malformed front-page
+    # boundary contains more than an abstract. This is especially important
+    # for publisher PDFs whose first page is exposed as one large text block.
+    word_count = lambda blocks: sum(len(str(item.get("text", "")).split()) for item in blocks)
+    if metadata_abstract and word_count(abstract) / 150 * 60 > max_seconds:
+        abstract = []
     document_abstract = bool(abstract)
     conclusion: list[dict[str, Any]] = []
     section: str | None = None
@@ -400,7 +406,6 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
                 (abstract if section == "abstract" else conclusion).append(block)
     if not abstract:
         return {"available": False, "reason": "abstract-not-detected", "abstract": [], "conclusion": []}
-    word_count = lambda blocks: sum(len(str(item.get("text", "")).split()) for item in blocks)
     include_conclusion = bool(conclusion) and (word_count(abstract) + word_count(conclusion)) / 150 * 60 <= max_seconds
     return {"available": True, "abstract": abstract, "conclusion": conclusion if include_conclusion else [],
             "brief_contents": "the authors' abstract and conclusion" if include_conclusion else "the authors' abstract"}

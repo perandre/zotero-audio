@@ -191,7 +191,12 @@ def _heading_level(text: str) -> int | None:
 
 
 def _metadata_value(reader: PdfReader, name: str) -> str | None:
-    value = getattr(reader.metadata, name, None) if reader.metadata else None
+    try:
+        value = getattr(reader.metadata, name, None) if reader.metadata else None
+    except (TypeError, ValueError):
+        # A malformed PDF creation/modification date must not prevent us from
+        # reading otherwise valid article text and bibliographic metadata.
+        return None
     if not value:
         return None
     return normalize_speech_text(str(value)) or None
@@ -202,6 +207,14 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
     # Poppler can put the adjacent keyword column between the spaced heading
     # and abstract. It keeps a blank line at that column's end.
     first_page = re.sub(r"(?m)^A B S T R A C T\s*$", "Abstract", first_page)
+    # Some publisher PDFs flatten the title block, article information, and
+    # abstract heading onto one line. Restore a boundary only for the visibly
+    # typeset all-caps marker; ordinary mentions of "abstract" are left alone.
+    first_page = re.sub(
+        r"(?<![A-Za-z])(?:A\s+B\s+S\s+T\s+R\s+A\s+C\s+T|ABSTRACT)(?![A-Za-z])",
+        "\nAbstract\n",
+        first_page,
+    )
     first_page = re.sub(r"(?ms)(^Abstract\n\s*)Keywords:[^\n]*\n.*?\n\s*\n", r"\1", first_page)
     first_page = re.sub(r"\u00ad\s*\n\s*", "", first_page)
     lines = [normalize_speech_text(line) for line in first_page.splitlines()]
@@ -216,6 +229,40 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
         for index, line in enumerate(lines):
             if line.casefold().startswith("edited by "):
                 start, source = index + 1, "pdf-editorial-front-matter"
+                break
+    # Several ACM/arXiv and journal layouts visibly place the abstract
+    # paragraph between the author block and publication furniture without
+    # printing an ``Abstract`` heading. Restrict this fallback to recognizable
+    # publisher front matter and stop at its fixed bibliographic markers; it
+    # must never turn an arbitrary opening paragraph into a Brief.
+    if start is None and any(
+        line.casefold() == "article"
+        or re.search(r"(?i)\barxiv:\s*\d|\bccs concepts\b|\bacm reference format\b", line)
+        for line in lines
+    ):
+        stop_markers = (
+            r"(?i)^ccs concepts\b",
+            r"(?i)^additional key words and phrases\b",
+            r"(?i)^acm reference format\b",
+            r"(?i)^authors['’] addresses\b",
+            r"(?i)^permission to make digital copies\b",
+            r"(?i)^\d+\s+[A-Z][^.!?]{8,},\s",
+        )
+        for index, line in enumerate(lines):
+            if len(line.split()) < 6 or not re.match(r"[A-Z][a-z]", line):
+                continue
+            if any(re.search(pattern, line) for pattern in stop_markers):
+                continue
+            candidate: list[str] = []
+            for following in lines[index:]:
+                if any(re.search(pattern, following) for pattern in stop_markers):
+                    break
+                if FURNITURE_RE.match(following):
+                    break
+                candidate.append(following)
+            words = " ".join(candidate).split()
+            if 40 <= len(words) <= 500 and re.search(r"[.!?]", " ".join(candidate)):
+                start, source = index, "pdf-implicit-front-matter"
                 break
     if start is None:
         return None, None
@@ -242,6 +289,14 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
             lowered in {"keywords", "key words", "introduction", "significance"}
             or line.count("|") >= 2
             or (collected and _heading_level(line) is not None)
+            or (
+                source == "pdf-implicit-front-matter"
+                and re.match(
+                    r"(?i)^(?:ccs concepts|additional key words and phrases|acm reference format|"
+                    r"authors['’] addresses|permission to make digital copies)\b",
+                    line,
+                )
+            )
         ):
             break
         prefix, is_boundary = boundary_prefix(line)
@@ -262,6 +317,11 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
 def _front_matter_replaced_with_abstract(first_page: str, abstract: str, source: str | None) -> str:
     if not source:
         return first_page
+    first_page = re.sub(
+        r"(?<![A-Za-z])(?:A\s+B\s+S\s+T\s+R\s+A\s+C\s+T|ABSTRACT)(?![A-Za-z])",
+        "\nAbstract\n",
+        first_page,
+    )
     lines = first_page.replace("\r\n", "\n").replace("\r", "\n").splitlines()
     start = None
     for index, line in enumerate(lines):
@@ -271,6 +331,12 @@ def _front_matter_replaced_with_abstract(first_page: str, abstract: str, source:
         ):
             start = index
             break
+    if start is None and source == "pdf-implicit-front-matter":
+        first_word = normalize_speech_text(abstract).split(" ", 1)[0].casefold()
+        for index, line in enumerate(lines):
+            if normalize_speech_text(line).casefold().startswith(first_word):
+                start = index
+                break
     if start is None:
         return first_page
     end = None
@@ -357,6 +423,13 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
 
     edge_keys = _running_edge_keys(raw_pages)
     inferred_abstract, abstract_source = (None, None) if report else _infer_abstract(raw_pages[0])
+    if not report and not inferred_abstract:
+        # A few publisher PDFs expose the abstract in the logical PDF text
+        # order but their layout extractor places the adjacent article-info
+        # column before it. Use the page's native text as a narrow fallback
+        # for Brief detection while retaining layout spans for the article.
+        native_first_page = reader.pages[0].extract_text() or ""
+        inferred_abstract, abstract_source = _infer_abstract(native_first_page)
     processed_pages = list(raw_pages)
     if inferred_abstract:
         processed_pages[0] = _front_matter_replaced_with_abstract(
