@@ -993,7 +993,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
                         public_root: Path | None = None, base_url: str = "https://podcast.example.invalid",
                         selected: bool = False, license_record: dict[str, Any] | None = None,
                         metadata: dict[str, Any] | None = None, dry_run: bool = True,
-                        publishing_enabled: bool = False, edition: str = "both") -> dict[str, Any]:
+                        publishing_enabled: bool = False, edition: str = "both",
+                        narration_max_chars: int = 900) -> dict[str, Any]:
     """Build distinct Brief/Full editions, archive privately, then optionally publish."""
     from .cover import render_cover
     if edition not in {"both", *EDITIONS}:
@@ -1050,7 +1051,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     for edition in edition_names:
         stage = config.state_root / "documents" / paper_guid / source_sha / edition
         plan = create_edition_plan(source_plan, structure, edition, metadata=metadata, license_result=license_result,
-                                   public=bool(license_result.get("allowed")))
+                                   public=bool(license_result.get("allowed")), max_chars=narration_max_chars)
         existing_plan = load_json(stage / "speech-plan.json") if (stage / "speech-plan.json").is_file() else {}
         stage.mkdir(parents=True, exist_ok=True); atomic_write_json(stage / "speech-plan.json", plan); atomic_write_json(stage / "narration-plan.json", plan)
         atomic_write_text(stage / "narration.md", build_markdown_transcript(plan, str(document.get("title", bundle.name))))
