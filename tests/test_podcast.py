@@ -390,7 +390,7 @@ def _stub_media(monkeypatch):
         atomic_write_json(stage / "qa-report.json", qa)
         return audio, qa
 
-    def cover(destination):
+    def cover(destination, *, edition="full"):
         destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(b"1 More Paper cover")
         return destination
 

@@ -1054,7 +1054,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
     images = {}
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
-        copy_podcast_cover(stage); images[edition] = _artifact_url(publisher, stage, "shows")
+        copy_podcast_cover(stage, edition=edition); images[edition] = _artifact_url(publisher, stage, "shows")
     feed_stages: list[tuple[str, Path]] = []
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         episodes = [item for item in manifest["episodes"] if item["edition"] == edition]
@@ -1259,7 +1259,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         target_audio = private_dir / f"{safe} - {'Brief' if edition == EDITION_BRIEF else 'Full Reading'} [{zotero_key}].m4a"; artifact_dir = target_audio.with_suffix(""); artifact_dir.mkdir(parents=True, exist_ok=True)
         _copy_if_changed(audio, target_audio); cover, transcript = artifact_dir / "cover.png", artifact_dir / "transcript.vtt"
         transcript_html, chapters_path, markdown = artifact_dir / "transcript.html", artifact_dir / "chapters.json", artifact_dir / "transcript.md"
-        copy_podcast_cover(cover)
+        copy_podcast_cover(cover, edition=edition)
         build_transcript(cues, transcript); build_transcript_html(cues, title, transcript_html, attribution=", ".join(authors)); chapter_json(chapters, chapters_path)
         atomic_write_text(markdown, build_markdown_transcript(plan, title))
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,

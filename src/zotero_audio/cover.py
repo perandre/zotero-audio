@@ -9,33 +9,43 @@ from pathlib import Path
 from .branding import PODCAST_NAME
 from .util import atomic_write_json, atomic_write_text, sha256_file, sha256_text
 
-DESIGN_VERSION = "1-more-paper/v1"
-PODCAST_COVER_PATH = Path(__file__).resolve().parent / "assets" / "1_more_paper_cover.png"
+DESIGN_VERSION = "1-more-paper/v2"
+PODCAST_COVER_PATHS = {
+    "brief": Path(__file__).resolve().parent / "assets" / "1_more_paper_brief_cover.png",
+    "full": Path(__file__).resolve().parent / "assets" / "1_more_paper_full_cover.png",
+}
+# Keep the original singular export as a backwards-compatible alias for
+# callers that used the generic podcast cover before edition-specific art.
+PODCAST_COVER_PATH = PODCAST_COVER_PATHS["full"]
 PALETTE = {"paper": "#F2EFE6", "ink": "#16212B", "brief": "#2F5BD3", "full": "#D9553F"}
 
 
-def copy_podcast_cover(destination: Path) -> Path:
-    """Copy the user-supplied podcast cover to a generated artifact path."""
+def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
+    """Copy the user-supplied edition cover to a generated artifact path."""
     if destination.suffix.casefold() != ".png":
         raise ValueError("podcast cover destination must be .png")
-    if not PODCAST_COVER_PATH.is_file():
-        raise FileNotFoundError(f"podcast cover asset is missing: {PODCAST_COVER_PATH}")
+    try:
+        source = PODCAST_COVER_PATHS[edition]
+    except KeyError as exc:
+        raise ValueError("podcast cover edition must be brief or full") from exc
+    if not source.is_file():
+        raise FileNotFoundError(f"podcast cover asset is missing: {source}")
 
     from PIL import Image
 
-    with Image.open(PODCAST_COVER_PATH) as image:
+    with Image.open(source) as image:
         if image.width != image.height:
             raise ValueError("podcast cover must be square")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.resolve() != PODCAST_COVER_PATH.resolve() and (
-        not destination.is_file() or sha256_file(destination) != sha256_file(PODCAST_COVER_PATH)
+    if destination.resolve() != source.resolve() and (
+        not destination.is_file() or sha256_file(destination) != sha256_file(source)
     ):
-        shutil.copyfile(PODCAST_COVER_PATH, destination)
+        shutil.copyfile(source, destination)
     with Image.open(destination) as image:
         width, height, mode = image.width, image.height, image.mode
     atomic_write_json(destination.with_suffix(".artwork.json"), {
         "schema": "zotero-audio-artwork/v1", "design_version": DESIGN_VERSION,
-        "generation": "user-supplied-static", "source": PODCAST_COVER_PATH.name,
+        "generation": "user-supplied-static", "edition": edition, "source": source.name,
         "width": width, "height": height, "mode": mode, "sha256": sha256_file(destination),
     })
     return destination

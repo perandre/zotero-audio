@@ -7,11 +7,12 @@ Quiet editorial modernism: scholarly, tactile, precise, and unmistakably human.
 The covers should feel like a small independent academic press, using strong
 typography, flat ink, and one restrained abstract form.
 
-The canonical `1 More Paper` show and episode artwork is the user-supplied square
-asset at `src/zotero_audio/assets/1_more_paper_cover.png`. Podcast builds copy
-that PNG byte-for-byte to every show and episode cover path and record its hash;
-the deterministic renderer below remains available for legacy non-podcast cover
-requests.
+The canonical `1 More Paper` artwork is supplied as two square assets:
+`src/zotero_audio/assets/1_more_paper_brief_cover.png` for Brief and
+`src/zotero_audio/assets/1_more_paper_full_cover.png` for Full Reading. Podcast
+builds copy the edition-specific PNG byte-for-byte to every matching show and
+episode cover path and record its hash; the deterministic renderer below remains
+available for legacy non-podcast cover requests.
 
 Avoid the visual shorthand of generated technology art: no glossy gradients,
 glowing brains, circuit patterns, floating symbols, fake scientific diagrams,
