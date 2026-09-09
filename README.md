@@ -153,7 +153,9 @@ are intentionally local artifacts. Zotero storage is read-only to the pipeline.
 
 The podcast stage builds two truthful sibling editions from a completed bundle:
 `Brief` contains the authors' abstract and, when short and confidently bounded,
-their conclusion; `Full Reading` contains the complete approved speech plan.
+their conclusion for academic papers. For Zotero `Report` items, it contains a
+bounded publisher executive summary, key findings, or another supported summary.
+`Full Reading` contains the complete approved speech plan.
 Each has its own spoken introduction, closing, M4A, 3000 px cover, VTT and HTML
 transcripts, Markdown companion transcript, chapters, episode record, and stable
 GUID. The two editions never share a mislabeled audio or transcript. Podcast
@@ -235,3 +237,15 @@ recognizable as part of one series.
 
 The detailed policy, metadata contract, routing rationale, and one-time Spotify
 setup are in [the podcast automation plan](docs/podcast-automation-plan.md).
+
+## Industry reports
+
+Use Zotero's `Report` item type for consultancy, analyst, and industry reports,
+with the issuing organisation in `Institution` and the PDF attached. The same
+pipeline then preserves report metadata, identifies report summaries for Briefs,
+and labels introductions and show notes as reports. A report does not need a
+named author when its issuing organisation is supplied.
+
+The `VIKING PhD / Industry Reports` pilot collection contains five reports from
+McKinsey, Deloitte, and BCG. See [the report workflow](docs/industry-reports.md)
+for intake, evidence notes, summary selection, and the pilot sources.

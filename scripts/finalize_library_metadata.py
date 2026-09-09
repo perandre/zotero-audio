@@ -15,7 +15,7 @@ from mutagen.mp4 import MP4
 
 from zotero_audio.audio import inspect_m4a, normalize_mp4_timestamps
 from zotero_audio.util import atomic_write_json, filename_part, load_json, sha256_file
-from zotero_audio.zotero import METADATA_SCHEMA, bundle_metadata_snapshot, zotero_metadata
+from zotero_audio.zotero import METADATA_SCHEMA, bibliographic_metadata, bundle_metadata_snapshot, zotero_metadata
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         technical = inspect_m4a(desired)
         item.update(
             {
+                **bibliographic_metadata(metadata),
                 "title": title,
                 "authors": metadata.get("authors") or [],
                 "publication_year": year,

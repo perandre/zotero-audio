@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from .util import atomic_write_json, atomic_write_text, filename_part, json_digest, sha256_file, sha256_text
 from .zotero import merge_document_metadata
+from .literature import REPORT_SUMMARIES, is_report
 
 
 DEFAULT_ZOTERO_STORAGE = Path.home() / "Zotero" / "storage"
@@ -22,7 +23,7 @@ SEMANTIC_HEADINGS = {
     "materials and methods", "methods", "methodology", "results", "findings",
     "discussion", "limitations", "conclusion", "conclusions", "data availability",
     "acknowledgments", "acknowledgements",
-} | REFERENCE_HEADINGS
+} | REFERENCE_HEADINGS | set(REPORT_SUMMARIES) | {"contents", "table of contents", "about this report", "recommendations", "appendix", "appendices", "endnotes"}
 YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 NUMBERED_HEADING_RE = re.compile(r"^(\d+(?:\.\d+){0,5})[.)]\s+(.+)$")
 REFERENCE_ENTRY_RE = re.compile(r"^\d+[.]\s+[A-ZÀ-ÖØ-Þ][.]\s+")
@@ -177,6 +178,9 @@ def _paragraphs(text: str, omitted_edges: set[str]) -> tuple[list[str], list[dic
 
 
 def _heading_level(text: str) -> int | None:
+    marked = re.match(r"^(#{2,6})\s+", text)
+    if marked:
+        return len(marked.group(1))
     lowered = text.casefold().rstrip(":")
     if lowered in SEMANTIC_HEADINGS:
         return 2
@@ -311,7 +315,8 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
     raw_pages: list[str] = []
     extraction_errors: list[dict[str, Any]] = []
     from .layout import extract_layout
-    raw_pages, layout_records = extract_layout(pdf)
+    report = is_report(metadata or {})
+    raw_pages, layout_records = extract_layout(pdf, report=report)
     engine, engine_version = "pymupdf4llm-layout-original-spans", _package_version("pymupdf4llm")
     for page_number, records in enumerate(layout_records, 1):
         if records[-1]["raw_text"]:
@@ -351,7 +356,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
             break
 
     edge_keys = _running_edge_keys(raw_pages)
-    inferred_abstract, abstract_source = _infer_abstract(raw_pages[0])
+    inferred_abstract, abstract_source = (None, None) if report else _infer_abstract(raw_pages[0])
     processed_pages = list(raw_pages)
     if inferred_abstract:
         processed_pages[0] = _front_matter_replaced_with_abstract(
@@ -371,11 +376,18 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
             block_id = f"p{page_number:04d}-b{index:04d}"
             lowered = text.casefold().rstrip(":")
             heading_level = _heading_level(text)
+            if report and NUMBERED_HEADING_RE.match(text):
+                # Numbered key findings are prose unless the layout classifier
+                # marked them as headings (with an explicit Markdown prefix).
+                heading_level = None
+            if heading_level:
+                text = re.sub(r"^#{2,6}\s+", "", text)
+                lowered = text.casefold().rstrip(":")
             included = True
             omission_reason = None
             if heading_level:
                 suppress_until_heading = False
-            if lowered in REFERENCE_HEADINGS or REFERENCE_ENTRY_RE.match(text):
+            if lowered in REFERENCE_HEADINGS or (report and lowered == "endnotes") or REFERENCE_ENTRY_RE.match(text):
                 references_started = True
             if references_started and not include_references:
                 included = False
@@ -390,6 +402,9 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
             elif suppress_remainder:
                 included = False
                 omission_reason = "duplicate-editorial-front-matter"
+            elif report and re.fullmatch(r"\d{1,4}", text):
+                included = False
+                omission_reason = "standalone-page-or-chapter-number"
             elif re.match(r"(?i)^(?:table|fig(?:ure)?)\s*\d+[.:]", text):
                 included = False
                 omission_reason = "table-or-figure-caption"
@@ -483,7 +498,7 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
         "extraction": {
             "engine": engine,
             "engine_version": engine_version,
-            "algorithm": "layout-original-spans-v4",
+            "algorithm": "layout-original-spans-report-v1" if report else "layout-original-spans-v4",
             "include_references": include_references,
             "errors": extraction_errors,
         },
@@ -508,6 +523,8 @@ def render_markdown(structure: dict[str, Any]) -> str:
         f"journal: {json.dumps(document.get('journal'), ensure_ascii=False)}",
         f"publisher: {json.dumps(document.get('publisher'), ensure_ascii=False)}",
         f"university: {json.dumps(document.get('university'), ensure_ascii=False)}",
+        *[f"{key}: {json.dumps(document.get(key), ensure_ascii=False)}" for key in
+          ("item_type", "literature_type", "institution", "report_type", "report_number", "series_title", "evidence")],
         f"doi: {json.dumps(document.get('doi'), ensure_ascii=False)}",
         f"url: {json.dumps(document.get('url'), ensure_ascii=False)}",
         f"rights: {json.dumps(document.get('rights'), ensure_ascii=False)}",

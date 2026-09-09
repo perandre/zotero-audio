@@ -29,6 +29,9 @@ def _prepare_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--include-references", action="store_true")
     parser.add_argument("--max-chars", type=int, default=900)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--literature-type", choices=("academic", "report"),
+                        help="Override literature type; Zotero Report items are detected automatically")
+    parser.add_argument("--metadata-json", type=Path, help="Bibliographic metadata for a local PDF")
 
 
 def _synthesis_arguments(parser: argparse.ArgumentParser) -> None:
@@ -75,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument("--edition", choices=("brief", "full"), default="brief")
     info.add_argument("--journal")
     info.add_argument("--university")
+    info.add_argument("--literature-type", choices=("academic", "report"), default="academic")
+    info.add_argument("--institution")
     build = podcast_sub.add_parser("build", aliases=["rebuild"], help="Build either or both podcast editions; rebuild re-extracts the PDF")
     build.add_argument("bundle", type=Path)
     build.add_argument("--config", type=Path, help="TOML config; see podcast.example.toml")
@@ -124,6 +129,10 @@ def _prepare(args: argparse.Namespace) -> tuple[Path, bool]:
     metadata = None
     if args.zotero_key and args.zotero_db.expanduser().is_file():
         metadata = zotero_metadata(args.zotero_db, args.zotero_key)
+    if args.metadata_json:
+        metadata = {**(metadata or {}), **load_json(args.metadata_json)}
+    if args.literature_type:
+        metadata = {**(metadata or {}), "literature_type": args.literature_type}
     bundle, _, _, reused = prepare_bundle(
         pdf,
         zotero_key=args.zotero_key,
@@ -158,9 +167,11 @@ def main(argv: list[str] | None = None) -> int:
             print(output)
             return 0
         if args.command == "podcast" and args.podcast_command == "info":
-            print(episode_title(args.title, args.author, args.year))
+            print(episode_title(args.title, args.author, args.year,
+                                institution=args.institution if args.literature_type == "report" else None))
             print(build_intro(args.edition, args.title, args.author, journal=args.journal,
-                              university=args.university, year=args.year))
+                              university=args.university, year=args.year,
+                              literature_type=args.literature_type, institution=args.institution))
             return 0
         if args.command == "podcast" and args.podcast_command in {"build", "rebuild"}:
             license_record = load_json(args.license_json) if args.license_json else None

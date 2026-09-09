@@ -30,6 +30,7 @@ from .audio import (
 )
 from .segment import chunk_text, create_speech_plan
 from .branding import PODCAST_NAME
+from .literature import EVIDENCE_FIELDS, brief_blocks, brief_sections, extract_report_brief, is_report, report_organisation
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import (
     license_record_from_metadata,
@@ -249,9 +250,11 @@ def _surname(name: str) -> str:
     return parts[-1] if parts else ""
 
 
-def episode_title(title: str, authors: Iterable[str] = (), year: str | int | None = None) -> str:
+def episode_title(title: str, authors: Iterable[str] = (), year: str | int | None = None, *, institution: str | None = None) -> str:
     names = [_surname(str(author)) for author in authors if str(author).strip()]
     label = names[0] if len(names) == 1 else f"{names[0]} & {names[1]}" if len(names) == 2 else f"{names[0]} et al." if names else ""
+    if institution:
+        label = institution.strip()
     suffix = " ".join(part for part in (label, f"({str(year).strip()})" if year else "") if part)
     return f"{title.strip()} — {suffix}" if suffix else title.strip()
 
@@ -303,9 +306,28 @@ def _date_preposition(value: str) -> str:
 
 def build_intro(edition: str, title: str, authors: Iterable[str], *, journal: str | None = None,
                 university: str | None = None, publication_date: str | None = None,
-                year: str | int | None = None) -> str:
+                year: str | int | None = None, literature_type: str = "academic",
+                institution: str | None = None, publisher: str | None = None,
+                series_title: str | None = None, report_number: str | None = None) -> str:
     if edition not in EDITIONS:
         raise ValueError(f"unknown edition: {edition}")
+    if literature_type == "report":
+        names = [str(author).strip() for author in authors if str(author).strip()]
+        kind = "a brief of the report" if edition == EDITION_BRIEF else "the report"
+        attribution = f", by {spoken_authors(names)}" if names else ""
+        parts = [f'You’re listening to {kind} “{title.strip()}”{attribution}.']
+        organisation = str(institution or publisher or "").strip()
+        date_value = str(publication_date or year or "").strip()
+        publication = f"Issued by {organisation}" if organisation else "Published"
+        if date_value:
+            publication += f" {_date_preposition(date_value)} {_spoken_date(date_value)}"
+        if organisation or date_value:
+            parts.append(publication + ".")
+        if series_title:
+            parts.append(f"Report series: {series_title}.")
+        if report_number:
+            parts.append(f"Report number: {report_number}.")
+        return " ".join(parts)
     kind = "a brief of " if edition == EDITION_BRIEF else ""
     affiliation = f", from {university.strip()}" if university and university.strip() else ""
     parts = [f'You’re listening to {kind}“{title.strip()},” by {spoken_authors(authors)}{affiliation}.']
@@ -320,6 +342,8 @@ def build_intro(edition: str, title: str, authors: Iterable[str], *, journal: st
 
 def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict[str, Any]:
     structure_document = structure.get("document", {})
+    if is_report(structure_document):
+        return extract_report_brief(structure, max_seconds)
     metadata_abstract = str(structure_document.get("abstract") or structure_document.get("metadata", {}).get("abstract", "")).strip()
     structured_abstract: list[dict[str, Any]] = []
     in_abstract = False
@@ -498,8 +522,8 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
             brief = extract_brief({**structure, "document": merge_document_metadata(
                 source_plan.get("document", {}), metadata)})
             brief_pages = {
-                int(block.get("pdf_page", 1)) for block in (*brief.get("abstract", []), *brief.get("conclusion", []))
-                if str(block.get("pdf_page", "")).isdigit()
+                int(page) for block in brief_blocks(brief)
+                for page in block.get("pdf_pages", [block.get("pdf_page")]) if str(page).isdigit()
             }
             extraction_errors = structure["extraction"]["errors"]
             if any(not error.get("pdf_page") or int(error["pdf_page"]) in brief_pages
@@ -507,10 +531,10 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
                 errors.append("unresolved-pdf-extraction-errors")
         else:
             errors.append("unresolved-pdf-extraction-errors")
-    document = merge_document_metadata(source_plan.get("document", {}), metadata)
+    document = merge_document_metadata({**structure.get("document", {}), **source_plan.get("document", {})}, metadata)
     if not str(document.get("title", "")).strip():
         errors.append("missing-title")
-    if not _authors(document, metadata):
+    if not _authors(document, metadata) and not (is_report(document) and report_organisation(document)):
         errors.append("missing-authors")
     language = str(metadata.get("language") or metadata.get("bibliographic_language") or "en").casefold()
     if language.startswith(("nb", "nn", "no")):
@@ -524,13 +548,26 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
     if edition != EDITION_BRIEF and len(meaningful) < 2:
         errors.append("page-flat-or-missing-section-structure")
     if edition == EDITION_BRIEF:
-        spoken = "\n".join(str(block.get("text", "")) for block in (
-            *brief.get("abstract", []), *brief.get("conclusion", [])))
+        spoken = "\n".join(str(block.get("text", "")) for block in brief_blocks(brief))
     else:
         spoken = "\n".join(str(segment.get("text", "")) for segment in source_plan.get("segments", [])[1:])
     if sanitize_spoken_artifacts:
         raw_spoken = spoken
-        clean_segments = [sanitize_spoken_text(line)[0] for line in spoken.splitlines()]
+        if edition == EDITION_BRIEF:
+            clean_segments = [
+                sanitize_spoken_text(
+                    str(block.get("text", "")),
+                    section=block.get("section") or block.get("heading"),
+                )[0]
+                for block in brief_blocks(brief)
+            ]
+        else:
+            clean_segments = [
+                sanitize_spoken_text(
+                    str(segment.get("text", "")), section=segment.get("section")
+                )[0]
+                for segment in source_plan.get("segments", [])[1:]
+            ]
         spoken = "\n".join(clean_segments)
         if spoken != raw_spoken:
             warnings.append("spoken-artifact-cleanup-applied")
@@ -549,7 +586,9 @@ def content_quality_gate(structure: dict[str, Any], source_plan: dict[str, Any],
     if any(heading.casefold().rstrip(".:") in {"references", "bibliography", "works cited"} for heading in headings):
         errors.append("reference-section-in-spoken-plan")
     if not brief["available"]:
-        warnings.append("brief-unavailable-no-confident-abstract")
+        warnings.append(brief["reason"] if is_report(document) else "brief-unavailable-no-confident-abstract")
+        if edition == EDITION_BRIEF:
+            errors.append(brief["reason"])
     return {"schema": "zotero-audio-content-qa/v1", "status": "pass" if not errors else "needs_review",
             "errors": errors, "warnings": warnings, "heading_count": len(meaningful)}
 
@@ -648,13 +687,16 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
     authors, title = _authors(document, metadata), str(document.get("title") or "Untitled paper")
     brief = extract_brief(structure)
     if edition == EDITION_BRIEF and not brief["available"]:
-        raise RuntimeError("Brief unavailable: no confidently bounded author abstract")
+        raise RuntimeError(f"Brief unavailable: {brief['reason']}")
     publication_date = document.get("publication_date")
     if str(publication_date or "").strip() == str(document.get("publication_year") or "").strip():
         publication_date = None
     intro = build_intro(edition, title, authors, journal=document.get("journal") or document.get("publication_title"),
                         university=document.get("university"), publication_date=publication_date,
-                        year=document.get("publication_year"))
+                        year=document.get("publication_year"),
+                        literature_type="report" if is_report(document) else "academic",
+                        institution=document.get("institution"), publisher=document.get("publisher"),
+                        series_title=document.get("series_title"), report_number=document.get("report_number"))
     segments: list[dict[str, Any]] = []
     def append(text: str, kind: str, section: str, ids: list[str] | None = None, pages: list[int] | None = None,
                pause: int = 240, transformations: list[str] | None = None) -> None:
@@ -672,7 +714,8 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
             segments.append({**original, "ordinal": len(segments) + 1, "section": original.get("section") or title,
                              "transformations": list(original.get("transformations", [])), "narrator_text": False})
     else:
-        for heading, blocks in (("Abstract", brief["abstract"]), ("Authors’ conclusion", brief["conclusion"])):
+        for section in brief_sections(brief):
+            heading, blocks = section["heading"], section["blocks"]
             if not blocks:
                 continue
             append(heading + ".", "heading", heading, pause=500)
@@ -681,8 +724,9 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                     str(block.get("text", "")), section=heading
                 )
                 if spoken_text:
-                    append(spoken_text, "body", heading,
-                           [str(block["id"])] if block.get("id") else [], [int(block.get("pdf_page", 1))],
+                    append(spoken_text, "heading" if block.get("type") == "heading" else "body", heading,
+                           block.get("source_block_ids") or ([str(block["id"])] if block.get("id") else []),
+                           [int(page) for page in block.get("pdf_pages", [block.get("pdf_page", 1)])],
                            transformations=transformations)
     if edition == EDITION_FULL:
         sanitized_segments: list[dict[str, Any]] = []
@@ -778,18 +822,32 @@ def _episode_guid(source_sha: str, key: str, edition: str) -> str:
 
 
 def _show_notes(document: dict[str, Any], authors: list[str], edition: str, license_result: dict[str, Any]) -> str:
-    lines = [str(document.get("abstract") or document.get("metadata", {}).get("abstract") or f"A {edition} audio edition of this paper."),
+    noun = "report" if is_report(document) else "paper"
+    lines = [str(document.get("abstract") or document.get("metadata", {}).get("abstract") or f"A {edition} audio edition of this {noun}."),
              "", f"Authors: {', '.join(authors) if authors else 'Not supplied'}"]
+    if is_report(document):
+        lines.append("Literature type: Report")
+        if report_organisation(document):
+            lines.append(f"Issuing organisation: {report_organisation(document)}")
+        for key, label in (("report_type", "Report type"), ("series_title", "Report series"), ("report_number", "Report number")):
+            if document.get(key):
+                lines.append(f"{label}: {document[key]}")
+        evidence = document.get("evidence") or {}
+        for key, label in EVIDENCE_FIELDS.items():
+            if evidence.get(key):
+                lines.append(f"{label}: {evidence[key]}")
+        if not evidence.get("peer_review"):
+            lines.append("Peer review: Not stated in supplied metadata")
     journal = document.get("journal") or document.get("publication_title")
     if journal: lines.append(f"Published in: {journal}")
     if document.get("university"): lines.append(f"Institution: {document['university']}")
     if document.get("publication_date") or document.get("publication_year"):
         lines.append(f"Publication date: {document.get('publication_date') or document.get('publication_year')}")
     if license_result.get("allowed"):
-        lines.extend((f"Read the paper: {license_result['read_url']}",
+        lines.extend((f"Read the {noun}: {license_result['read_url']}",
                       f"Source license: {license_result['name']} — {license_result['license_url']}"))
     elif document.get("url") or document.get("doi"):
-        lines.append(f"Read the paper: {document.get('url') or 'https://doi.org/' + str(document['doi'])}")
+        lines.append(f"Read the {noun}: {document.get('url') or 'https://doi.org/' + str(document['doi'])}")
     lines.extend(("", "The authors and publisher do not sponsor or endorse this recording."))
     return "\n".join(lines)
 
@@ -1137,7 +1195,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     edition_names = [EDITION_FULL] + ([EDITION_BRIEF] if brief["available"] else [])
     if edition != "both":
         if edition not in edition_names:
-            raise RuntimeError("Requested brief has no confidently bounded abstract")
+            raise RuntimeError(f"Requested brief unavailable: {brief['reason']}")
         edition_names = [edition]
     planned_state = publication_state(selected=selected, private_ready=content_qa["status"] == "pass",
                                       license_record=license_record, source_sha256=source_sha)
@@ -1156,7 +1214,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         return response
     if config.dry_run:
         for edition in edition_names:
-            response["editions"][edition] = {"status": "planned", "title": episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"))}
+            response["editions"][edition] = {"status": "planned", "title": episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"),
+                institution=report_organisation(document) if is_report(document) else None)}
         return response
     if backend is None: raise RuntimeError("a local speech backend is required to render edition introductions")
     private_records = {}
@@ -1193,7 +1252,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         final_loudness = qa.get("checks", {}).get("loudness", {})
         if not loudness_pass(final_loudness): raise RuntimeError(f"{edition} failed the podcast loudness gate")
         if cues[-1]["end"] > qa["checks"]["m4a_duration_seconds"] + 0.25: raise RuntimeError(f"{edition} transcript exceeds encoded audio duration")
-        title = episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"))
+        title = episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"),
+                              institution=report_organisation(document) if is_report(document) else None)
         private_dir = config.private_root / ("Briefs" if edition == EDITION_BRIEF else "Full Readings") / year
         safe = re.sub(r"[^\w .()\[\]—&-]+", "_", title, flags=re.UNICODE).strip(" .")[:190]
         target_audio = private_dir / f"{safe} - {'Brief' if edition == EDITION_BRIEF else 'Full Reading'} [{zotero_key}].m4a"; artifact_dir = target_audio.with_suffix(""); artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1203,6 +1263,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         build_transcript(cues, transcript); build_transcript_html(cues, title, transcript_html, attribution=", ".join(authors)); chapter_json(chapters, chapters_path)
         atomic_write_text(markdown, build_markdown_transcript(plan, title))
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,
+                  "brief_contents": plan.get("brief_contents"),
+                  **{key: document.get(key) for key in ("literature_type", "item_type", "institution", "report_type", "report_number", "series_title", "evidence")},
                   "paper_title": str(document.get("title", bundle.name)), "authors": authors, "author_label": spoken_authors(authors),
                   "publication_year": document.get("publication_year"), "duration": float(qa["checks"]["m4a_duration_seconds"]),
                   "voice": voice,

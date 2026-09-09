@@ -9,13 +9,15 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, TypeVar
 
 from .util import json_digest, load_json
+from .literature import evidence_from_extra
 
 
 DEFAULT_ZOTERO_DB = Path.home() / "Zotero" / "zotero.sqlite"
-METADATA_SCHEMA = 4
+METADATA_SCHEMA = 5
 T = TypeVar("T")
 
 BIBLIOGRAPHIC_FIELDS = (
+    "item_type", "literature_type", "institution", "report_type", "report_number", "series_title", "evidence",
     "parent_key",
     "title",
     "publication_year",
@@ -71,17 +73,18 @@ def normalize_publication_date(value: Any) -> Any:
 def _query_metadata(connection: sqlite3.Connection, attachment_key: str) -> dict[str, Any] | None:
     row = connection.execute(
         """
-        SELECT ia.parentItemID, parent.key
+        SELECT ia.parentItemID, parent.key, item_type.typeName
         FROM items attachment
         JOIN itemAttachments ia ON ia.itemID = attachment.itemID
         LEFT JOIN items parent ON parent.itemID = ia.parentItemID
+        LEFT JOIN itemTypes item_type ON item_type.itemTypeID = parent.itemTypeID
         WHERE attachment.key = ?
         """,
         (attachment_key,),
     ).fetchone()
     if not row or row[0] is None:
         return None
-    parent_id, parent_key = row
+    parent_id, parent_key, item_type = row
     fields = dict(
         connection.execute(
             """
@@ -91,7 +94,8 @@ def _query_metadata(connection: sqlite3.Connection, attachment_key: str) -> dict
             JOIN itemDataValues v ON v.valueID = d.valueID
             WHERE d.itemID = ? AND f.fieldName IN (
                 'title', 'date', 'publicationTitle', 'proceedingsTitle', 'publisher',
-                'university', 'DOI', 'url', 'rights', 'abstractNote', 'language', 'extra'
+                'university', 'DOI', 'url', 'rights', 'abstractNote', 'language', 'extra',
+                'institution', 'reportType', 'reportNumber', 'seriesTitle'
             )
             """,
             (parent_id,),
@@ -140,6 +144,13 @@ def _query_metadata(connection: sqlite3.Connection, attachment_key: str) -> dict
     iso_date = re.search(r"\b(?:19|20)\d{2}-\d{1,2}-\d{1,2}\b", raw_date or "")
     publication_date = normalize_publication_date(iso_date.group(0) if iso_date else raw_date)
     return {
+        "item_type": item_type,
+        "literature_type": "report" if item_type == "report" else "academic",
+        "institution": fields.get("institution"),
+        "report_type": fields.get("reportType"),
+        "report_number": fields.get("reportNumber"),
+        "series_title": fields.get("seriesTitle"),
+        "evidence": evidence_from_extra(fields.get("extra", "")),
         "parent_key": parent_key,
         "title": fields.get("title"),
         "publication_year": year_match.group(0) if year_match else None,
@@ -219,6 +230,7 @@ def merge_document_metadata(document: dict[str, Any], metadata: dict[str, Any] |
     result = dict(document)
     clean = bibliographic_metadata(metadata)
     for key in (
+        "item_type", "literature_type", "institution", "report_type", "report_number", "series_title", "evidence",
         "title", "publication_year", "publication_date", "authors", "journal", "publisher",
         "university", "doi", "url", "rights", "abstract", "language",
     ):

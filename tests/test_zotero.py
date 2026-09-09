@@ -16,7 +16,9 @@ def _database(path: Path) -> None:
     connection = sqlite3.connect(path)
     connection.executescript(
         """
-        CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT);
+        CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER);
+        CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
+        INSERT INTO itemTypes VALUES (1, 'attachment'), (2, 'journalArticle'), (3, 'report');
         CREATE TABLE itemAttachments (itemID INTEGER, parentItemID INTEGER);
         CREATE TABLE fields (fieldID INTEGER PRIMARY KEY, fieldName TEXT);
         CREATE TABLE itemDataValues (valueID INTEGER PRIMARY KEY, value TEXT);
@@ -28,7 +30,7 @@ def _database(path: Path) -> None:
         CREATE TABLE itemTags (itemID INTEGER, tagID INTEGER);
         CREATE TABLE collections (collectionID INTEGER PRIMARY KEY, parentCollectionID INTEGER, collectionName TEXT);
         CREATE TABLE collectionItems (collectionID INTEGER, itemID INTEGER);
-        INSERT INTO items VALUES (1, 'ATTACH01'), (2, 'PARENT01');
+        INSERT INTO items VALUES (1, 'ATTACH01', 1), (2, 'PARENT01', 2);
         INSERT INTO itemAttachments VALUES (1, 2);
         INSERT INTO fields VALUES (1, 'title'), (2, 'date'), (3, 'DOI'), (4, 'rights'), (5, 'abstractNote');
         INSERT INTO itemDataValues VALUES
@@ -66,6 +68,30 @@ def test_partial_publication_dates_keep_known_precision_without_fake_day():
     assert normalize_publication_date("2026-02-00") == "2026-02"
     assert normalize_publication_date("2026-00-00") == "2026"
     assert normalize_publication_date("2026-04-05") == "2026-04-05"
+
+
+def test_report_metadata_preserves_type_issuer_series_and_evidence(tmp_path: Path):
+    database = tmp_path / "zotero.sqlite"
+    _database(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE items SET itemTypeID = 3 WHERE itemID = 2")
+        for number, (field, value) in enumerate([
+            ("institution", "Example Institute"), ("seriesTitle", "AI Outlook"),
+            ("reportType", "Industry report"), ("reportNumber", "42"),
+            ("extra", "Evidence methodology: Survey\nEvidence sample: 200 executives\nPeer review: Not stated"),
+        ], 6):
+            connection.execute("INSERT INTO fields VALUES (?, ?)", (number, field))
+            connection.execute("INSERT INTO itemDataValues VALUES (?, ?)", (number, value))
+            connection.execute("INSERT INTO itemData VALUES (2, ?, ?)", (number, number))
+    metadata = zotero_metadata(database, "ATTACH01")
+    assert metadata["literature_type"] == metadata["item_type"] == "report"
+    assert metadata["institution"] == "Example Institute"
+    assert metadata["report_type"] == "Industry report"
+    assert metadata["evidence"]["sample"] == "200 executives"
+    snapshot = bundle_metadata_snapshot(metadata, attachment_key="ATTACH01", source_sha256="a" * 64)
+    document = merge_document_metadata({}, snapshot)
+    assert document["report_number"] == "42" and document["series_title"] == "AI Outlook"
+    assert document["evidence"]["methodology"] == "Survey"
 
 
 def test_bundle_snapshot_is_auto_discovered_and_builds_license_record(tmp_path: Path):
