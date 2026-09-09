@@ -159,10 +159,12 @@ transcripts, Markdown companion transcript, chapters, episode record, and stable
 GUID. The two editions never share a mislabeled audio or transcript. Podcast
 voices are fixed by edition: `Brief` uses `af_heart`, while `Full Reading` uses
 `am_michael`.
-Newly assembled episodes begin with the short CC0 `bells_1` sound from
-[Freesound](https://freesound.org/people/LSpec/sounds/867760/) immediately
-before the spoken introduction. Transcript cues and chapters begin after the
-sound so they remain aligned with the narration.
+Newly assembled episodes begin with the short `typing_sound_01` effect by
+Soul_Serenity_Sounds from [Pixabay](https://pixabay.com/no/sound-effects/typing-sound-01-229863/)
+under the [Pixabay Content License](https://pixabay.com/service/license-summary/),
+immediately before the spoken introduction. Transcript cues and chapters begin
+after the sound so they remain aligned with the narration. Previously assembled
+episodes retain the opening sound that was used when they were built.
 
 Copy [podcast.example.toml](podcast.example.toml) outside the repository and
 fill in the private iCloud root, runtime state root, public mirror, HTTPS base

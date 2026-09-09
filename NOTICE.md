@@ -17,8 +17,12 @@ Markdown, model weight, or generated audio is copied into this repository.
 
 ## Episode opening sound
 
-`src/zotero_audio/assets/bells_1.mp3` is the `bells_1` sound by LSpec,
-downloaded from [Freesound](https://freesound.org/people/LSpec/sounds/867760/)
-under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).
+`src/zotero_audio/assets/typing_sound_01.mp3` is the `Typing Sound 01` effect
+by Soul_Serenity_Sounds, supplied from [Pixabay](https://pixabay.com/no/sound-effects/typing-sound-01-229863/)
+under the [Pixabay Content License](https://pixabay.com/service/license-summary/).
 The source asset is tracked by SHA-256 in `zotero_audio.audio` so generated
 episodes retain a verifiable effect provenance record.
+
+Previously assembled episodes may contain `src/zotero_audio/assets/bells_1.mp3`,
+the `bells_1` sound by LSpec from [Freesound](https://freesound.org/people/LSpec/sounds/867760/)
+under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/).

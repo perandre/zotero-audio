@@ -46,10 +46,10 @@ TRUE_PEAK_MAX_DBTP = -1.0
 # and content. Keep enough working headroom so the final encoded file remains
 # below the -1 dBTP delivery ceiling, including on unusually long episodes.
 AAC_WORKING_TRUE_PEAK_DBTP = -3.5
-EPISODE_STINGER_SOURCE_URL = "https://freesound.org/people/LSpec/sounds/867760/"
-EPISODE_STINGER_LICENSE = "CC0 1.0 Universal"
-EPISODE_STINGER_SHA256 = "dbf2f44dbaff2dbb44000a47a494a593ca520d0b311e82008a3e3edef89f7983"
-EPISODE_STINGER_PATH = Path(__file__).resolve().parent / "assets" / "bells_1.mp3"
+EPISODE_STINGER_SOURCE_URL = "https://pixabay.com/no/sound-effects/typing-sound-01-229863/"
+EPISODE_STINGER_LICENSE = "Pixabay Content License"
+EPISODE_STINGER_SHA256 = "abb4b2841711fb3fdfc4670b4775835e75a47b1abb36ef93e92ee01852b16607"
+EPISODE_STINGER_PATH = Path(__file__).resolve().parent / "assets" / "typing_sound_01.mp3"
 
 
 def loudness_is_competitive(integrated_lufs: float, true_peak_dbtp: float, clipped_samples: bool = False) -> bool:
@@ -68,7 +68,7 @@ def episode_stinger_metadata() -> dict[str, Any]:
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError(f"Episode stinger has invalid duration: {EPISODE_STINGER_PATH}")
     return {
-        "name": "bells_1",
+        "name": "typing_sound_01",
         "source_url": EPISODE_STINGER_SOURCE_URL,
         "license": EPISODE_STINGER_LICENSE,
         "sha256": sha256,
