@@ -156,7 +156,9 @@ The podcast stage builds two truthful sibling editions from a completed bundle:
 their conclusion; `Full Reading` contains the complete approved speech plan.
 Each has its own spoken introduction, closing, M4A, 3000 px cover, VTT and HTML
 transcripts, Markdown companion transcript, chapters, episode record, and stable
-GUID. The two editions never share a mislabeled audio or transcript.
+GUID. The two editions never share a mislabeled audio or transcript. Podcast
+voices are fixed by edition: `Brief` uses `af_heart`, while `Full Reading` uses
+`am_michael`.
 Newly assembled episodes begin with the short CC0 `bells_1` sound from
 [Freesound](https://freesound.org/people/LSpec/sounds/867760/) immediately
 before the spoken introduction. Transcript cues and chapters begin after the

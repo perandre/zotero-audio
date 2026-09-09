@@ -122,10 +122,10 @@ should be silent.
 
 Generate two related listening editions from one source record:
 
-| Edition | Contents | Typical role |
-| --- | --- | --- |
-| **Brief** | Spoken identification, author-provided abstract, optionally the authors' conclusion when it is confidently detected and the total remains concise, then the closing attribution | Discovery and everyday listening |
-| **Full Reading** | Spoken identification followed by the verified main-text listening copy, with parenthetical citation clusters and references omitted, narrative attribution retained, and visual material handled explicitly, then the closing attribution | Deep listening and archival access |
+| Edition | Contents | Voice | Typical role |
+| --- | --- | --- | --- |
+| **Brief** | Spoken identification, author-provided abstract, optionally the authors' conclusion when it is confidently detected and the total remains concise, then the closing attribution | `af_heart` | Discovery and everyday listening |
+| **Full Reading** | Spoken identification followed by the verified main-text listening copy, with parenthetical citation clusters and references omitted, narrative attribution retained, and visual material handled explicitly, then the closing attribution | `am_michael` | Deep listening and archival access |
 
 Call the short version `Brief`, `Abstract Edition`, or another explicit name;
 do not call it a summary unless a summarization model actually produced it.

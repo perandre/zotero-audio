@@ -40,6 +40,10 @@ from .zotero import (
 EDITION_BRIEF = "brief"
 EDITION_FULL = "full"
 EDITIONS = (EDITION_BRIEF, EDITION_FULL)
+EDITION_VOICES = {
+    EDITION_BRIEF: "af_heart",
+    EDITION_FULL: "am_michael",
+}
 TRUE_PEAK_CEILING_DBTP = -1.0
 ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
 PODCAST_NS = "https://podcastindex.org/namespace/1.0"
@@ -641,6 +645,19 @@ def _seed_source_audio(source_bundle: Path, target_bundle: Path, plan: dict[str,
                           "synthesis_config_sha256": config_digest, "status": "in_progress", "segments": seeded})
 
 
+def _configure_backend_for_edition(backend: SpeechBackend, edition: str) -> str:
+    """Apply the fixed podcast voice policy before rendering an edition."""
+    voice = EDITION_VOICES[edition]
+    configure = getattr(backend, "configure", None)
+    if not callable(configure):
+        raise RuntimeError("Podcast backend must support edition-specific voice configuration")
+    config = backend.config
+    configure(voice=voice, speed=float(config.get("speed", 1.0)), language="a")
+    if backend.config.get("voice") != voice:
+        raise RuntimeError(f"Podcast backend did not apply voice {voice} for {edition}")
+    return voice
+
+
 def _timing(plan: dict[str, Any], manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
     records = {int(record["ordinal"]): record for record in manifest.get("segments", [])}; cues, chapters = [], []; cursor = episode_stinger_duration(); last = None
     for segment in plan["segments"]:
@@ -1049,6 +1066,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
     if backend is None: raise RuntimeError("a local speech backend is required to render edition introductions")
     private_records = {}
     for edition in edition_names:
+        voice = _configure_backend_for_edition(backend, edition)
         stage = config.state_root / "documents" / paper_guid / source_sha / edition
         plan = create_edition_plan(source_plan, structure, edition, metadata=metadata, license_result=license_result,
                                    public=bool(license_result.get("allowed")), max_chars=narration_max_chars)
@@ -1092,6 +1110,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,
                   "paper_title": str(document.get("title", bundle.name)), "authors": authors, "author_label": spoken_authors(authors),
                   "publication_year": document.get("publication_year"), "duration": float(qa["checks"]["m4a_duration_seconds"]),
+                  "voice": voice,
                   "audio": str(target_audio), "cover": str(cover), "transcript": str(transcript),
                   "transcript_html": str(transcript_html), "chapters": str(chapters_path), "markdown": str(markdown),
                   "show_notes": _show_notes(document, authors, edition, license_result),

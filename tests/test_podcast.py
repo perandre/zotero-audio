@@ -22,6 +22,7 @@ from zotero_audio.podcast import (
     content_quality_gate,
     create_edition_plan,
     episode_title,
+    EDITION_VOICES,
     extract_brief,
     health_check,
     load_podcast_config,
@@ -310,7 +311,13 @@ def _bundle(tmp_path: Path) -> Path:
 
 
 class Backend:
-    config = {"engine": "fake"}
+    def __init__(self):
+        self.config = {"engine": "fake", "voice": "initial", "speed": 1.0, "language": "a"}
+        self.configured_voices = []
+
+    def configure(self, *, voice, speed, language):
+        self.configured_voices.append(voice)
+        self.config.update({"voice": voice, "speed": speed, "language": language})
 
     def synthesize(self, text, destination):  # pragma: no cover - orchestration stubs synthesis below
         raise AssertionError("unexpected direct synthesis")
@@ -351,6 +358,17 @@ def test_dry_run_writes_nothing(tmp_path: Path):
     result = build_local_podcast(_bundle(tmp_path), tmp_path / "private")
     assert result["dry_run"] and set(result["editions"]) == {"brief", "full"}
     assert not (tmp_path / "private").exists()
+
+
+def test_podcast_build_uses_fixed_edition_voices(tmp_path: Path, monkeypatch):
+    _stub_media(monkeypatch)
+    backend = Backend()
+    result = build_local_podcast(_bundle(tmp_path), tmp_path / "private", backend=backend,
+                                 dry_run=False, edition="both")
+    assert EDITION_VOICES == {"brief": "af_heart", "full": "am_michael"}
+    assert set(backend.configured_voices) == {"af_heart", "am_michael"}
+    assert result["editions"]["brief"]["voice"] == "af_heart"
+    assert result["editions"]["full"]["voice"] == "am_michael"
 
 
 @pytest.mark.parametrize("edition", ["brief", "full"])

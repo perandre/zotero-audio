@@ -312,6 +312,9 @@ class KokoroBackend:
             "determinism": "byte-stable in the project benchmark on this machine",
         }
 
+    def configure(self, *, voice: str, speed: float, language: str) -> None:
+        self.config.update({"voice": voice, "speed": speed, "language": language})
+
     def synthesize(self, text: str, destination: Path) -> dict[str, Any]:
         import numpy as np
 
