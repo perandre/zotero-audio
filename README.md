@@ -199,6 +199,11 @@ a strictly parsed Rights/License line in Extra). An exact allowlisted statement
 embedded in the checksum-bound source PDF is also accepted and recorded as PDF
 evidence. Missing, vague, conflicting, NC, ND, and embargoed rights stay private.
 
+The [Zotero license-status add-on](docs/zotero-license-status.md) maintains an
+automatic **Audio — License blocked** saved search. It applies gate-status tags
+and records license evidence and blocking reasons in Extra for each PDF-backed
+record, while preserving existing Rights and collection membership.
+
 For automatic runs, save the completed file as
 `/Users/pesh/Sites/zotero-audio-runtime/podcast.toml`; the existing launchd job
 auto-detects it. A different location can be supplied by adding these two

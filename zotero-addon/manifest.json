@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "name": "Zotero Audio License Status",
+  "version": "0.1.0",
+  "description": "Keep an automatic saved search of PDFs that do not pass the Zotero Audio license gate.",
+  "applications": {
+    "zotero": {
+      "id": "audio-license-status@zotero-audio.local",
+      "update_url": "https://raw.githubusercontent.com/perandre/zotero-audio/main/zotero-addon/updates.json",
+      "strict_min_version": "9.0",
+      "strict_max_version": "9.0.*"
+    }
+  }
+}

@@ -70,6 +70,18 @@ def normalize_publication_date(value: Any) -> Any:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
+def rights_from_fields(fields: dict[str, Any]) -> str | None:
+    rights = fields.get("rights")
+    if not rights and fields.get("extra"):
+        match = re.search(
+            r"(?im)^\s*(?:license|rights)\s*:\s*"
+            r"(https?://\S+|CC\s*[- ]?BY\s+4\.0|CC0(?:\s+1\.0)?)\s*$",
+            fields["extra"],
+        )
+        rights = match.group(1) if match else None
+    return rights
+
+
 def _query_metadata(connection: sqlite3.Connection, attachment_key: str) -> dict[str, Any] | None:
     row = connection.execute(
         """
@@ -132,14 +144,7 @@ def _query_metadata(connection: sqlite3.Connection, attachment_key: str) -> dict
         (parent_id,),
     ).fetchall()]
     year_match = re.search(r"\b(?:19|20)\d{2}\b", fields.get("date", ""))
-    rights = fields.get("rights")
-    if not rights and fields.get("extra"):
-        match = re.search(
-            r"(?im)^\s*(?:license|rights)\s*:\s*"
-            r"(https?://\S+|CC\s*[- ]?BY\s+4\.0|CC0(?:\s+1\.0)?)\s*$",
-            fields["extra"],
-        )
-        rights = match.group(1) if match else None
+    rights = rights_from_fields(fields)
     raw_date = fields.get("date")
     iso_date = re.search(r"\b(?:19|20)\d{2}-\d{1,2}-\d{1,2}\b", raw_date or "")
     publication_date = normalize_publication_date(iso_date.group(0) if iso_date else raw_date)
