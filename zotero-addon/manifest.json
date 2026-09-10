@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Zotero Audio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Track PDF license status and expose a read-only local API for Zotero feed subscriptions and entries.",
   "applications": {
     "zotero": {

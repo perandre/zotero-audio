@@ -54,6 +54,8 @@ var AudioLicenseStatus = {
   },
 
   async snapshot(item) {
+    // Startup can resolve item identities before their bibliographic fields load.
+    await item.loadAllData();
     const fields = {};
     if (item.isRegularItem()) {
       for (const field of ["rights", "extra", "DOI", "url"]) {

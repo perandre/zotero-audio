@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const status = require("../zotero-addon/license-status.js");
 
 function item(extra = "My original notes.\n", tags = ["podcast", "research"]) {
@@ -53,4 +55,25 @@ test("standalone PDFs receive tags without unsupported Extra fields", async () =
   record.getField = () => { throw new Error("Attachment has no Extra"); };
   await status.applyOutcome(record, blocked);
   assert(record.tags.has("audio:license:blocked"));
+});
+
+test("license snapshots wait for item fields to load at Zotero startup", async () => {
+  let loaded = false;
+  const scope = vm.createContext({ Zotero: { Items: { async getAsync(ids) {
+    assert.deepEqual(ids, []);
+    return [];
+  } } } });
+  vm.runInContext(fs.readFileSync(require.resolve("../zotero-addon/license-status.js"), "utf8"), scope);
+  const snapshot = await scope.AudioLicenseStatus.snapshot({
+    key: "PAPER001",
+    async loadAllData() { await Promise.resolve(); loaded = true; },
+    isRegularItem() { return true; },
+    getField(name) {
+      assert(loaded, "Bibliographic fields must load before they are read");
+      return name === "rights" ? "CC BY 4.0" : "";
+    },
+    getAttachments() { return []; }
+  });
+  assert.equal(snapshot.fields.rights, "CC BY 4.0");
+  assert.equal(snapshot.attachments.length, 0);
 });

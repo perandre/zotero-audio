@@ -27,6 +27,8 @@ Group libraries are outside this add-on's scope.
 Version 0.2.0 also provides the [read-only local feed API](zotero-feed-api.md).
 The plugin ID is unchanged from **Zotero Audio License Status** 0.1.0, so
 installing the new package upgrades the existing plugin.
+Version 0.2.1 waits for bibliographic fields to load before taking license
+snapshots, including during startup.
 
 ## Installation
 
