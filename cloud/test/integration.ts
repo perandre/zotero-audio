@@ -32,6 +32,7 @@ async function parsed(response: Response) {
 }
 let r = await send("/api/library");
 assert.equal(r.status, 401);
+assert.equal(r.headers.get("Referrer-Policy"), "no-referrer");
 r = await send("/mcp");
 assert.equal(r.status, 401);
 assert.match(r.headers.get("WWW-Authenticate") ?? "", /resource_metadata/);
@@ -43,6 +44,26 @@ const authMeta = await parsed(
   await send("/.well-known/oauth-authorization-server"),
 );
 assert.ok(authMeta.code_challenge_methods_supported.includes("S256"));
+r = await send("/login");
+assert.equal(r.status, 200);
+// Check the final response after the Worker wrapper: no-referrer causes real
+// browser form submissions to send Origin: null, unlike the fetches below.
+assert.equal(r.headers.get("Referrer-Policy"), "same-origin");
+assert.match(r.headers.get("Content-Security-Policy") ?? "", /form-action 'self';/);
+for (const origin of [undefined, "null", "https://evil.example"]) {
+  const headers = new Headers({
+    "Content-Type": "application/x-www-form-urlencoded",
+  });
+  if (origin !== undefined) headers.set("Origin", origin);
+  r = await send("/login", {
+    method: "POST",
+    headers,
+    body: new URLSearchParams({ key: secrets.OWNER_ACCESS_KEY }),
+  });
+  assert.equal(r.status, 403);
+  assert.equal(((await r.json()) as any).error.code, "origin_mismatch");
+  assert.equal(r.headers.get("Set-Cookie"), null);
+}
 r = await send("/login", {
   method: "POST",
   headers: {
@@ -237,9 +258,51 @@ async function oauth(scopes: string) {
   const path = "/authorize?" + params;
   const consent = await send(path, { headers: { Cookie: cookie } });
   assert.equal(consent.status, 200, await consent.clone().text());
+  assert.equal(consent.headers.get("Referrer-Policy"), "same-origin");
+  assert.match(
+    consent.headers.get("Content-Security-Policy") ?? "",
+    /form-action 'self' http:\/\/127\.0\.0\.1:3099;/,
+  );
+  const invalidParams = new URLSearchParams(params);
+  invalidParams.set("redirect_uri", "https://evil.example/callback");
+  const invalidRedirect = await send("/authorize?" + invalidParams, {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(invalidRedirect.status, 400);
+  assert.match(
+    invalidRedirect.headers.get("Content-Security-Policy") ?? "",
+    /form-action 'self';/,
+  );
   const html = await consent.text(),
     csrf = html.match(/name="csrf" value="([^"]+)"/)?.[1];
   assert.ok(csrf, "Missing CSRF token");
+  for (const origin of [undefined, "null", "https://evil.example"]) {
+    const headers = new Headers({
+      Cookie: cookie,
+      "Content-Type": "application/x-www-form-urlencoded",
+    });
+    if (origin !== undefined) headers.set("Origin", origin);
+    const rejected = await send(path, {
+      method: "POST",
+      headers,
+      body: new URLSearchParams({ csrf, decision: "allow" }),
+    });
+    assert.equal(rejected.status, 403);
+    assert.equal(((await rejected.json()) as any).error.code, "origin_mismatch");
+    assert.equal(rejected.headers.get("Location"), null);
+  }
+  const badCsrf = await send(path, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: base,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ csrf: "wrong-token", decision: "allow" }),
+  });
+  assert.equal(badCsrf.status, 403);
+  assert.equal(((await badCsrf.json()) as any).error.code, "csrf_failed");
+  assert.equal(badCsrf.headers.get("Location"), null);
   const approval = await send(path, {
     method: "POST",
     headers: {

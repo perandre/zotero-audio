@@ -209,7 +209,8 @@ export default {
       const response = await provider.fetch(request, env, ctx);
       const secured = new Response(response.body, response);
       secured.headers.set("X-Content-Type-Options", "nosniff");
-      secured.headers.set("Referrer-Policy", "no-referrer");
+      if (!secured.headers.has("Referrer-Policy"))
+        secured.headers.set("Referrer-Policy", "no-referrer");
       secured.headers.set("X-Request-ID", requestId);
       if (
         !secured.headers.has("Content-Security-Policy") &&
