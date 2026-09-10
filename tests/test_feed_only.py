@@ -61,3 +61,47 @@ def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path
     assert item.find("{https://podcastindex.org/namespace/1.0}transcript") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}chapters") is None
     assert feed.find("./channel/{http://www.itunes.com/dtds/podcast-1.0.dtd}image") is not None
+
+
+def test_user_authorized_policy_publishes_existing_brief_without_license_claim(tmp_path: Path, monkeypatch):
+    audio = tmp_path / "brief.m4a"
+    audio.write_bytes(b"existing brief audio")
+    source_sha = "b" * 64
+    artifact = tmp_path / "private" / "Briefs" / "paper" / "episode.json"
+    atomic_write_json(artifact, {
+        "edition": "brief",
+        "guid": "brief-guid",
+        "source_sha256": source_sha,
+        "title": "Unresolved Rights Paper",
+        "authors": ["Ada Smith"],
+        "duration": 8.0,
+        "audio": str(audio),
+        "read_url": "https://example.org/paper",
+        "source_license": {"allowed": False, "status": "denied", "reason": "not-allowlisted-or-unverified"},
+    })
+    batch_manifest = tmp_path / "batch-manifest.json"
+    atomic_write_json(batch_manifest, {"destination": str(tmp_path), "items": []})
+
+    def fake_cover(path: Path, *, edition: str):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"{edition} cover".encode())
+
+    monkeypatch.setattr(feed_only, "copy_podcast_cover", fake_cover)
+    config = PodcastConfig(
+        private_root=tmp_path / "private",
+        state_root=tmp_path / "state",
+        public_root=tmp_path / "public",
+        base_url="https://audio.example",
+        owner_email="podcast@example.org",
+        publishing_enabled=True,
+        dry_run=False,
+        briefs_publication_policy="user_authorized",
+    )
+
+    result = feed_only.publish_existing_audio(config, batch_manifest_path=batch_manifest)
+
+    assert result["added"] == 1
+    feed = ET.parse(tmp_path / "public" / "brief" / "feed.xml")
+    item = feed.find("./channel/item")
+    assert item is not None
+    assert item.find("{https://podcastindex.org/namespace/1.0}license") is None

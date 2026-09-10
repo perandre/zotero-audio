@@ -26,6 +26,9 @@ from .util import atomic_write_json, atomic_write_text, load_json, sha256_file
 from .zotero import license_record_from_metadata
 
 
+BRIEFS_USER_AUTHORIZED = "user_authorized"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -61,10 +64,19 @@ def _license_record(config, item: dict[str, Any]) -> dict[str, Any] | None:
     return license_record_from_metadata(item, source_sha) if source_sha else None
 
 
-def _minimal_record(record: dict[str, Any], *, published_at: str) -> dict[str, Any] | None:
+def _minimal_record(record: dict[str, Any], *, published_at: str,
+                    allow_unlicensed_brief: bool = False) -> dict[str, Any] | None:
     audio = Path(str(record.get("audio") or "")).expanduser()
     license_value = record.get("source_license")
-    if not audio.is_file() or not isinstance(license_value, dict) or not license_value.get("allowed"):
+    if not audio.is_file():
+        return None
+    if not isinstance(license_value, dict):
+        license_value = {}
+    explicit_block = license_value.get("embargoed") or license_value.get("conflict") or license_value.get("reason") in {
+        "source-is-embargoed", "conflicting-license-evidence"
+    }
+    allowed = bool(license_value.get("allowed"))
+    if not allowed and (not allow_unlicensed_brief or explicit_block):
         return None
     read_url = str(record.get("read_url") or "").strip()
     if not read_url:
@@ -98,6 +110,7 @@ def _minimal_record(record: dict[str, Any], *, published_at: str) -> dict[str, A
         "pub_date": str(record.get("pub_date") or published_at),
         "episode_license_url": str(license_value.get("episode_license_url") or ""),
         "show_artwork_only": True,
+        "publication_basis": "license" if allowed else "user-authorized-brief",
     }
 
 
@@ -114,12 +127,16 @@ def _existing_artifacts(config, existing: dict[tuple[str, str], dict[str, Any]])
         key = (str(record.get("guid") or ""), str(record.get("source_sha256") or ""))
         if not key[0] or key in existing:
             continue
-        if not any(source_sha == key[1] for _, source_sha in published):
+        brief_override = (
+            record.get("edition") == "brief"
+            and str(getattr(config, "briefs_publication_policy", "license_required")) == BRIEFS_USER_AUTHORIZED
+        )
+        if not brief_override and not any(source_sha == key[1] for _, source_sha in published):
             # Published state is the durable publication-intent record. Older
             # artifact records that are already in the publication manifest
             # were handled above and need no further approval.
             continue
-        candidate = _minimal_record(record, published_at=_now())
+        candidate = _minimal_record(record, published_at=_now(), allow_unlicensed_brief=brief_override)
         if candidate:
             candidates.append(candidate)
     return candidates

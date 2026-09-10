@@ -209,6 +209,7 @@ class PodcastConfig:
     publishing_enabled: bool = False
     dry_run: bool = True
     r2_bucket: str = ""
+    briefs_publication_policy: str = "license_required"
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
         PODCAST_NAME, "Brief editions containing the authors' abstract and, when suitable, conclusion.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
@@ -241,6 +242,7 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         copyright=str(common.get("copyright", defaults.copyright)),
         publishing_enabled=bool(common.get("publishing_enabled", False)), dry_run=bool(common.get("dry_run", True)),
         r2_bucket=str(common.get("r2_bucket", "")).strip(),
+        briefs_publication_policy=str(common.get("briefs_publication_policy", defaults.briefs_publication_policy)).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
 
 
@@ -949,7 +951,7 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
     ET.SubElement(owner, f"{{{ITUNES_NS}}}email").text = str(show["owner_email"])
     ET.SubElement(channel, f"{{{PODCAST_NS}}}guid").text = str(show["guid"])
     for episode in sorted(episode_list, key=lambda item: _date(item["pub_date"]), reverse=True):
-        needed = ("title", "guid", "page_url", "audio_url", "bytes", "pub_date", "duration", "image_url", "transcript_url")
+        needed = ("title", "guid", "page_url", "audio_url", "bytes", "pub_date", "duration")
         absent = [key for key in needed if not episode.get(key)]
         if absent: raise ValueError(f"episode {episode.get('guid', '?')} lacks {', '.join(absent)}")
         item = ET.SubElement(channel, "item")
@@ -961,13 +963,17 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         ET.SubElement(item, "pubDate").text = _rfc2822(episode["pub_date"])
         ET.SubElement(item, "enclosure", {"url": str(episode["audio_url"]), "length": str(episode["bytes"]), "type": "audio/mp4"})
         ET.SubElement(item, f"{{{ITUNES_NS}}}duration").text = _duration(float(episode["duration"]))
-        ET.SubElement(item, f"{{{ITUNES_NS}}}explicit").text = "false"; ET.SubElement(item, f"{{{ITUNES_NS}}}image", {"href": str(episode["image_url"])})
-        ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_url"]), "type": "text/vtt"})
+        ET.SubElement(item, f"{{{ITUNES_NS}}}explicit").text = "false"
+        if episode.get("image_url") and not episode.get("show_artwork_only"):
+            ET.SubElement(item, f"{{{ITUNES_NS}}}image", {"href": str(episode["image_url"])})
+        if episode.get("transcript_url"):
+            ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_url"]), "type": "text/vtt"})
         if episode.get("transcript_html_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_html_url"]), "type": "text/html", "rel": "alternate"})
         if episode.get("chapters_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}chapters", {"url": str(episode["chapters_url"]), "type": "application/json+chapters"})
-        license_tag = ET.SubElement(item, f"{{{PODCAST_NS}}}license", {"url": str(episode["episode_license_url"])}); license_tag.text = "CC-BY-4.0"
+        if episode.get("episode_license_url"):
+            license_tag = ET.SubElement(item, f"{{{PODCAST_NS}}}license", {"url": str(episode["episode_license_url"])}); license_tag.text = "CC-BY-4.0"
     ET.indent(root); return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
