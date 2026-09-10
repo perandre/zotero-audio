@@ -12,6 +12,7 @@ content-addressed: rerunning the same plan and voice reuses verified segments.
 ## Requirements
 
 - macOS on Apple Silicon
+- Zotero with `Settings → Advanced → Allow other applications on this computer to communicate with Zotero` enabled (recommended)
 - Python 3.11 or newer
 - Built-in `/usr/bin/afconvert` for AAC encoding
 - FFmpeg for two-pass loudness normalization and final-AAC measurement
@@ -50,9 +51,14 @@ From a Zotero attachment key:
 ```bash
 "$RUNTIME/venv/bin/zotero-audio" run \
   --zotero-key ABCD1234 \
-  --zotero-storage "$HOME/Zotero/storage" \
   --output-root outputs
 ```
+
+When Zotero is running with its local API enabled, the pipeline resolves the
+attachment path and parent-item metadata through Zotero itself. It discovers
+stored and linked PDF attachments, so `--zotero-storage` and `--zotero-db` are
+normally unnecessary. The legacy storage/database arguments remain available
+as a fallback for older Zotero versions, headless runs, and recovery work.
 
 For a complete local Zotero library, the resumable batch runner delivers only
 finished M4A files to the requested destination while retaining manifests and
@@ -77,11 +83,12 @@ with the British-English frontend and `bf_emma`; no system TTS is used.
 ## Automatic library synchronization
 
 For a zero-click workflow, `auto_sync.py` runs the batch runner incrementally
-and then applies the title, author, year, and Zotero-key metadata. It scans the
-whole local Zotero library, so every new PDF is processed automatically. Source
-and output hashes keep unchanged items out of the synthesis queue, and a lock
-prevents overlapping runs. The Kokoro model is loaded only when a new or changed
-PDF needs audio.
+and then applies the title, author, year, and Zotero-key metadata. With the
+local API enabled, Zotero supplies the complete PDF attachment list and file
+paths, including linked files; every new PDF is still processed automatically.
+Source and output hashes keep unchanged items out of the synthesis queue, and a
+lock prevents overlapping runs. The Kokoro model is loaded only when a new or
+changed PDF needs audio.
 
 The included macOS `launchd` job checks every five minutes and once at login:
 
@@ -97,7 +104,9 @@ The supplied plist assumes the paths used by this installation:
 - Runtime and logs: `/Users/pesh/Sites/zotero-audio-runtime/full-library`
 
 Edit `launchd/com.pesh.zotero-audio.plist` before installation if any path is
-different. The job can be inspected with:
+different. The `--zotero-storage` and `--zotero-db` entries are compatibility
+fallbacks; they can be removed when the local API is enabled. The job can be
+inspected with:
 
 ```bash
 launchctl print "gui/$(id -u)/com.pesh.zotero-audio"

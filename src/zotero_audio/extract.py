@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from .util import atomic_write_json, atomic_write_text, filename_part, json_digest, sha256_file, sha256_text
 from .zotero import merge_document_metadata
+from .zotero_local import zotero_attachment_path
 from .literature import REPORT_SUMMARIES, is_report
 
 
@@ -46,21 +47,8 @@ def resolve_pdf(pdf: str | None, zotero_key: str | None, zotero_storage: Path) -
     if pdf:
         path = Path(pdf).expanduser().resolve()
     else:
-        root = zotero_storage.expanduser().resolve()
         key = str(zotero_key)
-        key_dir = (root / key).resolve()
-        if key_dir.parent != root:
-            raise ValueError("A Zotero key must be a single directory name")
-        candidates = sorted(key_dir.rglob("*.pdf")) if key_dir.exists() else []
-        if not candidates:
-            raise FileNotFoundError(f"No PDF found for Zotero key {key} in {key_dir}")
-        if len(candidates) > 1:
-            raise RuntimeError(
-                f"Multiple PDF attachments found for {key}: "
-                + ", ".join(item.name for item in candidates)
-                + ". Use --pdf to choose one."
-            )
-        path = candidates[0].resolve()
+        path = zotero_attachment_path(key, zotero_storage)
     if not path.is_file():
         raise FileNotFoundError(f"PDF does not exist: {path}")
     if path.suffix.lower() != ".pdf":

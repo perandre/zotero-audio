@@ -21,8 +21,8 @@ from zotero_audio.zotero import (
     METADATA_SCHEMA,
     bibliographic_metadata,
     bundle_metadata_snapshot,
-    zotero_metadata_many,
 )
+from zotero_audio.zotero_local import discover_zotero_pdfs, zotero_metadata_many_preferred
 
 
 NORWEGIAN_WORDS = {"av", "den", "det", "en", "er", "for", "ikke", "med", "og", "på", "som", "til"}
@@ -95,18 +95,17 @@ def main(argv: list[str] | None = None) -> int:
         log.info(message)
         if announce:
             print(message, flush=True)
-    pdfs = sorted(path.resolve() for path in storage.glob("*/*.pdf"))
+    discovered = discover_zotero_pdfs(storage)
     requested_keys = {key.strip() for key in args.keys.split(",")} if args.keys else None
     if requested_keys is not None:
-        pdfs = [path for path in pdfs if path.relative_to(storage).parts[0] in requested_keys]
+        discovered = [(key, path) for key, path in discovered if key in requested_keys]
+    pdfs = [path for _, path in discovered]
     if not pdfs:
-        raise SystemExit(f"No PDFs found in {storage}")
+        raise SystemExit(f"No PDFs found through Zotero or in {storage}")
 
     metadata_by_key: dict[str, dict[str, Any]] = {}
     try:
-        metadata_by_key = zotero_metadata_many(
-            args.zotero_db, (path.relative_to(storage).parts[0] for path in pdfs)
-        )
+        metadata_by_key = zotero_metadata_many_preferred(args.zotero_db, (key for key, _ in discovered))
     except (FileNotFoundError, OSError) as exc:
         progress(f"Zotero metadata unavailable; PDF metadata fallback will be used: {exc}")
 
@@ -149,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         manifest["items"].append(item)
 
-    def metadata_with_pdf_rights(pdf: Path, metadata: dict[str, Any] | None,
+    def metadata_with_pdf_rights(pdf: Path, key: str, metadata: dict[str, Any] | None,
                                  structure: dict[str, Any] | None = None) -> dict[str, Any]:
         value = dict(metadata or {})
         if value.get("rights"):
@@ -158,14 +157,13 @@ def main(argv: list[str] | None = None) -> int:
         if document.get("rights"):
             value.update({key: document[key] for key in ("rights", "rights_source") if document.get(key)})
             return value
-        inferred = extract_pdf(pdf, zotero_key=pdf.relative_to(storage).parts[0],
+        inferred = extract_pdf(pdf, zotero_key=key,
                                include_references=False, metadata=metadata)
         value.update({key: inferred["document"][key] for key in ("rights", "rights_source")
                       if inferred["document"].get(key)})
         return value
 
-    for number, pdf in enumerate(pdfs, start=1):
-        key = pdf.relative_to(storage).parts[0]
+    for number, (key, pdf) in enumerate(discovered, start=1):
         zotero_item = metadata_by_key.get(key)
         progress(f"[{number}/{len(pdfs)}] preparing {key}: {pdf.name}")
         source_sha: str | None = None
@@ -241,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
                         **output_info,
                     }
                     if zotero_item:
-                        metadata_value = metadata_with_pdf_rights(pdf, zotero_item, existing_structure)
+                        metadata_value = metadata_with_pdf_rights(pdf, key, zotero_item, existing_structure)
                         item.update(bibliographic_metadata(metadata_value))
                         item.update({"metadata_finalized": True, "metadata_schema": METADATA_SCHEMA})
                         atomic_write_json(
@@ -304,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                 "bitrate": delivered_info["bitrate"],
             }
             if zotero_item:
-                metadata_value = metadata_with_pdf_rights(pdf, zotero_item, structure)
+                metadata_value = metadata_with_pdf_rights(pdf, key, zotero_item, structure)
                 item.update(bibliographic_metadata(metadata_value))
                 item.update({"metadata_finalized": True, "metadata_schema": METADATA_SCHEMA})
                 atomic_write_json(

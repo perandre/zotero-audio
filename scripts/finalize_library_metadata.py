@@ -15,7 +15,8 @@ from mutagen.mp4 import MP4
 
 from zotero_audio.audio import inspect_m4a, normalize_mp4_timestamps
 from zotero_audio.util import atomic_write_json, filename_part, load_json, sha256_file
-from zotero_audio.zotero import METADATA_SCHEMA, bibliographic_metadata, bundle_metadata_snapshot, zotero_metadata
+from zotero_audio.zotero import METADATA_SCHEMA, bibliographic_metadata, bundle_metadata_snapshot
+from zotero_audio.zotero_local import zotero_metadata_preferred
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         if item.get("metadata_finalized") and item.get("metadata_schema", 0) >= METADATA_SCHEMA:
             continue
         source = destination_root / item["output_file"]
-        metadata = zotero_metadata(args.zotero_db, item["zotero_key"])
+        metadata = zotero_metadata_preferred(args.zotero_db, item["zotero_key"])
         if not metadata:
             item.update({"metadata_finalized": False, "metadata_status": "missing-parent-item"})
             atomic_write_json(manifest_path, manifest)

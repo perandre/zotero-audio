@@ -8,6 +8,7 @@ from pathlib import Path
 
 from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, inspect_m4a
 from zotero_audio.util import atomic_write_json, load_json, sha256_file
+from zotero_audio.zotero_local import discover_zotero_pdfs
 
 
 def main() -> int:
@@ -20,11 +21,11 @@ def main() -> int:
     storage = args.zotero_storage.expanduser().resolve()
     destination = args.destination.expanduser().resolve()
     state_dir = args.state_dir.expanduser().resolve()
-    pdfs = sorted(storage.glob("*/*.pdf"))
+    discovered = discover_zotero_pdfs(storage)
+    pdfs = [path for _, path in discovered]
     bundles = list((state_dir / "bundles").iterdir())
     items = []
-    for pdf in pdfs:
-        key = pdf.relative_to(storage).parts[0]
+    for key, pdf in discovered:
         bundle = next((path for path in bundles if path.name.endswith(f"[{key}]")), None)
         outputs = [path for path in destination.glob("*.m4a") if path.stem.endswith(f"[{key}]")]
         if bundle is None or len(outputs) != 1:

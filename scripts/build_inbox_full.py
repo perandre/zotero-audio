@@ -15,7 +15,8 @@ from zotero_audio.audio import DEFAULT_ENGLISH_VOICE, MlxKokoroBackend
 from zotero_audio.pipeline import prepare_bundle
 from zotero_audio.podcast import build_local_podcast, health_check, load_podcast_config
 from zotero_audio.util import atomic_write_json, load_json, sha256_file
-from zotero_audio.zotero import DEFAULT_ZOTERO_DB, bundle_metadata_snapshot, zotero_metadata_many
+from zotero_audio.zotero import DEFAULT_ZOTERO_DB, bundle_metadata_snapshot
+from zotero_audio.zotero_local import discover_zotero_pdfs, zotero_metadata_many_preferred
 
 
 DEFAULT_STORAGE = Path.home() / "Zotero" / "storage"
@@ -62,16 +63,17 @@ def main(argv: list[str] | None = None) -> int:
     state_dir.mkdir(parents=True, exist_ok=True)
     bundles_dir.mkdir(parents=True, exist_ok=True)
     config = load_podcast_config(args.podcast_config.expanduser().resolve())
-    pdfs = sorted(path.resolve() for path in storage.glob("*/*.pdf"))
+    discovered = discover_zotero_pdfs(storage)
+    pdfs = [path for _, path in discovered]
     if not pdfs:
-        raise SystemExit(f"No PDFs found in {storage}")
+        raise SystemExit(f"No PDFs found through Zotero or in {storage}")
 
-    keys = [path.relative_to(storage).parts[0] for path in pdfs]
-    metadata_by_key = zotero_metadata_many(database, keys)
+    keys = [key for key, _ in discovered]
+    metadata_by_key = zotero_metadata_many_preferred(database, keys)
     inbox = [
-        (pdf, pdf.relative_to(storage).parts[0], metadata_by_key.get(pdf.relative_to(storage).parts[0]) or {})
-        for pdf in pdfs
-        if _in_collection(metadata_by_key.get(pdf.relative_to(storage).parts[0]) or {}, args.collection)
+        (pdf, key, metadata_by_key.get(key) or {})
+        for key, pdf in discovered
+        if _in_collection(metadata_by_key.get(key) or {}, args.collection)
     ]
 
     lock_path = state_dir / "automatic-sync.lock"

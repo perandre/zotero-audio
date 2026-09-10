@@ -11,16 +11,17 @@ from .models import default_model_dir, install_kokoro_models
 from .pipeline import prepare_bundle
 from .util import load_json
 from .podcast import PodcastConfig, build_intro, build_local_podcast, episode_title, health_check, load_podcast_config
-from .zotero import DEFAULT_ZOTERO_DB, zotero_metadata
+from .zotero import DEFAULT_ZOTERO_DB
+from .zotero_local import zotero_metadata_preferred
 
 
 def _source_arguments(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--pdf", help="Path to a local PDF")
-    source.add_argument("--zotero-key", help="Zotero attachment key under storage/<key>/")
+    source.add_argument("--zotero-key", help="Zotero attachment key; resolved through Zotero's local API when available")
     parser.add_argument("--zotero-storage", type=Path, default=DEFAULT_ZOTERO_STORAGE)
     parser.add_argument("--zotero-db", type=Path, default=DEFAULT_ZOTERO_DB,
-                        help="Read parent-item metadata from the local Zotero database")
+                        help="SQLite fallback when Zotero's local API is unavailable")
 
 
 def _prepare_arguments(parser: argparse.ArgumentParser) -> None:
@@ -127,8 +128,11 @@ def _backend_from_args(args: argparse.Namespace):
 def _prepare(args: argparse.Namespace) -> tuple[Path, bool]:
     pdf = resolve_pdf(args.pdf, args.zotero_key, args.zotero_storage)
     metadata = None
-    if args.zotero_key and args.zotero_db.expanduser().is_file():
-        metadata = zotero_metadata(args.zotero_db, args.zotero_key)
+    if args.zotero_key:
+        try:
+            metadata = zotero_metadata_preferred(args.zotero_db, args.zotero_key)
+        except FileNotFoundError:
+            metadata = None
     if args.metadata_json:
         metadata = {**(metadata or {}), **load_json(args.metadata_json)}
     if args.literature_type:

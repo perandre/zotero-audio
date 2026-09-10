@@ -20,6 +20,7 @@ from zotero_audio.podcast import EDITIONS, build_local_podcast, health_check, lo
 from zotero_audio.util import json_digest
 from zotero_audio.runtime import configure_tool_path
 from zotero_audio.notifications import report_failure
+from zotero_audio.zotero_local import discover_zotero_pdfs
 
 
 DEFAULT_STORAGE = Path.home() / "Zotero" / "storage"
@@ -102,8 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Another automatic synchronization is already running")
             return 0
 
-        pdfs = sorted(storage.glob("*/*.pdf"))
-        if not pdfs:
+        if not discover_zotero_pdfs(storage):
             print(f"No PDFs found in {storage}; nothing to do")
             return 0
 

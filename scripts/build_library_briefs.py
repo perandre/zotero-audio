@@ -18,8 +18,8 @@ from zotero_audio.util import atomic_write_json, load_json, sha256_file
 from zotero_audio.zotero import (
     DEFAULT_ZOTERO_DB,
     bundle_metadata_snapshot,
-    zotero_metadata_many,
 )
+from zotero_audio.zotero_local import discover_zotero_pdfs, zotero_metadata_many_preferred
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,9 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     state_dir.mkdir(parents=True, exist_ok=True)
     bundles_dir.mkdir(parents=True, exist_ok=True)
     config = load_podcast_config(args.podcast_config.expanduser().resolve())
-    pdfs = sorted(path.resolve() for path in storage.glob("*/*.pdf"))
+    discovered = discover_zotero_pdfs(storage)
+    pdfs = [path for _, path in discovered]
     if not pdfs:
-        raise SystemExit(f"No PDFs found in {storage}")
+        raise SystemExit(f"No PDFs found through Zotero or in {storage}")
 
     # Do not race the five-minute automatic synchronizer while replacing
     # extraction bundles or writing the shared publication manifest.
@@ -91,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Another automatic synchronization is already running; retry after it finishes", file=sys.stderr)
             return 2
 
-        keys = [path.relative_to(storage).parts[0] for path in pdfs]
-        metadata_by_key = zotero_metadata_many(database, keys)
+        keys = [key for key, _ in discovered]
+        metadata_by_key = zotero_metadata_many_preferred(database, keys)
         report_path = state_dir / "brief-library-manifest.json"
         report: dict[str, Any] = {
             "schema": "zotero-audio-brief-library/v1",
@@ -102,8 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         backend: MlxKokoroBackend | None = None
 
-        for number, pdf in enumerate(pdfs, start=1):
-            key = pdf.relative_to(storage).parts[0]
+        for number, (key, pdf) in enumerate(discovered, start=1):
             source_sha = sha256_file(pdf)
             metadata = metadata_by_key.get(key) or {}
             print(f"[{number}/{len(pdfs)}] briefing {key}: {pdf.name}", flush=True)
