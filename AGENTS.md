@@ -6,6 +6,15 @@
 - Preserve unrelated local changes; never include secrets or generated runtime
   artifacts in commits. If verification, push, or deployment is blocked, report
   the blocker explicitly rather than claiming completion.
+- Treat this as a mature app. Use feature branches and pull requests into
+  `main` for all changes; never push changes directly to `main`.
+- Before merging, review the complete diff, run the relevant checks, address
+  blocking feedback, and record validation and material deployment risks in
+  the PR. Preserve durable data and backwards compatibility during upgrades.
+- The saved checkout runs the installed Mac service. Develop future changes in
+  isolated worktrees so edits do not alter the running app before review. After
+  a PR merges, update the saved checkout to `main`, deploy the merged revision
+  when needed, and verify the running service. Keep this release process fast.
 
 # Maintainer map
 
