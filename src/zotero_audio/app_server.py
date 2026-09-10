@@ -33,6 +33,7 @@ def status(store: Store, worker=None):
                        "current_job_id": getattr(worker, "current_job_id", None)}, "counts": counts,
             "cloud": store.state("cloud", {"online": False, "configured": False}), "cloud_lease": store.state("cloud_lease", {}), "zotero": store.state("zotero", {}),
             "deliveries": {r["kind"]: r["count"] for r in pending}, "capabilities": {"local_files": True, "authenticated": True, "remote": False},
+            "project": store.state("project_sync", {}), "project_error": store.state("project_sync_error"),
             "version": "0.2.0"}
 
 
@@ -103,6 +104,9 @@ def make_handler(store: Store, worker, port: int):
                 body = self.body() if mutation else {}
                 if path == "/api/status" and method == "GET":
                     return self.send_json(status(store, worker))
+                if path == "/api/project/document" and method == "GET":
+                    from .app_projects import ProjectDocuments
+                    return self.send_json(ProjectDocuments(store).read_document(first("path")))
                 if path == "/api/capabilities" and method == "GET":
                     return self.send_json({"local_files": True, "authenticated": True, "remote": False, "cancel_jobs": True, "retry_jobs": True})
                 if path == "/api/library" and method == "GET":

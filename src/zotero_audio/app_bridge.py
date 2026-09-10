@@ -188,6 +188,13 @@ class CloudBridge:
                 self.store.set_state("cloud_pending_claim", response["job"])
                 self._adopt_claim(response["job"])
         self.sync_articles()
+        from .app_projects import ProjectDocuments
+        try:
+            ProjectDocuments(self.store).sync(self)
+        except Exception:
+            self.store.set_state("project_sync_error", {"at": now(), "message": "PhD project sync needs attention; article processing continues."})
+        else:
+            self.store.set_state("project_sync_error", None)
 
     def _adopt_claim(self, job):
         with self._lease_lock:

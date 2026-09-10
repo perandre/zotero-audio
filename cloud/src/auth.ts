@@ -113,8 +113,7 @@ function page(
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
-        "Content-Security-Policy":
-          `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`,
+        "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`,
         // no-referrer makes browser form POSTs send Origin: null, which our
         // same-origin check rejects. Keep the origin for local forms only.
         "Referrer-Policy": "same-origin",
@@ -204,13 +203,13 @@ export async function authorize(request: Request, env: AppEnv) {
     );
   const requested = auth.scope.length ? auth.scope : ["library:read"];
   const scopes = requested.filter((s) =>
-    ["library:read", "jobs:write"].includes(s),
+    ["library:read", "jobs:write", "documents:write"].includes(s),
   );
   if (!scopes.includes("library:read")) scopes.unshift("library:read");
   if (request.method === "GET")
     return page(
       "Connect your research library",
-      `<p><strong>${escaped(client.clientName ?? "MCP client")}</strong> is requesting access to your library.</p><p>Access includes the full Markdown of private articles. Requested content is shared with the connected client.</p><ul><li>Search and read articles, quality reports and job status.</li>${scopes.includes("jobs:write") ? "<li>Queue, cancel and retry processing jobs on your Mac.</li>" : ""}</ul><form method="post" action="${escaped(url.pathname + url.search)}"><input type="hidden" name="csrf" value="${escaped(session.csrf)}"><button name="decision" value="allow">Allow connection</button> <button name="decision" value="deny">Cancel</button></form>`,
+      `<p><strong>${escaped(client.clientName ?? "MCP client")}</strong> is requesting access to your library.</p><p>Access includes private articles and the synced PhD project documents (plans, notes, drafts and extracted source text). Requested content is shared with the connected client.</p><ul><li>Search and read articles, PhD project documents, quality reports and job status.</li>${scopes.includes("jobs:write") ? "<li>Queue, cancel and retry processing jobs on your Mac.</li>" : ""}${scopes.includes("documents:write") ? "<li>Save Markdown notes and update PhD documents on your Mac, with commits and pushes to the project repository.</li>" : ""}</ul><form method="post" action="${escaped(url.pathname + url.search)}"><input type="hidden" name="csrf" value="${escaped(session.csrf)}"><button name="decision" value="allow">Allow connection</button> <button name="decision" value="deny">Cancel</button></form>`,
       200,
       auth.redirectUri,
     );

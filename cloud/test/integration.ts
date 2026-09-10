@@ -49,7 +49,10 @@ assert.equal(r.status, 200);
 // Check the final response after the Worker wrapper: no-referrer causes real
 // browser form submissions to send Origin: null, unlike the fetches below.
 assert.equal(r.headers.get("Referrer-Policy"), "same-origin");
-assert.match(r.headers.get("Content-Security-Policy") ?? "", /form-action 'self';/);
+assert.match(
+  r.headers.get("Content-Security-Policy") ?? "",
+  /form-action 'self';/,
+);
 for (const origin of [undefined, "null", "https://evil.example"]) {
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
@@ -133,7 +136,11 @@ assert.equal(r.status, 401);
 r = await send(`/api/articles/${id}/markdown`, { headers: { Cookie: cookie } });
 assert.equal(await r.text(), markdown);
 r = await send(`/api/articles/${id}/audio?edition=full`, { headers: owner });
-assert.equal(r.status, 409, "A missing Full must never redirect to Brief audio");
+assert.equal(
+  r.status,
+  409,
+  "A missing Full must never redirect to Brief audio",
+);
 r = await send(`/api/articles/${id}/audio?edition=brief`, { headers: owner });
 assert.equal(r.status, 302);
 assert.equal(r.headers.get("Location"), article.editions.brief.audio_url);
@@ -288,7 +295,10 @@ async function oauth(scopes: string) {
       body: new URLSearchParams({ csrf, decision: "allow" }),
     });
     assert.equal(rejected.status, 403);
-    assert.equal(((await rejected.json()) as any).error.code, "origin_mismatch");
+    assert.equal(
+      ((await rejected.json()) as any).error.code,
+      "origin_mismatch",
+    );
     assert.equal(rejected.headers.get("Location"), null);
   }
   const badCsrf = await send(path, {
@@ -408,6 +418,182 @@ const narrowedTools = await rpc(narrowed.access_token, "tools/list");
 assert.ok(
   !narrowedTools.result.tools.some((tool: any) => tool.name === "create_job"),
 );
+// Project documents use the same private MCP, with separate document-write consent.
+const projectWorker = "integration-project-worker";
+const projectPath = "NOW.md";
+const projectText =
+  "# Synthetic PhD priorities\n\nReview the synthetic interview guide.\n";
+const projectRevision = createHash("sha256").update(projectText).digest("hex");
+await parsed(
+  await send("/api/bridge/project/manifest", {
+    method: "POST",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: projectWorker,
+      title: "Synthetic PhD project",
+      paths: [projectPath],
+      warnings: ["diagram.png: inspect the original image."],
+    }),
+  }),
+);
+await parsed(
+  await send("/api/bridge/project/document", {
+    method: "PUT",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: projectWorker,
+      document: {
+        path: projectPath,
+        title: "Synthetic PhD priorities",
+        text: projectText,
+        revision: projectRevision,
+        format: "markdown",
+        source_modified_at: new Date().toISOString(),
+      },
+    }),
+  }),
+);
+r = await send("/api/project/document?path=NOW.md");
+assert.equal(r.status, 401);
+r = await send("/api/project/document?path=NOW.md", { headers: owner });
+assert.equal(await r.text(), projectText);
+async function callProject(
+  token: string,
+  name: string,
+  args: Record<string, unknown> = {},
+) {
+  return rpc(token, "tools/call", { name, arguments: args });
+}
+const priorities = await callProject(readToken, "whats_next");
+assert.equal(
+  priorities.result.structuredContent.documents[0].text,
+  projectText,
+);
+assert.deepEqual(priorities.result.structuredContent.missing, ["NEXT.md"]);
+const projectList = await callProject(readToken, "list_documents");
+assert.equal(projectList.result.structuredContent.documents[0].path, "NOW.md");
+assert.ok(projectList.result.structuredContent.warnings.length);
+const projectRead = await callProject(readToken, "read_document", {
+  path: projectPath,
+});
+assert.equal(projectRead.result.structuredContent.revision, projectRevision);
+const projectSearch = await callProject(readToken, "search", {
+  query: "synthetic interview",
+});
+assert.ok(
+  projectSearch.result.structuredContent.results.some(
+    (row: any) => row.id === "project:phd:NOW.md",
+  ),
+);
+const projectFetch = await callProject(readToken, "fetch", {
+  id: "project:phd:NOW.md",
+});
+assert.equal(projectFetch.result.structuredContent.text, projectText);
+const traversal = await callProject(readToken, "read_document", {
+  path: "../private.md",
+});
+assert.ok(traversal.error || traversal.result?.isError);
+const docChange = {
+  path: projectPath,
+  text: "# Synthetic PhD priorities\n\nUpdated synthetic plan.\n",
+  expected_revision: projectRevision,
+  request_id: `project-${id}`,
+};
+const jobGrantDenied = await callProject(
+  writeToken,
+  "save_document",
+  docChange,
+);
+assert.ok(jobGrantDenied.error || jobGrantDenied.result?.isError);
+const docGrant = await oauth("library:read documents:write");
+const docTools = await rpc(docGrant.access_token, "tools/list");
+assert.ok(
+  docTools.result.tools.some((tool: any) => tool.name === "save_document"),
+);
+assert.ok(
+  !docTools.result.tools.some((tool: any) => tool.name === "create_job"),
+);
+const saved = await callProject(
+  docGrant.access_token,
+  "save_document",
+  docChange,
+);
+assert.equal(saved.result.structuredContent.status, "queued");
+const savedAgain = await callProject(
+  docGrant.access_token,
+  "save_document",
+  docChange,
+);
+assert.equal(
+  savedAgain.result.structuredContent.request_id,
+  docChange.request_id,
+);
+const collision = await callProject(docGrant.access_token, "save_document", {
+  ...docChange,
+  text: "Different text",
+});
+assert.equal(collision.result.isError, true);
+const stale = await callProject(docGrant.access_token, "save_document", {
+  ...docChange,
+  expected_revision: "a".repeat(64),
+  request_id: `stale-${id}`,
+});
+assert.equal(stale.result.isError, true);
+const pending = await parsed(
+  await send(`/api/bridge/project/changes?worker_id=${projectWorker}`, {
+    headers: bridge,
+  }),
+);
+assert.equal(pending.changes[0].id, docChange.request_id);
+r = await send("/api/bridge/project/changes?worker_id=wrong", {
+  headers: bridge,
+});
+assert.equal(r.status, 409);
+await parsed(
+  await send(`/api/bridge/project/changes/${docChange.request_id}`, {
+    method: "PATCH",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: projectWorker,
+      status: "completed",
+      result: { message: "Synthetic save acknowledged", pushed: true },
+    }),
+  }),
+);
+const receipt = await callProject(
+  docGrant.access_token,
+  "save_document",
+  docChange,
+);
+assert.equal(receipt.result.structuredContent.status, "completed");
+const statusReceipt = await callProject(readToken, "document_change_status", {
+  request_id: docChange.request_id,
+});
+assert.equal(statusReceipt.result.structuredContent.result.pushed, true);
+await parsed(
+  await send("/api/bridge/project/manifest", {
+    method: "POST",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: projectWorker,
+      title: "Synthetic PhD project",
+      paths: [],
+      warnings: [],
+    }),
+  }),
+);
+const removed = await callProject(readToken, "read_document", {
+  path: projectPath,
+});
+assert.equal(removed.result.isError, true);
+const removedSearch = await callProject(readToken, "search_documents", {
+  query: "synthetic interview",
+});
+assert.equal(removedSearch.result.structuredContent.results.length, 0);
+console.log(
+  "PASS: private PhD browse/read/search/fetch, NOW/NEXT, document consent, traversal rejection, optimistic revisions, idempotent saves/receipts, writer isolation and removed-file reconciliation.",
+);
+
 const state = await parsed(await send("/api/status", { headers: owner }));
 assert.equal(state.capabilities.local_files, false);
 console.log(
