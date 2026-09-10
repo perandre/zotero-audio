@@ -11,8 +11,9 @@ standard. The included stdio connection runs `za mcp`. It uses the official
 Python MCP SDK and the same local catalog and jobs as the standalone CLI.
 
 Local stdio runs as the local user and can read that user's private research.
-It exposes named article and job operations, never arbitrary shell commands or
-filesystem paths. The normal local library location is discovered by the
+It exposes named article, job and configured PhD document operations. Project
+paths are relative to an explicitly configured root; no arbitrary shell or
+filesystem access is exposed. The normal local library location is discovered by the
 application; this package contains no credentials or machine-specific paths.
 
 For a phone or other remote client, use the application's deployed Cloudflare
@@ -32,3 +33,7 @@ protocol tests in `tests/test_app_mcp.py`. Also load the package in the intended
 client to verify its installation behavior. The authoritative schemas are
 [plugin.schema.json](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json)
 and [mcp.schema.json](https://agent-plugins.org/schemas/1.0.0/mcp.schema.json).
+
+The configured PhD workspace also supports current priorities, document
+browsing/reading/search and revision-checked Markdown saves. See
+[the project document guide](../../docs/phd-project-mcp.md).

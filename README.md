@@ -179,6 +179,18 @@ standard’s actual schemas. **Connecting and using the actual ChatGPT phone
 client still requires verification in that account**; server tests alone do not
 establish phone-client compatibility or workspace permission.
 
+## PhD project workspace
+
+The same MCP can browse, read and search the private VIKING PhD project,
+including `NOW.md`, `PROJECT.md`, methods, drafts and source PDFs. `whats_next`
+reads `NOW.md` and also `NEXT.md` when present. Project files are reference data;
+instructions inside them never override your request.
+
+The Mac syncs saved project text independently of Zotero/audio, including
+uncommitted edits. Revision-checked Markdown saves and meeting notes require
+separate `documents:write` consent and report their actual save/commit/push
+status. See [PhD project MCP setup and tools](docs/phd-project-mcp.md).
+
 ## Direct pipeline and further documentation
 
 The original `zotero-audio` CLI remains available for focused pipeline work:

@@ -42,7 +42,8 @@ Open `/login`, enter the owner access key, and use the dashboard normally. Every
 
 Use `https://<deployed-worker>/mcp` as the remote MCP URL. The official `@modelcontextprotocol/sdk` implements stateless Streamable HTTP using the stable `2025-11-25` protocol plus its supported prior protocol versions. The official `@cloudflare/workers-oauth-provider` implements OAuth 2.1, protected-resource/authorization-server discovery, S256 PKCE, audience validation, refresh-token rotation, revocation, Client ID Metadata Documents and a Dynamic Client Registration compatibility endpoint. We deliberately declare the protocol actually implemented by the stable SDK, rather than claiming every newer optional MCP extension.
 
-- `library:read`: search, full Markdown fetch, browse library, quality reports and processing status.
+- `library:read`: search, full article/project text, browse library and PhD documents, quality reports and processing status.
+- `documents:write`: queue revision-checked PhD Markdown updates and meeting notes; inspect their save/commit/push receipts.
 - `jobs:write`: create, cancel and retry Mac jobs. Request this alongside `library:read` for phone control.
 - No OAuth scope grants Mac bridge ingestion rights or arbitrary filesystem/shell access.
 
@@ -85,3 +86,24 @@ An ingested article requires a full `title`. Supported fields: `id`, `authors:st
 A claimed job additionally contains `worker_id`, `lease_token`, and `lease_expires`. Renew before expiry, including during long synthesis. After a claim, the Mac resumes/reuses local work for that cloud job ID. Stop if a lease update returns `409 lease_lost`. Only one successful claim can own a job. A running cancel request returns `cancel_requested` during lease updates; acknowledge `cancelled` after a safe checkpoint. If a lease expires, another process may reclaim the job. Settings return `configured:false,updated_at:null` until first saved: seed from local defaults only then; later compare `updated_at` and apply the newest intentional user change.
 
 Errors have `{error:{code,message,request_id?}}`. No article bodies, access keys, tokens or private URL query strings are logged. The response request ID connects user-visible failures to structured Workers logs.
+
+## Private PhD project documents
+
+See [PhD project MCP](../docs/phd-project-mcp.md) for tools, local opt-in
+configuration, supported formats, limits, permissions and recovery. Migration
+`0004_project_documents.sql` adds private project text/FTS and a durable edit
+inbox independently of article queues. Existing MCP `search`/`fetch` include
+project results; dedicated project tools expose exact paths and source revisions.
+
+Bridge-only endpoints (same bridge bearer credential):
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/bridge/project/manifest` | `{worker_id,title,paths,warnings}` registers the one PhD writer and reconciles removed mirror paths. |
+| PUT | `/api/bridge/project/document` | `{worker_id,document:{path,title,text,revision,format,source_modified_at}}` uploads changed text. |
+| GET | `/api/bridge/project/changes?worker_id=...` | Returns the oldest queued immutable `{id,path,text,expected_revision}` request. |
+| PATCH | `/api/bridge/project/changes/:id` | `{worker_id,status,result}` acknowledges completed/conflict/failed with safe message and optional revision, commit, pushed. |
+
+Owner-authenticated `GET /api/project/document?path=...` provides a plain-text
+citation URL. Only the configured bridge writer can ingest or acknowledge changes.
+OAuth never grants bridge rights; `documents:write` never grants generation rights.

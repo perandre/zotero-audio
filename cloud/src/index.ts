@@ -30,6 +30,13 @@ import {
 } from "./jobs";
 import { getSettings, patchSettings } from "./settings";
 import { mcp } from "./mcp";
+import {
+  syncManifest,
+  uploadDocument,
+  pendingChanges,
+  finishChange,
+  readDocument,
+} from "./projects";
 import type { AppEnv, Permissions } from "./types";
 
 async function bridge(request: Request, env: AppEnv) {
@@ -45,6 +52,25 @@ async function bridge(request: Request, env: AppEnv) {
       401,
       "bridge_unauthorized",
       "The Mac bridge credential was not accepted.",
+    );
+  if (path === "/api/bridge/project/manifest" && request.method === "POST")
+    return json(await syncManifest(env, await body(request, 400000)));
+  if (path === "/api/bridge/project/document" && request.method === "PUT")
+    return json(await uploadDocument(env, await body(request)));
+  if (path === "/api/bridge/project/changes" && request.method === "GET")
+    return json(
+      await pendingChanges(env, url.searchParams.get("worker_id") ?? ""),
+    );
+  const documentChange = path.match(
+    /^\/api\/bridge\/project\/changes\/([^/]+)$/,
+  );
+  if (documentChange && request.method === "PATCH")
+    return json(
+      await finishChange(
+        env,
+        idFromPath(documentChange[1]),
+        await body(request, 8000),
+      ),
     );
   if (path === "/api/bridge/heartbeat" && request.method === "POST")
     return json(await heartbeat(env, await body(request, 16000)));
@@ -75,6 +101,19 @@ async function api(request: Request, env: AppEnv) {
   const url = new URL(request.url),
     path = url.pathname;
   if (!["GET", "HEAD"].includes(request.method)) sameOrigin(request);
+  if (path === "/api/project/document" && request.method === "GET") {
+    const document = await readDocument(
+      env,
+      url.searchParams.get("path") ?? "",
+      url.origin,
+    );
+    return new Response(document.text, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
   if (path === "/api/library" && request.method === "GET")
     return json(await listArticles(env, url));
   if (path === "/api/search" && request.method === "GET")
@@ -120,7 +159,11 @@ async function api(request: Request, env: AppEnv) {
       const extra = JSON.parse(row.metadata),
         edition = url.searchParams.get("edition") ?? "full";
       if (!["full", "brief"].includes(edition))
-        throw new HttpError(400, "invalid_edition", "Choose Full or Brief audio.");
+        throw new HttpError(
+          400,
+          "invalid_edition",
+          "Choose Full or Brief audio.",
+        );
       const audio = extra.editions?.[edition]?.audio_url;
       if (typeof audio === "string" && audio.startsWith("https://"))
         return Response.redirect(audio, 302);
@@ -189,12 +232,12 @@ export default {
         authorizeEndpoint: "/authorize",
         tokenEndpoint: "/oauth/token",
         clientRegistrationEndpoint: "/oauth/register",
-        scopesSupported: ["library:read", "jobs:write"],
+        scopesSupported: ["library:read", "jobs:write", "documents:write"],
         resourceMetadata: {
           resource: `${url.origin}/mcp`,
           authorization_servers:
             url.protocol === "https:" ? [url.origin] : undefined,
-          scopes_supported: ["library:read", "jobs:write"],
+          scopes_supported: ["library:read", "jobs:write", "documents:write"],
           resource_name: "One More Paper research library",
         },
         clientIdMetadataDocumentEnabled: true,

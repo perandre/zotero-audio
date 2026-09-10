@@ -56,3 +56,11 @@ python -m pytest tests/test_app_mcp.py tests/test_generation.py
 The core application's Python dependency declaration installs the official SDK;
 running generation, searching through the CLI, or using the dashboard still
 requires no AI service or subscription.
+
+## PhD workspace
+
+With `control/projects.json` configured, `whats_next`, `list_documents`,
+`read_document`, `search_documents` and `save_document` operate on the saved
+PhD folder. `search` and `fetch` also handle project results. Local saves are
+synchronous and use the same revision checks, backups and scoped Git workflow
+as remote saves. See [the complete project document contract](phd-project-mcp.md).
