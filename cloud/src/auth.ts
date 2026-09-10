@@ -93,7 +93,19 @@ async function cookie(env: AppEnv, request: Request) {
   );
   return `${COOKIE}=${payload}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${new URL(request.url).protocol === "https:" ? "; Secure" : ""}`;
 }
-function page(title: string, content: string, status = 200) {
+function page(
+  title: string,
+  content: string,
+  status = 200,
+  validatedRedirectUri?: string,
+) {
+  // Browsers also apply form-action to a POST's redirect chain. Consent must
+  // allow the callback already validated by the OAuth provider. URL parsing
+  // keeps client-controlled query strings out of the policy.
+  const redirect = validatedRedirectUri ? new URL(validatedRedirectUri) : null;
+  const formAction = redirect
+    ? `'self' ${redirect.origin === "null" ? redirect.protocol : redirect.origin}`
+    : "'self'";
   return new Response(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escaped(title)} · One More Paper</title><style>body{font:17px/1.6 system-ui,sans-serif;margin:0;background:#f6f4ef;color:#252925}main{max-width:540px;margin:12vh auto;padding:30px}h1{line-height:1.2}label{display:block;margin:20px 0 8px}input[type=password]{box-sizing:border-box;width:100%;padding:12px;border:1px solid #8b958b;border-radius:8px;font:inherit}button{font:inherit;background:#234b40;color:white;border:0;border-radius:8px;padding:12px 20px;margin-top:22px;cursor:pointer}a{color:#234b40}small{display:block;color:#555}li{margin:10px 0}.error{color:#8c2820}</style></head><body><main><p>One More Paper</p><h1>${escaped(title)}</h1>${content}</main></body></html>`,
     {
@@ -102,8 +114,10 @@ function page(title: string, content: string, status = 200) {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
         "Content-Security-Policy":
-          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-        "Referrer-Policy": "no-referrer",
+          `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; base-uri 'none'; frame-ancestors 'none'`,
+        // no-referrer makes browser form POSTs send Origin: null, which our
+        // same-origin check rejects. Keep the origin for local forms only.
+        "Referrer-Policy": "same-origin",
       },
     },
   );
@@ -197,6 +211,8 @@ export async function authorize(request: Request, env: AppEnv) {
     return page(
       "Connect your research library",
       `<p><strong>${escaped(client.clientName ?? "MCP client")}</strong> is requesting access to your library.</p><p>Access includes the full Markdown of private articles. Requested content is shared with the connected client.</p><ul><li>Search and read articles, quality reports and job status.</li>${scopes.includes("jobs:write") ? "<li>Queue, cancel and retry processing jobs on your Mac.</li>" : ""}</ul><form method="post" action="${escaped(url.pathname + url.search)}"><input type="hidden" name="csrf" value="${escaped(session.csrf)}"><button name="decision" value="allow">Allow connection</button> <button name="decision" value="deny">Cancel</button></form>`,
+      200,
+      auth.redirectUri,
     );
   if (request.method !== "POST")
     throw new HttpError(
