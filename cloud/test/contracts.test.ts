@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { jobSchema } from "../src/jobs";
-import { searchExpression, searchableBody } from "../src/library";
+import { readableDocumentFilename, searchExpression, searchableBody } from "../src/library";
 import { settingsSchema, defaultSettings } from "../src/settings";
 import { idFromPath, integer } from "../src/http";
 
@@ -59,6 +59,17 @@ test("Artifact paths reject traversal and all pagination is bounded", () => {
   assert.equal(integer("100000000", 50, 100), 100);
   assert.equal(integer("-4", 50, 100), 0);
   assert.equal(integer("NaN", 50, 100), 50);
+});
+
+test("Document object names remain readable while rejecting unsafe path characters", () => {
+  assert.equal(
+    readableDocumentFilename("How companies use AI — Author (2025)"),
+    "How companies use AI - Author (2025).md",
+  );
+  assert.equal(
+    readableDocumentFilename("A paper / with a very long title"),
+    "A paper - with a very long title.md",
+  );
 });
 
 test("Search indexes the article, while provenance stays in its original file", () => {

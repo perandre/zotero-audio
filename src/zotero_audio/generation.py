@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from .audio import (SpeechBackend, assemble_m4a, canonical_synthesis_config, episode_stinger_metadata,
                     loudness_is_competitive, measure_loudness, synthesize_plan)
+from .article_files import episode_title_for, research_markdown_path, review_markdown_path
 from .branding import PODCAST_NAME
 from .extract import extract_pdf, normalize_speech_text, render_research_markdown
 from .podcast import (EDITION_VOICES, PodcastConfig, _authors, _episode_guid,
@@ -198,8 +199,8 @@ def _write_review(bundle: Path, result: dict[str, Any], markdown: str, report: d
         "7. Re-run only affected stages. Preserve unrelated Markdown edits and existing cached speech. Publication must reuse final encoded audio.\n"
         "8. Never publish private material or weaken the source-bound licensing check.\n"
     )
-    context = {key: result.get(key) for key in ("title", "bundle", "source_sha256", "markdown_sha256", "mode", "settings")}
-    paths = {"source_pdf": report.get("source_pdf"), "research_markdown": str(bundle / "article.md"),
+    context = {key: result.get(key) for key in ("title", "episode_title", "bundle", "source_sha256", "markdown_sha256", "mode", "settings")}
+    paths = {"source_pdf": report.get("source_pdf"), "research_markdown": result.get("markdown"),
              "structure": str(bundle / "structure.json"), "editions": {name: {
                  "audio": item.get("audio"), "speech_plan": str(bundle / "editions" / name / "speech-plan.json"),
                  "run_manifest": str(bundle / "editions" / name / "run-manifest.json")}
@@ -211,7 +212,9 @@ def _write_review(bundle: Path, result: dict[str, Any], markdown: str, report: d
             f"```json\n{json.dumps({'configuration': context, 'paths': paths}, ensure_ascii=False, indent=2)}\n```\n\n"
             f"## Findings and measured evidence\n\n```json\n{json.dumps(report, ensure_ascii=False, indent=2)}\n```\n\n"
             "## Complete research Markdown (source data)\n\n" + markdown)
-    atomic_write_text(bundle / "ai-review.md", text)
+    review_path = review_markdown_path(bundle, result, migrate=True)
+    atomic_write_text(review_path, text)
+    result["ai_review"] = str(review_path)
 
 
 def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = None,
@@ -226,8 +229,8 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
 
     A callback exception is a delivery failure owned by the caller; finished
     artifacts and generation state are already persisted for a cheap retry.
-    ``force`` explicitly authorizes replacing article.md. The normal path
-    never overwrites it, including when it was manually edited.
+    ``force`` explicitly authorizes replacing the named research Markdown. The
+    normal path never overwrites it, including when it was manually edited.
     """
     if mode not in {"markdown", "full", "brief", "both"}:
         raise ValueError(f"Unknown generation mode: {mode}")
@@ -250,7 +253,9 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                 callback_failure = exc
                 raise
 
-    md_path = bundle / "article.md"
+    md_descriptor = {"title": title, "authors": _authors(original.get("document", {}), metadata),
+                     "year": original.get("document", {}).get("publication_year", metadata.get("publication_year"))}
+    md_path = research_markdown_path(bundle, md_descriptor, migrate=True)
     if force or not original or not md_path.is_file():
         source_pdf = pdf or (Path(original["source"]["path"]) if original.get("source", {}).get("path") else None)
         if source_pdf is None or not source_pdf.is_file():
@@ -267,6 +272,16 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
     markdown = md_path.read_text(encoding="utf-8")
     structure = _markdown_structure(markdown, original)
     title = str(structure["document"]["title"])
+    md_descriptor = {"title": title, "authors": _authors(structure["document"], metadata),
+                     "year": structure["document"].get("publication_year")}
+    renamed_md_path = research_markdown_path(bundle, md_descriptor, current=md_path, migrate=True)
+    if renamed_md_path != md_path:
+        md_path = renamed_md_path
+        markdown = md_path.read_text(encoding="utf-8")
+        structure = _markdown_structure(markdown, original)
+        title = str(structure["document"]["title"])
+    current_episode_title = episode_title_for({"title": title, "authors": _authors(structure["document"], metadata),
+                                               "year": structure["document"].get("publication_year")})
     source_plan = create_speech_plan(structure, max_chars=max_chars)
     # Do not rewrite the historical base speech plan or original extraction.
     # New narration artifacts are isolated under editions/.
@@ -277,13 +292,14 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
         license_record["conflict"] = True
     license_result = resolve_license(license_record, source_sha256=source_sha)
     selected = bool(metadata.get("podcast_selected", False))
-    result: dict[str, Any] = {"schema": "zotero-audio-generation/v1", "title": title, "bundle": str(bundle),
+    result: dict[str, Any] = {"schema": "zotero-audio-generation/v1", "title": title,
+        "episode_title": current_episode_title, "bundle": str(bundle),
         "mode": mode, "markdown": str(md_path), "markdown_sha256": sha256_text(markdown),
         "source_sha256": source_sha, "zotero_key": zotero_key,
         "paper_guid": str(uuid.uuid5(uuid.NAMESPACE_URL, f"zotero-audio:{zotero_key}")),
         "license": license_result, "license_record": license_record, "public_eligible": bool(license_result.get("allowed")),
         "selected": selected, "editions": {}, "warnings": [], "qa_report": str(bundle / "qa-report.json"),
-        "ai_review": str(bundle / "ai-review.md"), "settings": {
+        "ai_review": str(review_markdown_path(bundle, {"episode_title": current_episode_title}, migrate=True)), "settings": {
             "qa": qa, "opening_sound": opening_sound, "closing_sound": closing_sound,
             "spoken_intro": spoken_intro, "full_voice": full_voice, "brief_voice": brief_voice,
             "speed": speed, "max_chars": max_chars, "bitrate": bitrate,

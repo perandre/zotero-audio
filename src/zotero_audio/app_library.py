@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 
+from .article_files import episode_title_for, research_markdown_path, review_markdown_path
 from .app_state import Store
 from .util import sha256_file
 
@@ -22,6 +23,7 @@ def visible_article(article: dict, *, local: bool = True) -> dict:
               "qa_status", "warnings", "updated_at", "artifacts", "source_sha256", "markdown_sha256", "editions",
               "publication_status", "icloud_status", "backup_status", "source_changed", "metadata_warning")
     value = {key: article[key] for key in fields if key in article}
+    value["episode_title"] = episode_title_for(article)
     value["editions"] = {
         name: {key: record[key] for key in ("edition", "title", "duration", "audio_sha256", "audio_url", "status", "publication_status", "qa_status") if key in record}
         for name, record in article.get("editions", {}).items()
@@ -46,10 +48,13 @@ def import_existing(store: Store) -> int:
     records = list(publication.values()) if isinstance(publication, dict) else publication
     count = 0
     for bundle in sorted((root / "bundles").glob("*")):
-        if not bundle.is_dir() or not (bundle / "article.md").is_file():
+        if not bundle.is_dir():
             continue
         metadata = read_json(bundle / "metadata.json")
         structure = read_json(bundle / "structure.json")
+        markdown_path = research_markdown_path(bundle, structure.get("document", {}), migrate=True)
+        if not markdown_path.is_file():
+            continue
         doc = structure.get("document", {})
         key = metadata.get("zotero_key") or structure.get("zotero_key")
         if not key:
@@ -92,17 +97,18 @@ def import_existing(store: Store) -> int:
             warning = "Existing audio has QA findings; it remains available for listening."
             if warning not in warnings:
                 warnings.append(warning)
-        markdown = (bundle / "article.md").read_text(encoding="utf-8")
+        markdown = markdown_path.read_text(encoding="utf-8")
+        review_path = review_markdown_path(bundle, {"title": title, "authors": authors, "year": metadata.get("publication_year")}, migrate=True)
         article = {**old, "id": key, "title": title, "authors": authors, "year": metadata.get("publication_year"),
                    "source_url": metadata.get("url") or (f"https://doi.org/{metadata['doi']}" if metadata.get("doi") else None),
                    "license_status": "open" if rights and ("creativecommons.org/licenses/by/4.0" in rights.lower() or "creativecommons.org/publicdomain/zero" in rights.lower()) else "private",
                    "source_path": batch.get("source_path") or structure.get("source", {}).get("path"), "source_sha256": source_sha,
-                   "bundle": str(bundle), "markdown": str(bundle / "article.md"), "markdown_sha256": sha256_file(bundle / "article.md"),
+                   "bundle": str(bundle), "markdown": str(markdown_path), "markdown_sha256": sha256_file(markdown_path),
                    "markdown_status": "ready", "audio_status": "ready" if editions else "not_started", "qa_status": qa_status,
                    "warnings": warnings, "metadata": metadata, "editions": editions,
-                   "artifacts": {"markdown": True, "audio": bool(editions), "review": (bundle / "ai-review.md").is_file()}}
-        if (bundle / "ai-review.md").is_file():
-            article["review"] = str(bundle / "ai-review.md")
+                   "artifacts": {"markdown": True, "audio": bool(editions), "review": review_path.is_file()}}
+        if review_path.is_file():
+            article["review"] = str(review_path)
         source = Path(article["source_path"]) if article.get("source_path") else None
         if source and source.is_file():
             article["source_stat"] = [source.stat().st_size, source.stat().st_mtime_ns]
@@ -118,6 +124,32 @@ def import_existing(store: Store) -> int:
         count += 1
     store.set_state("last_import_count", count)
     return count
+
+
+def migrate_catalog_markdown(store: Store) -> int:
+    """Rename known research and review Markdown files to their episode names."""
+    migrated = 0
+    for article in store.all_articles():
+        changed = False
+        markdown = Path(article["markdown"]) if article.get("markdown") else None
+        if markdown and markdown.is_file():
+            desired = research_markdown_path(markdown.parent, article, current=markdown, migrate=True)
+            if desired != markdown:
+                changed = True
+                article["markdown"] = str(desired)
+                article["markdown_sha256"] = sha256_file(desired)
+        review = Path(article["review"]) if article.get("review") else None
+        if review and review.is_file():
+            desired = review_markdown_path(review.parent, article, current=review, migrate=True)
+            if desired != review:
+                changed = True
+                article["review"] = str(desired)
+        if changed:
+            markdown_text = Path(article["markdown"]).read_text(encoding="utf-8") if article.get("markdown") else None
+            with store.edit_article(article["id"], markdown=markdown_text) as current:
+                current.update({key: value for key, value in article.items() if key in {"markdown", "markdown_sha256", "review"}})
+            migrated += 1
+    return migrated
 
 
 def refresh_zotero(store: Store) -> dict:

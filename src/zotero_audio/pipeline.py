@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .article_files import research_markdown_path
 from .extract import bundle_name, extract_pdf, render_markdown, write_extraction
 from .segment import create_speech_plan
 from .util import atomic_write_json, load_json
@@ -32,7 +33,7 @@ def prepare_bundle(
             raise RuntimeError(f"Multiple bundles found for Zotero key {zotero_key}")
     structure_path = bundle / "structure.json"
     plan_path = bundle / "speech-plan.json"
-    article_path = bundle / "article.md"
+    article_path = research_markdown_path(bundle, candidate_structure.get("document", {}), migrate=True)
 
     if not force and structure_path.exists() and plan_path.exists() and article_path.exists():
         existing_structure = load_json(structure_path)

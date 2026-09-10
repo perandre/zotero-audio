@@ -8,7 +8,7 @@ from zotero_audio import generation
 from zotero_audio.app_state import Store
 from zotero_audio.app_worker import Cancelled, LocalWorker, readable_filename
 from zotero_audio.extract import render_research_markdown
-from zotero_audio.util import atomic_write_json, json_digest, sha256_file
+from zotero_audio.util import atomic_write_json, episode_title, json_digest, readable_markdown_filename, sha256_file
 
 
 @pytest.fixture
@@ -27,9 +27,10 @@ def article_store(tmp_path):
     structure["structure_sha256"] = json_digest(structure)
     atomic_write_json(bundle / "structure.json", structure)
     markdown = render_research_markdown(structure)
-    (bundle / "article.md").write_text(markdown)
+    markdown_path = bundle / readable_markdown_filename(episode_title(structure["document"]["title"], ["Anna Author"], "2025"))
+    markdown_path.write_text(markdown)
     article = {"id": "ARTICLE1", "title": structure["document"]["title"], "authors": ["Anna Author"], "year": "2025",
-               "bundle": str(bundle), "metadata": structure["document"], "markdown": str(bundle / "article.md"),
+               "bundle": str(bundle), "metadata": structure["document"], "markdown": str(markdown_path),
                "source_sha256": "a" * 64, "editions": {}, "artifacts": {"markdown": True, "audio": False}, "warnings": []}
     store.put_article(article, markdown=markdown)
     return store, article

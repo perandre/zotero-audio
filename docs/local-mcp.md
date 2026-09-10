@@ -38,6 +38,13 @@ Cloudflare HTTPS Streamable HTTP endpoint protected by OAuth. The local stdio
 transport cannot be added as a remote phone URL, and private retrieval never
 overrides the podcast publication licensing gate.
 
+Research Markdown is stored locally inside each article bundle under a filename
+matching the human-facing episode title, for example
+`How companies use AI - Author (2025).md`. The cloud bridge mirrors the current
+full document to R2 using the same readable filename. Legacy `article.md` paths
+are migrated when the local daemon opens the article; article IDs and catalog
+references remain stable.
+
 Verification uses the official MCP Python client over real subprocess stdio,
 including initialization, tool/resource discovery, structured and full-text
 retrieval, unknown IDs, invalid arguments, job idempotency, cancellation and

@@ -11,7 +11,8 @@ import traceback
 import uuid
 from pathlib import Path
 
-from .app_library import artifact_path, import_existing, read_json, refresh_zotero
+from .app_library import artifact_path, import_existing, migrate_catalog_markdown, read_json, refresh_zotero
+from .article_files import research_markdown_filename, review_markdown_path
 from .app_state import Store, TERMINAL, now
 from .util import sha256_file
 
@@ -95,6 +96,7 @@ class LocalWorker:
 
     def start(self):
         self.store.recover()
+        migrate_catalog_markdown(self.store)
         for target, name in ((self.run, "generation"), (self.deliver, "delivery")):
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
@@ -200,7 +202,8 @@ class LocalWorker:
                     markdown = markdown_path.read_text(encoding="utf-8")
                     with self.store.edit_article(article_id, markdown=markdown) as current:
                         current.update(markdown=event["markdown"], markdown_sha256=event["markdown_sha256"], markdown_status="ready",
-                                       qa_status=event.get("qa_status", "unchecked"), review=str(markdown_path.parent / "ai-review.md"), managed=True)
+                                       qa_status=event.get("qa_status", "unchecked"),
+                                       review=str(review_markdown_path(markdown_path.parent, current, migrate=True)), managed=True)
                         current["artifacts"] = {**current.get("artifacts", {}), "markdown": True, "review": True}
                         current["warnings"] = _merge_warnings(generation.get("warnings"), current.get("delivery_warnings"))
                     self.queue_backup(current, Path(event["markdown"]), "Markdown", settings)
@@ -211,7 +214,7 @@ class LocalWorker:
                 # and listening use an immutable, readable revision instead.
                 record["audio"] = str(self.snapshot(Path(record["audio"]), expected_hash=record.get("audio_sha256"), name=readable_filename(display, edition)))
                 if record.get("markdown") and Path(record["markdown"]).is_file():
-                    record["markdown"] = str(self.snapshot(Path(record["markdown"]), name=readable_filename(display, edition, ".md")))
+                    record["markdown"] = str(self.snapshot(Path(record["markdown"]), name=research_markdown_filename(display)))
                 publishing = bool(settings["auto_publish"] and record.get("public_eligible") and record.get("selected"))
                 private = not record.get("public_eligible")
                 destination = (str(Path(settings["icloud_folder"]) / readable_filename(display, edition))
