@@ -1,300 +1,199 @@
-# Zotero Audio
+# 1 More Paper
 
-Zotero Audio is a local macOS pipeline that turns a Zotero PDF attachment into
-TTS-friendly Markdown and an AAC-encoded M4A file without sending article text
-to a service. It targets Apple Silicon Macs with 16 GB of unified memory.
+Read, listen to and search the research already saved in Zotero. **Markdown is a
+finished product; audio is optional.** A persistent Python worker uses Kokoro on
+Apple silicon, while a small dashboard and short commands keep every article’s
+full title, progress, files and quality findings visible. The same operations
+are available to AI agents through MCP and a portable agent plugin.
 
-The generated bundle preserves the source PDF SHA-256, Zotero key, PDF page
-markers, block-to-page mapping, segment text hashes, exact TTS configuration,
-per-segment audio hashes, final output hash, and QA results. Synthesis is
-content-addressed: rerunning the same plan and voice reuses verified segments.
+- **On your Mac:** run `za dashboard`, or open [the local dashboard](http://127.0.0.1:8765).
+- **From another device:** [open your private library](https://one-more-paper.perandre.workers.dev).
+- **Remote MCP:** `https://one-more-paper.perandre.workers.dev/mcp`.
 
-## Requirements
+The owner login key is stored outside Git in
+`/Users/pesh/Sites/zotero-audio-runtime/control/Cloud login.txt`. Keep its contents
+private. The Mac’s separate bridge connection is configured in
+`/Users/pesh/Sites/zotero-audio-runtime/control/cloud.json`.
 
-- macOS on Apple Silicon
-- Zotero with `Settings → Advanced → Allow other applications on this computer to communicate with Zotero` enabled (recommended)
-- Python 3.11 or newer
-- Built-in `/usr/bin/afconvert` for AAC encoding
-- FFmpeg for two-pass loudness normalization and final-AAC measurement
-- Local storage for the Kokoro-82M BF16 model and Python environment
+## Everyday commands
 
-## Install
+```sh
+za                         # A human-readable action menu
+za sync --wait             # Read saved Zotero PDFs and import existing output
+za markdown new            # Create Markdown for articles without it
+za markdown all            # Consider the whole library; preserve existing Markdown
+za full                    # Choose one article by its full title
+za brief "Article title"   # Create an authors’ summary edition
+za both "Article title"    # Create Brief and Full independently
+za search "AI adoption"    # Search your research text
+za status                  # Current stage, full titles and delivery progress
+za dashboard               # Preview text, play audio, reveal files and change settings
+za review "Article title"  # Read findings and the complete AI review brief
+za open "Article title" --audio --reveal
+za retry                   # Retry the latest eligible job using cached work
+```
 
-```bash
+`new` means the requested output is missing. Existing Markdown and verified
+speech are reused. `--force` explicitly replaces Markdown from the PDF, including
+manual edits. Add `--wait` to watch generation, `--no-qa` to skip optional checks,
+or `--json` for machine-readable results. Noninteractive callers must supply an
+unambiguous title or an ID returned by `za list --json`; human output always
+includes the full title.
+
+The dashboard’s command palette offers the same common actions. It distinguishes
+**Markdown ready**, **Audio ready**, **Publishing**, and **iCloud/backup pending**.
+Opening local files in Finder requires the local dashboard. Private audio can
+also be played from its iCloud export; it is not uploaded to the cloud library.
+
+## What happens to each article
+
+```text
+Zotero GET API → extraction → research Markdown → optional text QA
+                                 │
+                                 ├─ private cloud search and full-text MCP access
+                                 └─ optional narration → Kokoro → final AAC → optional audio QA
+                                                                          │
+                                            eligible public audio → upload assets → update RSS
+                                            private audio → chosen iCloud folder
+                                            optional backup → separate background delivery
+```
+
+Research Markdown preserves links, citations and provenance. Narration omits
+long URLs, citation markers, reference lists and contact boilerplate without
+asking an LLM to rewrite the research. Optional checks run on Markdown before
+speech and on the finished audio afterward. Usable results remain available
+with warnings; basic failures such as empty or invalid audio still fail clearly.
+
+Each edition gets one final encode, including its spoken introduction and
+selected opening/closing sounds. Publishing reuses that finished file. A ready
+Brief, Full edition or article can publish while other work continues. Only
+show-level artwork is needed; chapters and timed transcripts are not required
+by this new generation path.
+
+**`auto_publish` applies to explicitly requested audio jobs.** With it enabled,
+new `full`, `brief` and `both` jobs express publication intent, while the existing
+source-bound licensing rules and podcast configuration still decide eligibility.
+Importing existing files or refreshing Zotero never publishes them automatically.
+Private and unverified material remains available for local listening and
+private research access.
+
+## Storage and privacy
+
+| Location | Contents |
+| --- | --- |
+| Mac runtime | Working Markdown, audio, source metadata, QA evidence, SQLite state, logs and reusable model/segment caches. |
+| Private Cloudflare R2 | Current full Markdown and QA reports, including private/non-open articles. |
+| Cloudflare D1 | Search index, article metadata, durable jobs and settings. |
+| Your chosen iCloud folder | Readably named private M4A audio, without podcast metadata or logs. |
+| Optional backup folder | Separate versions of Markdown/audio; disabled by default. |
+
+Cloudflare Workers Free hosts the authenticated dashboard and MCP. R2 Standard,
+D1 and OAuth KV use their free allowances. Application caps are conservative,
+but **account-wide usage is shared, and these are not an absolute $0 billing
+cap**. See [cloud setup and limits](cloud/README.md) before increasing capacity.
+
+Searching synced Markdown works while the Mac is asleep. New extraction/audio
+jobs wait for the Mac. Access through an authorized MCP client shares requested
+private text with that client. Public podcast files remain in a separate bucket.
+Backup, iCloud cloud synchronization and publication retries never roll back
+completed local generation.
+
+## Install and iterate on this Mac
+
+Requirements: Apple silicon macOS, Python 3.11+, FFmpeg, macOS `afconvert`, Zotero
+and local Kokoro model storage. Enable Zotero’s **Allow other applications on this
+computer to communicate with Zotero** setting. The normal integration reads
+`http://localhost:23119/api/`; Zotero itself supplies stored/linked PDF paths and
+parent metadata. Direct database/storage arguments remain recovery fallbacks.
+
+```sh
 REPO=/Users/pesh/Sites/zotero-audio
 RUNTIME=/Users/pesh/Sites/zotero-audio-runtime
 mkdir -p "$RUNTIME"
 python3.12 -m venv "$RUNTIME/venv"
-"$RUNTIME/venv/bin/pip" install -e "${REPO}[mlx,dev]"
-```
-
-Keep `HF_HOME`, the virtual environment, segment cache, manifests, and logs
-under `RUNTIME`, outside iCloud-backed Documents:
-
-```bash
+"$RUNTIME/venv/bin/python" -m pip install -e "${REPO}[mlx,dev]"
+export PATH="$RUNTIME/venv/bin:$PATH"
+export ZOTERO_AUDIO_RUNTIME="$RUNTIME"
 export HF_HOME="$RUNTIME/huggingface"
-mkdir -p "$HF_HOME"
+za doctor
+za install
+za sync --wait
+za dashboard
 ```
 
-## Run
+`za install` installs a per-user `launchd` worker and disables the previous
+five-minute scheduler at cutover. It preserves models and generated files.
+For foreground development, use `za serve` instead of installing the service.
+One generation worker owns the model and the runtime lock; do not run a legacy
+batch against the same runtime concurrently.
 
-From a direct PDF path:
+Most Python changes need only `za restart`; editable installation avoids an app
+bundle rebuild. Frontend files are ordinary HTML/CSS/JavaScript. Reinstall Python
+dependencies only when they change. Keep model files and runtime state outside
+Git and outside the iCloud delivery folder.
 
-```bash
-"$RUNTIME/venv/bin/zotero-audio" run \
-  --pdf '/path/to/article.pdf' \
-  --output-root outputs
+```sh
+"$RUNTIME/venv/bin/python" -m pytest tests/test_app_state.py tests/test_app_worker.py tests/test_app_bridge.py tests/test_generation.py tests/test_app_mcp.py
+cd "$REPO/cloud"
+npm ci
+npm run check
+npm test
 ```
 
-From a Zotero attachment key:
+Cloud integration tests additionally require local Wrangler and local secrets;
+[cloud/README.md](cloud/README.md) documents the setup, migrations, OAuth tests and
+deployment commands. Test changes at the affected layer, then use a real article
+for any extraction/speech change that needs listening or visual review.
 
-```bash
-"$RUNTIME/venv/bin/zotero-audio" run \
-  --zotero-key ABCD1234 \
-  --output-root outputs
+Inspect local failures with `za status --json`, `za doctor`, and the runtime
+`control/daemon.log`, `control/daemon.stderr.log`, `control/events.jsonl`, and
+`control/errors/` files. `za restart` waits for the current atomic stage to stop
+safely; cached speech survives. Lifecycle commands also handle an installed
+launchd service:
+
+```sh
+za stop       # Stop the worker without losing queued work or cached audio
+za restart    # Start/restart it and resume interrupted work
 ```
 
-When Zotero is running with its local API enabled, the pipeline resolves the
-attachment path and parent-item metadata through Zotero itself. It discovers
-stored and linked PDF attachments, so `--zotero-storage` and `--zotero-db` are
-normally unnecessary. The legacy storage/database arguments remain available
-as a fallback for older Zotero versions, headless runs, and recovery work.
+## Agents and phone access
 
-For a complete local Zotero library, the resumable batch runner delivers only
-finished M4A files to the requested destination while retaining manifests and
-segment caches under the ignored state directory:
+[plugins/one-more-paper](plugins/one-more-paper/README.md) follows
+[Agent Plugins 1.0.0](https://agent-plugins.org/specification), with root
+`plugin.json`, `mcp.json`, and a reusable skill. Its local MCP connection runs
+`za mcp` over stdio using the official Python SDK. The CLI and dashboard operate
+fully without this plugin or any AI.
 
-```bash
-"$RUNTIME/venv/bin/python" "$REPO/scripts/batch_library.py" \
-  --zotero-storage "$HOME/Zotero/storage" \
-  --destination /path/to/audio-library \
-  --state-dir "$RUNTIME/full-library" \
-  --log-file "$RUNTIME/full-library/batch.log"
+For ChatGPT or another remote client, use the HTTPS `/mcp` URL above and complete
+the owner login/OAuth consent flow. Read scope supports search, complete Markdown,
+quality reports and status; write scope additionally queues, cancels and retries
+jobs. The server exposes named operations, never arbitrary shell commands or
+filesystem access. Search results carry full titles, evidence snippets and
+canonical authenticated links.
+
+The remote service uses the official MCP SDK and OAuth provider. Initial
+production verification exercised S256 PKCE, read/write scope isolation,
+search, exact full private-Markdown retrieval, and a remotely queued Markdown
+job completed by the Mac. Both plugin manifests were checked against the
+standard’s actual schemas. **Connecting and using the actual ChatGPT phone
+client still requires verification in that account**; server tests alone do not
+establish phone-client compatibility or workspace permission.
+
+## Direct pipeline and further documentation
+
+The original `zotero-audio` CLI remains available for focused pipeline work:
+
+```sh
+zotero-audio prepare --pdf article.pdf --output-root "$RUNTIME/work"
+zotero-audio synthesize "$RUNTIME/work/<bundle>" --engine kokoro-mlx
+zotero-audio assemble "$RUNTIME/work/<bundle>" --bitrate 64000
+zotero-audio podcast health --config "$RUNTIME/podcast.toml" --remote
 ```
 
-The batch runner keeps one BF16 Kokoro model loaded for the run and writes
-progress to the local batch log. It writes only completed M4As to the
-destination; extraction, segmentation, PCM, manifests, and caches stay under
-`RUNTIME`. English defaults to `am_michael`; the operational segmentation default
-is 900 characters, selected from the included full-paper benchmark.
-Because Kokoro-82M has no Norwegian frontend, Norwegian material is rendered
-with the British-English frontend and `bf_emma`; no system TTS is used.
-
-## Automatic library synchronization
-
-For a zero-click workflow, `auto_sync.py` runs the batch runner incrementally
-and then applies the title, author, year, and Zotero-key metadata. With the
-local API enabled, Zotero supplies the complete PDF attachment list and file
-paths, including linked files; every new PDF is still processed automatically.
-Source and output hashes keep unchanged items out of the synthesis queue, and a
-lock prevents overlapping runs. The Kokoro model is loaded only when a new or
-changed PDF needs audio.
-
-The included macOS `launchd` job checks every five minutes and once at login:
-
-```bash
-/Users/pesh/Sites/zotero-audio/scripts/install_launchd.sh
-```
-
-The supplied plist assumes the paths used by this installation:
-
-- Zotero storage: `/Users/pesh/Zotero/storage`
-- Zotero database: `/Users/pesh/Zotero/zotero.sqlite`
-- Audio destination: `/Users/pesh/Music/Zotero Audio`
-- Runtime and logs: `/Users/pesh/Sites/zotero-audio-runtime/full-library`
-
-Edit `launchd/com.pesh.zotero-audio.plist` before installation if any path is
-different. The `--zotero-storage` and `--zotero-db` entries are compatibility
-fallbacks; they can be removed when the local API is enabled. The job can be
-inspected with:
-
-```bash
-launchctl print "gui/$(id -u)/com.pesh.zotero-audio"
-tail -f /Users/pesh/Sites/zotero-audio-runtime/full-library/auto-sync.stdout.log
-```
-
-Completed files trigger a macOS notification. Failed or scanned (OCR-required)
-PDFs remain in the batch manifest and trigger an action-required notification;
-the next scheduled run retries them. To stop the automation, unload the plist:
-
-```bash
-launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pesh.zotero-audio.plist"
-```
-
-Each stage can also be run separately:
-
-```bash
-"$RUNTIME/venv/bin/zotero-audio" prepare --pdf article.pdf --output-root "$RUNTIME/work"
-"$RUNTIME/venv/bin/zotero-audio" synthesize "$RUNTIME/work/<bundle>" --engine kokoro-mlx
-"$RUNTIME/venv/bin/zotero-audio" assemble "$RUNTIME/work/<bundle>" --bitrate 64000
-```
-
-The default excludes the reference list from speech. Add
-`--include-references` when references are part of the intended listening copy.
-Scanned PDFs with no embedded text fail explicitly; preprocess those with OCR or
-Marker rather than silently producing an empty recording.
-
-## Reproduce the Kokoro benchmark
-
-```bash
-"$RUNTIME/venv/bin/python" "$REPO/scripts/benchmark_workers.py" \
-  --pdf "$HOME/Zotero/storage/8HK8HFKA/8HK8HFKA.pdf" \
-  --runtime-dir "$RUNTIME" \
-  --segment-chars 600 900 1200
-```
-
-This runs a whole paper with one and two persistent workers at each segment
-size, records per-worker load/synthesis time and peak memory in a local JSON
-result plus log, and stops a hung run at the timeout. Treat two-worker mode as
-diagnostic: independent MLX processes can contend for Metal and hang under load
-([MLX-Audio issue #733](https://github.com/Blaizzy/mlx-audio/issues/733)). Use
-the fastest safe segment size from the result as `--max-chars`; do not assume
-900 is optimal. See [the engine evaluation](docs/tts-evaluation.md) for the
-quality rationale.
-
-## Repository safety
-
-`outputs/`, `work/`, `models/`, `.cache/`, and virtual environments are ignored.
-Do not use `git add -f` on those paths: article Markdown, audio, and model weights
-are intentionally local artifacts. Zotero storage is read-only to the pipeline.
-
-## Podcast automation
-
-The podcast stage builds two truthful sibling editions from a completed bundle:
-`Brief` contains the authors' abstract and, when short and confidently bounded,
-their conclusion for academic papers. For Zotero `Report` items, it contains a
-bounded publisher executive summary, key findings, or another supported summary.
-`Full Reading` contains the complete approved speech plan.
-Each has its own spoken introduction, closing, M4A, 3000 px cover, VTT and HTML
-transcripts, Markdown companion transcript, chapters, episode record, and stable
-GUID. The two editions never share a mislabeled audio or transcript. Podcast
-voices are fixed by edition: `Brief` uses `af_heart`, while `Full Reading` uses
-`am_michael`.
-Newly assembled episodes begin with the short `typing_sound_01` effect by
-Soul_Serenity_Sounds from [Pixabay](https://pixabay.com/no/sound-effects/typing-sound-01-229863/)
-under the [Pixabay Content License](https://pixabay.com/service/license-summary/),
-immediately before the spoken introduction. Transcript cues and chapters begin
-after the sound so they remain aligned with the narration. Previously assembled
-episodes retain the opening sound that was used when they were built.
-
-Copy [podcast.example.toml](podcast.example.toml) outside the repository and
-fill in the private iCloud root, runtime state root, public mirror, HTTPS base
-URL, public owner email, and show identity. Safety defaults are `dry_run = true`
-and `publishing_enabled = false`.
-
-Preview an exact build without writing files or loading Kokoro:
-
-```bash
-"$RUNTIME/venv/bin/zotero-audio" podcast build \
-  "$RUNTIME/full-library/bundles/<bundle>" \
-  --config "$RUNTIME/podcast.toml"
-```
-
-For Zotero-backed bundles, parent-item metadata is automatic. Title, ordered
-authors, publication data, journal, DOI/URL, abstract, language, rights, tags,
-and collection membership are captured in `metadata.json` beside the bundle
-and reused by direct podcast commands. `--metadata-json` is only an explicit
-override. New extractions also use conservative semantic line reconstruction,
-remove contact/URL furniture from narration, omit references and visual grids,
-and retain a PDF-page provenance map.
-
-After reviewing the paths, set `dry_run = false`. Private Brief and Full
-Reading files are then created regardless of public eligibility. Put an item in
-the Zotero collection `Podcast Queue`, or add the exact tag `podcast`, to express
-publication intent. Public staging additionally requires a canonical CC BY 4.0,
-CC0 1.0, or Public Domain Mark 1.0 record, a paper URL or DOI, and
-`publishing_enabled = true`. The preferred source is Zotero's Rights field (or
-a strictly parsed Rights/License line in Extra). An exact allowlisted statement
-embedded in the checksum-bound source PDF is also accepted and recorded as PDF
-evidence. Missing, vague, conflicting, NC, ND, and embargoed rights stay private.
-
-The [Zotero license-status add-on](docs/zotero-license-status.md) maintains an
-automatic **Audio — License blocked** saved search. It applies gate-status tags
-and records license evidence and blocking reasons in Extra for each PDF-backed
-record, while preserving existing Rights and collection membership.
-
-The same add-on exposes a [read-only local feed API](docs/zotero-feed-api.md)
-at `http://localhost:23119/zotero-audio/feeds`. Local tools can list subscriptions
-and read feed entries with read/unread filtering before selecting papers to save.
-Reading a feed through this API does not mark entries read or enqueue audio.
-
-For automatic runs, save the completed file as
-`/Users/pesh/Sites/zotero-audio-runtime/podcast.toml`; the existing launchd job
-auto-detects it. A different location can be supplied by adding these two
-entries to the plist's `ProgramArguments` array and reinstalling it:
-
-To rebuild the Brief edition independently for every PDF, including sources
-whose Full Reading needs review, run the resumable library pass below. The
-`--select-all` flag records this invocation as explicit publication intent; the
-normal license and content gates still prevent unsafe or unverified sources
-from entering the public feed. Outcomes are recorded in
-`brief-library-manifest.json` under the runtime directory.
-
-```bash
-"$RUNTIME/venv/bin/python" "$REPO/scripts/build_library_briefs.py" \
-  --zotero-storage "$HOME/Zotero/storage" \
-  --zotero-db "$HOME/Zotero/zotero.sqlite" \
-  --state-dir "$RUNTIME/full-library" \
-  --podcast-config "$RUNTIME/podcast.toml" \
-  --select-all
-```
-
-To build Full Reading editions for every PDF in Zotero's `00 Inbox` collection,
-run the corresponding resumable Inbox pass. It selects each Inbox source for
-the podcast, while the normal extraction, content, and license gates still
-keep unsafe or unverified sources out of the public Full feed. Outcomes are
-recorded in `inbox-full-manifest.json`.
-
-```bash
-"$RUNTIME/venv/bin/python" "$REPO/scripts/build_inbox_full.py" \
-  --zotero-storage "$HOME/Zotero/storage" \
-  --zotero-db "$HOME/Zotero/zotero.sqlite" \
-  --state-dir "$RUNTIME/full-library" \
-  --podcast-config "$RUNTIME/podcast.toml"
-```
-
-```xml
-<string>--podcast-config</string>
-<string>/Users/pesh/Sites/zotero-audio-runtime/podcast.toml</string>
-```
-
-The generated `public_root` is a static, content-addressed site and object-store
-mirror. For the Cloudflare setup, set `r2_bucket` in the podcast section and
-the existing automatic job uploads new or changed files to that R2 bucket using
-the logged-in Wrangler profile. The bucket's public custom domain is the
-configured `base_url`; no Worker is required for these static files. Submit the
-resulting `brief/feed.xml` and `full/feed.xml` URLs to Spotify once; future
-eligible episodes arrive through RSS without browser automation. Feed files are
-committed last and unchanged reruns preserve their bytes. Validate the mirror
-or its public origin with:
-
-```bash
-"$RUNTIME/venv/bin/zotero-audio" podcast health --config "$RUNTIME/podcast.toml"
-"$RUNTIME/venv/bin/zotero-audio" podcast health --config "$RUNTIME/podcast.toml" --remote
-```
-
-Markdown is kept as an adjacent companion file rather than stuffed into M4A
-metadata. Podcast clients receive the edition-specific timed VTT through the
-Podcasting 2.0 transcript tag. Final encoded audio must measure from -17 to -15
-LUFS integrated and no higher than -1 dBTP; otherwise neither private delivery
-nor public publication advances.
-
-Artwork follows [DESIGN.md](DESIGN.md). All text is locally typeset. A stable,
-three-shape editorial motif is generated from the title, avoiding image-model
-text, visual artifacts, and a network dependency while keeping every episode
-recognizable as part of one series.
-
-The detailed policy, metadata contract, routing rationale, and one-time Spotify
-setup are in [the podcast automation plan](docs/podcast-automation-plan.md).
-
-## Industry reports
-
-Use Zotero's `Report` item type for consultancy, analyst, and industry reports,
-with the issuing organisation in `Institution` and the PDF attached. The same
-pipeline then preserves report metadata, identifies report summaries for Briefs,
-and labels introductions and show notes as reports. A report does not need a
-named author when its issuing organisation is supplied.
-
-The `VIKING PhD / Industry Reports` pilot collection contains five reports from
-McKinsey, Deloitte, and BCG. See [the report workflow](docs/industry-reports.md)
-for intake, evidence notes, summary selection, and the pilot sources.
+See [architecture and maintainer map](docs/architecture.md),
+[the generation contract](docs/generation-api.md),
+[legacy commands and batch examples](docs/legacy-cli.md),
+[Zotero license status](docs/zotero-license-status.md),
+[the read-only Zotero feed inbox](docs/zotero-feed-api.md), and
+[Kokoro evaluation](docs/tts-evaluation.md). Broader article discovery and saving
+new research remain Zotero responsibilities in this version.

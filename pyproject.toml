@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zotero-audio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local, provenance-preserving Zotero PDF to AAC/M4A pipeline for macOS"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,6 +13,7 @@ dependencies = [
   "Pillow>=11,<13",
   "pypdf>=6.0,<7",
   "pymupdf4llm==1.28.2",
+  "mcp>=1.26,<2",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ dev = [
 
 [project.scripts]
 zotero-audio = "zotero_audio.cli:main"
+za = "zotero_audio.app_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

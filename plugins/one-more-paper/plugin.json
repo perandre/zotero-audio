@@ -1,0 +1,8 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "one-more-paper",
+  "version": "0.1.0",
+  "description": "Search saved Zotero research, read complete Markdown, and create optional local audio editions with visible progress.",
+  "repository": "https://github.com/perandre/zotero-audio",
+  "keywords": ["zotero", "research", "markdown", "audio", "mcp"]
+}

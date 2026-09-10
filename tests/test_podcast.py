@@ -380,6 +380,16 @@ def test_config_preserves_safe_defaults(tmp_path: Path):
     assert config.site_title == config.author == config.brief_show.title == config.full_show.title == "1 More Paper"
 
 
+def test_site_accepts_existing_feed_only_episodes_without_individual_artwork(tmp_path: Path):
+    config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state", public_root=tmp_path / "public")
+    item = {"title": "An existing paper with show artwork", "edition": "full", "pub_date": "2026-01-01T00:00:00Z",
+            "page_url": "https://doi.org/10.example/paper", "authors": ["Anna Author"], "show_artwork_only": True}
+    podcast_module._write_site(config, {"episodes": [item]}, cover_url="https://audio.example/show-cover.png")
+    page = (config.public_root / "index.html").read_text()
+    assert item["title"] in page and "Anna Author" in page
+    assert 'src="https://audio.example/show-cover.png"' in page
+
+
 def _bundle(tmp_path: Path) -> Path:
     bundle = tmp_path / "bundle"; bundle.mkdir()
     plan = _source_plan(); atomic_write_json(bundle / "speech-plan.json", plan); atomic_write_json(bundle / "structure.json", _structure())

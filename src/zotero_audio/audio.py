@@ -114,7 +114,7 @@ def measure_loudness(
     }
 
 
-def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
+def normalize_wav_loudness(source: Path, destination: Path, *, verify: bool = True) -> dict[str, Any]:
     """Two-pass loudnorm to a WAV; returns measured post-normalization values."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg: raise RuntimeError("FFmpeg is required for two-pass loudness normalization")
@@ -128,7 +128,7 @@ def normalize_wav_loudness(source: Path, destination: Path) -> dict[str, Any]:
                     f"measured_LRA={first['input_lra']}:measured_thresh={first['input_thresh']}:offset={first['target_offset']}:linear=true:print_format=summary")
     destination.parent.mkdir(parents=True, exist_ok=True)
     _run([ffmpeg, "-y", "-i", str(source), "-af", filter_value, "-ar", str(TARGET_SAMPLE_RATE), "-ac", "1", "-c:a", "pcm_s16le", str(destination)])
-    measured = measure_loudness(destination)
+    measured = measure_loudness(destination) if verify else {"verification": "final-encoded-audio-only"}
     measured["normalization_gain_db"] = float(first["target_offset"])
     measured["input"] = first
     return measured
@@ -138,6 +138,21 @@ class SpeechBackend(Protocol):
     config: dict[str, Any]
 
     def synthesize(self, text: str, destination: Path) -> dict[str, Any] | None: ...
+
+
+_BACKEND_FACTORIES: dict[str, Callable[..., SpeechBackend]] = {}
+
+
+def register_backend(name: str, factory: Callable[..., SpeechBackend]) -> None:
+    """Register a provider without changing orchestration or audio assembly.
+
+    Factories receive the keyword options accepted by ``create_backend``.
+    Providers must identify their model/revision and settings in ``config``
+    and produce a validated mono 24 kHz PCM WAV. No remote fallback occurs.
+    """
+    if not name.strip() or name in {"kokoro-mlx", "kokoro-onnx"}:
+        raise ValueError("Choose a nonempty custom backend name")
+    _BACKEND_FACTORIES[name] = factory
 
 
 def normalize_kokoro_text(text: str) -> str:
@@ -290,6 +305,18 @@ def _render_episode_stinger(destination: Path) -> dict[str, Any]:
     return validate_wav(destination)
 
 
+def canonical_synthesis_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Keep equivalent JSON speed numbers stable without weakening other keys.
+
+    Browser JSON serialization turns 1.0 into 1. Preserve every provider/model
+    setting, including its type, except the explicitly numeric speech speed.
+    """
+    canonical = dict(config)
+    if "speed" in canonical and type(canonical["speed"]) in (int, float):
+        canonical["speed"] = float(canonical["speed"])
+    return canonical
+
+
 class KokoroBackend:
     def __init__(self, *, model: Path, voices: Path, voice: str, speed: float, language: str) -> None:
         if not model.is_file() or not voices.is_file():
@@ -313,7 +340,7 @@ class KokoroBackend:
             "voices": voices.name,
             "voices_sha256": sha256_file(voices),
             "voice": voice,
-            "speed": speed,
+            "speed": float(speed),
             "language": language,
             "sample_rate": TARGET_SAMPLE_RATE,
             "execution_provider": "CPUExecutionProvider",
@@ -321,7 +348,7 @@ class KokoroBackend:
         }
 
     def configure(self, *, voice: str, speed: float, language: str) -> None:
-        self.config.update({"voice": voice, "speed": speed, "language": language})
+        self.config.update({"voice": voice, "speed": float(speed), "language": language})
 
     def synthesize(self, text: str, destination: Path) -> dict[str, Any]:
         import numpy as np
@@ -402,7 +429,7 @@ class MlxKokoroBackend:
             "model_revision": self.model_revision,
             "precision": "bf16",
             "voice": voice,
-            "speed": speed,
+            "speed": float(speed),
             "language": language,
             "sample_rate": TARGET_SAMPLE_RATE,
             "device": "Apple Silicon GPU",
@@ -499,27 +526,41 @@ def create_backend(
             speed=speed,
             language=language,
         )
-    raise ValueError(f"Unsupported Kokoro engine: {engine}")
+    if engine in _BACKEND_FACTORIES:
+        return _BACKEND_FACTORIES[engine](voice=voice, speed=speed, language=language,
+                                          model=model, voices=voices, mlx_model=mlx_model)
+    raise ValueError(f"Unsupported speech engine: {engine}")
 
 
-def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any], int]:
+def synthesize_plan(bundle: Path, backend: SpeechBackend, *,
+                    progress: Callable[[dict[str, Any]], None] | None = None,
+                    force: bool = False) -> tuple[dict[str, Any], int]:
     plan = load_json(bundle / "speech-plan.json")
     segments_dir = bundle / "audio" / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
-    config_digest = json_digest(backend.config)
+    synthesis_config = canonical_synthesis_config(backend.config)
+    config_digest = json_digest(synthesis_config)
     previous_records: dict[str, dict[str, Any]] = {}
     previous_path = bundle / "run-manifest.json"
     if previous_path.exists():
         previous = load_json(previous_path)
-        if (
-            previous.get("plan_sha256") == plan["plan_sha256"]
-            and previous.get("synthesis_config_sha256") == config_digest
-        ):
-            previous_records = {
-                record["cache_key"]: record
-                for record in previous.get("segments", [])
-                if isinstance(record, dict) and record.get("cache_key")
-            }
+        previous_digest = previous.get("synthesis_config_sha256")
+        previous_config = previous.get("synthesis_config")
+        compatible = previous_digest == config_digest or (
+            isinstance(previous_config, dict)
+            and previous_digest == json_digest(previous_config)
+            and json_digest(canonical_synthesis_config(previous_config)) == config_digest
+        )
+        if not force and compatible:
+            for record in previous.get("segments", []):
+                if not isinstance(record, dict) or not record.get("text_sha256"):
+                    continue
+                old_key = json_digest({"text_sha256": record["text_sha256"],
+                                       "synthesis_config_sha256": previous_digest})
+                if record.get("cache_key") == old_key:
+                    new_key = json_digest({"text_sha256": record["text_sha256"],
+                                           "synthesis_config_sha256": config_digest})
+                    previous_records[new_key] = record
     records: list[dict[str, Any]] = []
     current_records: dict[str, dict[str, Any]] = {}
     manifest = {
@@ -527,7 +568,7 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
         "pipeline_version": __version__,
         "source_sha256": plan["source_sha256"],
         "plan_sha256": plan["plan_sha256"],
-        "synthesis_config": backend.config,
+        "synthesis_config": synthesis_config,
         "synthesis_config_sha256": config_digest,
         "status": "in_progress",
         "segments": records,
@@ -540,6 +581,16 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
             {"text_sha256": segment["text_sha256"], "synthesis_config_sha256": config_digest}
         )
         path = segments_dir / f"{cache_key}.wav"
+        # Old integer-speed manifests may name the same verified speech with
+        # an older key. Keep the existing bytes in place; the new manifest
+        # records their canonical key and actual path without duplicating WAVs.
+        prior_record = current_records.get(cache_key) or previous_records.get(cache_key)
+        if not force and not path.exists() and prior_record and prior_record.get("path"):
+            prior_path = (bundle / prior_record["path"]).resolve()
+            if prior_path.parent == segments_dir.resolve() and prior_path.is_file():
+                path = prior_path
+        if force and cache_key not in current_records:
+            path.unlink(missing_ok=True)
         current_record = current_records.get(cache_key)
         if current_record and path.exists():
             verified = current_record.get("sha256") == sha256_file(path)
@@ -581,7 +632,7 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
                 manifest["error"] = f"{type(exc).__name__}: {exc}"
                 atomic_write_json(bundle / "run-manifest.json", manifest)
                 raise RuntimeError(
-                    f"Kokoro synthesis failed at segment {segment['ordinal']}: {exc}"
+                    f"Speech synthesis failed at segment {segment['ordinal']}: {exc}"
                 ) from exc
             audio_info = validate_wav(path)
         if not render_chunks:
@@ -601,6 +652,9 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
         records.append(record)
         current_records[cache_key] = record
         atomic_write_json(bundle / "run-manifest.json", manifest)
+        if progress:
+            progress({"stage": "synthesizing", "completed": len(records),
+                      "total": len(plan["segments"]), "reused": reused})
     manifest["status"] = "complete"
     manifest.pop("failed_ordinal", None)
     manifest.pop("error", None)
@@ -609,7 +663,7 @@ def synthesize_plan(bundle: Path, backend: SpeechBackend) -> tuple[dict[str, Any
 
 
 def _concatenate_pcm(bundle: Path, plan: dict[str, Any], manifest: dict[str, Any], destination: Path,
-                     prefix_audio: Path | None = None) -> None:
+                     prefix_audio: Path | None = None, suffix_audio: Path | None = None) -> None:
     records = {record["ordinal"]: record for record in manifest["segments"]}
     with wave.open(str(destination), "wb") as output:
         output.setnchannels(TARGET_CHANNELS)
@@ -632,6 +686,10 @@ def _concatenate_pcm(bundle: Path, plan: dict[str, Any], manifest: dict[str, Any
             if segment is not plan["segments"][-1]:
                 pause_frames = round(TARGET_SAMPLE_RATE * segment["pause_after_ms"] / 1000)
                 output.writeframes(b"\x00" * pause_frames * TARGET_SAMPLE_WIDTH)
+        if suffix_audio is not None:
+            validate_wav(suffix_audio)
+            with wave.open(str(suffix_audio), "rb") as stream:
+                output.writeframes(stream.readframes(stream.getnframes()))
 
 
 def encode_wav_to_m4a(
@@ -710,7 +768,10 @@ def _embed_m4a_chapters(path: Path, chapters: list[dict[str, Any]], duration_sec
 
 def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
                  chapters: list[dict[str, Any]] | None = None,
-                 album: str = "Zotero Audio") -> tuple[Path, dict[str, Any]]:
+                 album: str = "Zotero Audio", opening_sound: bool = True,
+                 closing_sound: bool = False, optional_qa: bool = True,
+                 warn_only: bool = False,
+                 progress: Callable[[dict[str, Any]], None] | None = None) -> tuple[Path, dict[str, Any]]:
     plan = load_json(bundle / "speech-plan.json")
     manifest = load_json(bundle / "run-manifest.json")
     if manifest["plan_sha256"] != plan["plan_sha256"]:
@@ -718,17 +779,24 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
     audio_dir = bundle / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     final_path = audio_dir / f"{bundle.name}.m4a"
-    stinger = episode_stinger_metadata()
+    stinger = episode_stinger_metadata() if opening_sound or closing_sound else {}
     with tempfile.TemporaryDirectory(prefix="zotero-audio-assemble-", dir=audio_dir) as temporary:
         stinger_wav = Path(temporary) / "episode-stinger.wav"
-        rendered_stinger = _render_episode_stinger(stinger_wav)
+        rendered_stinger = (_render_episode_stinger(stinger_wav) if opening_sound or closing_sound
+                            else {"duration_seconds": 0.0})
         combined = Path(temporary) / "combined.wav"
-        _concatenate_pcm(bundle, plan, manifest, combined, prefix_audio=stinger_wav)
+        _concatenate_pcm(bundle, plan, manifest, combined,
+                         prefix_audio=stinger_wav if opening_sound else None,
+                         suffix_audio=stinger_wav if closing_sound else None)
         normalized = Path(temporary) / "normalized.wav"
-        normalization = normalize_wav_loudness(combined, normalized)
+        if progress:
+            progress({"stage": "normalizing_audio"})
+        normalization = normalize_wav_loudness(combined, normalized, verify=not warn_only)
         combined = normalized
         pcm_info = validate_wav(combined)
         document = plan["document"]
+        if progress:
+            progress({"stage": "encoding_audio"})
         final_info = encode_wav_to_m4a(
             combined,
             final_path,
@@ -747,14 +815,19 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
 
     # Lossy encoding can create new inter-sample peaks. Delivery is gated on
     # this final encoded measurement, never on the intermediate WAV alone.
-    loudness = measure_loudness(final_path)
+    if optional_qa and progress:
+        progress({"stage": "checking_audio"})
+    loudness = measure_loudness(final_path) if optional_qa else {"status": "skipped"}
 
     final = MP4(final_path)
     expected_audio_seconds = sum(record["duration_seconds"] for record in manifest["segments"])
     expected_pause_seconds = sum(segment["pause_after_ms"] for segment in plan["segments"][:-1]) / 1000
-    expected_total = rendered_stinger["duration_seconds"] + expected_audio_seconds + expected_pause_seconds
+    expected_total = (rendered_stinger["duration_seconds"] * (int(opening_sound) + int(closing_sound))
+                      + expected_audio_seconds + expected_pause_seconds)
     duration = final_info["duration_seconds"]
     duration_delta = abs(duration - expected_total)
+    if not math.isfinite(duration) or duration <= 0 or final_info["codec"] != "aac":
+        raise RuntimeError(f"Final audio is empty or unusable: {final_path}")
     tag_names = sorted(final.tags.keys()) if final.tags else []
     required_tags = {"©nam", "©alb", "©cmt"}
     embedded_chapter_count = len(final.chapters or [])
@@ -787,6 +860,8 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
             "episode_stinger": {
                 **stinger,
                 "rendered_duration_seconds": rendered_stinger["duration_seconds"],
+                "opening": opening_sound,
+                "closing": closing_sound,
             },
             "normalization": normalization,
             "loudness": loudness,
@@ -797,12 +872,16 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
             "bytes": final_path.stat().st_size,
         },
     }
-    qa["checks"]["loudness"]["pass"] = loudness_is_competitive(
-        loudness["integrated_lufs"], loudness["true_peak_dbtp"], loudness.get("clipped_samples", False)
-    ) and not loudness.get("silent", False)
-    technical_pass = technical_pass and qa["checks"]["loudness"]["pass"]
-    qa["status"] = "pass" if technical_pass else "fail"
+    qa["optional_qa"] = optional_qa
+    if optional_qa:
+        qa["checks"]["loudness"]["pass"] = loudness_is_competitive(
+            loudness["integrated_lufs"], loudness["true_peak_dbtp"], loudness.get("clipped_samples", False)
+        ) and not loudness.get("silent", False)
+        if loudness.get("silent"):
+            raise RuntimeError(f"Final audio is silent: {final_path}")
+        technical_pass = technical_pass and qa["checks"]["loudness"]["pass"]
+    qa["status"] = "pass" if technical_pass else "warning" if warn_only else "fail"
     atomic_write_json(bundle / "qa-report.json", qa)
-    if qa["status"] != "pass":
+    if qa["status"] == "fail":
         raise RuntimeError(f"M4A QA failed; see {bundle / 'qa-report.json'}")
     return final_path, qa
