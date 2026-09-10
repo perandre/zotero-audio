@@ -220,6 +220,20 @@ from entering the public feed. Outcomes are recorded in
   --select-all
 ```
 
+To build Full Reading editions for every PDF in Zotero's `00 Inbox` collection,
+run the corresponding resumable Inbox pass. It selects each Inbox source for
+the podcast, while the normal extraction, content, and license gates still
+keep unsafe or unverified sources out of the public Full feed. Outcomes are
+recorded in `inbox-full-manifest.json`.
+
+```bash
+"$RUNTIME/venv/bin/python" "$REPO/scripts/build_inbox_full.py" \
+  --zotero-storage "$HOME/Zotero/storage" \
+  --zotero-db "$HOME/Zotero/zotero.sqlite" \
+  --state-dir "$RUNTIME/full-library" \
+  --podcast-config "$RUNTIME/podcast.toml"
+```
+
 ```xml
 <string>--podcast-config</string>
 <string>/Users/pesh/Sites/zotero-audio-runtime/podcast.toml</string>
