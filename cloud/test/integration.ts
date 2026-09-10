@@ -1,0 +1,352 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+
+const base = process.env.TEST_BASE_URL ?? "http://127.0.0.1:8797";
+if (
+  !["127.0.0.1", "localhost"].includes(new URL(base).hostname) &&
+  !process.env.ALLOW_REMOTE_INTEGRATION
+)
+  throw new Error(
+    "Integration tests create fixtures. Set ALLOW_REMOTE_INTEGRATION explicitly for a remote test.",
+  );
+const secrets = Object.fromEntries(
+  readFileSync(process.env.TEST_SECRETS_FILE ?? ".dev.vars", "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf("=");
+      return [line.slice(0, i), line.slice(i + 1)];
+    }),
+);
+const bridge = {
+  Authorization: `Bearer ${secrets.BRIDGE_TOKEN}`,
+  "Content-Type": "application/json",
+};
+const send = (path: string, init: RequestInit = {}) =>
+  fetch(base + path, { redirect: "manual", ...init });
+async function parsed(response: Response) {
+  const value = await response.json();
+  assert.ok(response.ok, `HTTP ${response.status}: ${JSON.stringify(value)}`);
+  return value as Record<string, any>;
+}
+let r = await send("/api/library");
+assert.equal(r.status, 401);
+r = await send("/mcp");
+assert.equal(r.status, 401);
+assert.match(r.headers.get("WWW-Authenticate") ?? "", /resource_metadata/);
+const meta = await parsed(
+  await send("/.well-known/oauth-protected-resource/mcp"),
+);
+assert.equal(meta.resource, `${base}/mcp`);
+const authMeta = await parsed(
+  await send("/.well-known/oauth-authorization-server"),
+);
+assert.ok(authMeta.code_challenge_methods_supported.includes("S256"));
+r = await send("/login", {
+  method: "POST",
+  headers: {
+    Origin: base,
+    "Content-Type": "application/x-www-form-urlencoded",
+  },
+  body: new URLSearchParams({ key: secrets.OWNER_ACCESS_KEY }),
+});
+assert.equal(r.status, 303);
+const cookie = r.headers.get("Set-Cookie")!.split(";")[0];
+assert.ok(cookie);
+const owner = {
+  Cookie: cookie,
+  Origin: base,
+  "Content-Type": "application/json",
+};
+r = await send("/api/settings", {
+  method: "PATCH",
+  headers: owner,
+  body: JSON.stringify({
+    qa_enabled: true,
+    opening_sound: "typing",
+    closing_sound: "none",
+  }),
+});
+assert.equal(r.status, 200, await r.text());
+r = await send("/api/settings", {
+  method: "PATCH",
+  headers: {
+    Cookie: cookie,
+    Origin: "https://evil.example",
+    "Content-Type": "application/json",
+  },
+  body: "{}",
+});
+assert.equal(r.status, 403);
+const id = `test-${randomBytes(5).toString("hex")}`;
+const article = {
+  id,
+  title: "How Example Company improved AI adoption — Research fixture",
+  authors: ["Test Author"],
+  year: 2025,
+  license_status: "private",
+  markdown_status: "ready",
+  audio_status: "pending",
+  qa_status: "warnings",
+  warnings: ["Citation formatting needs review."],
+  audio_url: "https://audio.example/brief.m4a",
+  editions: { brief: { audio_url: "https://audio.example/brief.m4a" } },
+};
+const markdown =
+  "# How Example Company improved AI adoption\n\nExample Company improved AI adoption through weekly staff training.\n\n## References\n\n[1] Source citation.";
+const ingestion = await parsed(
+  await send(`/api/bridge/articles/${id}`, {
+    method: "PUT",
+    headers: bridge,
+    body: JSON.stringify({
+      article,
+      markdown,
+      review: "# Quality report\n\nWarning: inspect citation formatting.\n",
+    }),
+  }),
+);
+assert.equal(ingestion.article.title, article.title);
+r = await send(`/api/articles/${id}/markdown`);
+assert.equal(r.status, 401);
+r = await send(`/api/articles/${id}/markdown`, { headers: { Cookie: cookie } });
+assert.equal(await r.text(), markdown);
+r = await send(`/api/articles/${id}/audio?edition=full`, { headers: owner });
+assert.equal(r.status, 409, "A missing Full must never redirect to Brief audio");
+r = await send(`/api/articles/${id}/audio?edition=brief`, { headers: owner });
+assert.equal(r.status, 302);
+assert.equal(r.headers.get("Location"), article.editions.brief.audio_url);
+const found = await parsed(
+  await send("/api/search?q=weekly%20staff", { headers: owner }),
+);
+assert.ok(found.results.some((row: any) => row.id === id));
+const key = `request-${id}`;
+const jobBody = JSON.stringify({
+  action: "markdown",
+  scope: "one",
+  article_id: id,
+  qa: true,
+});
+const created = await parsed(
+  await send("/api/jobs", {
+    method: "POST",
+    headers: { ...owner, "Idempotency-Key": key },
+    body: jobBody,
+  }),
+);
+assert.equal(created.job.title, article.title);
+const repeated = await parsed(
+  await send("/api/jobs", {
+    method: "POST",
+    headers: { ...owner, "Idempotency-Key": key },
+    body: jobBody,
+  }),
+);
+assert.equal(created.job.id, repeated.job.id);
+const claims = await Promise.all(
+  [1, 2].map((worker) =>
+    send("/api/bridge/jobs/claim", {
+      method: "POST",
+      headers: bridge,
+      body: JSON.stringify({ worker_id: `test-${worker}` }),
+    }).then(parsed),
+  ),
+);
+const claimed = claims.find((value) => value.job?.id === created.job.id);
+assert.ok(claimed, "Expected test job claim");
+assert.equal(
+  claims.filter((value) => value.job?.id === created.job.id).length,
+  1,
+);
+const repeatedClaim = await parsed(
+  await send("/api/bridge/jobs/claim", {
+    method: "POST",
+    headers: bridge,
+    body: JSON.stringify({ worker_id: claimed.job.worker_id }),
+  }),
+);
+assert.equal(repeatedClaim.job.id, claimed.job.id);
+assert.equal(repeatedClaim.job.lease_token, claimed.job.lease_token);
+r = await send(`/api/bridge/jobs/${created.job.id}`, {
+  method: "PATCH",
+  headers: bridge,
+  body: JSON.stringify({
+    worker_id: claimed.job.worker_id,
+    lease_token: "wrong-lease",
+    status: "completed",
+  }),
+});
+assert.equal(r.status, 409);
+await parsed(
+  await send(`/api/jobs/${created.job.id}/cancel`, {
+    method: "POST",
+    headers: owner,
+    body: "{}",
+  }),
+);
+const cancelled = await parsed(
+  await send(`/api/bridge/jobs/${created.job.id}`, {
+    method: "PATCH",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: claimed.job.worker_id,
+      lease_token: claimed.job.lease_token,
+      status: "running",
+      stage: "markdown",
+    }),
+  }),
+);
+assert.equal(cancelled.job.status, "cancel_requested");
+await parsed(
+  await send(`/api/bridge/jobs/${created.job.id}`, {
+    method: "PATCH",
+    headers: bridge,
+    body: JSON.stringify({
+      worker_id: claimed.job.worker_id,
+      lease_token: claimed.job.lease_token,
+      status: "cancelled",
+    }),
+  }),
+);
+async function oauth(scopes: string) {
+  const client = await parsed(
+    await send("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Local integration test",
+        redirect_uris: ["http://127.0.0.1:3099/callback"],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      }),
+    }),
+  );
+  const verifier = randomBytes(32).toString("base64url"),
+    challenge = createHash("sha256").update(verifier).digest("base64url");
+  const params = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: "http://127.0.0.1:3099/callback",
+    response_type: "code",
+    scope: scopes,
+    state: "integration-state",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    resource: base + "/mcp",
+  });
+  const path = "/authorize?" + params;
+  const consent = await send(path, { headers: { Cookie: cookie } });
+  assert.equal(consent.status, 200, await consent.clone().text());
+  const html = await consent.text(),
+    csrf = html.match(/name="csrf" value="([^"]+)"/)?.[1];
+  assert.ok(csrf, "Missing CSRF token");
+  const approval = await send(path, {
+    method: "POST",
+    headers: {
+      Cookie: cookie,
+      Origin: base,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ csrf, decision: "allow" }),
+  });
+  assert.equal(approval.status, 303, await approval.text());
+  const redirect = new URL(approval.headers.get("Location")!);
+  assert.equal(redirect.searchParams.get("state"), "integration-state");
+  const token = await parsed(
+    await send("/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code: redirect.searchParams.get("code")!,
+        client_id: client.client_id,
+        redirect_uri: "http://127.0.0.1:3099/callback",
+        code_verifier: verifier,
+        resource: base + "/mcp",
+      }),
+    }),
+  );
+  return {
+    access_token: String(token.access_token),
+    refresh_token: String(token.refresh_token),
+    client_id: String(client.client_id),
+  };
+}
+async function rpc(
+  token: string,
+  method: string,
+  params: Record<string, unknown> = {},
+) {
+  return parsed(
+    await send("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "MCP-Protocol-Version": "2025-11-25",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    }),
+  );
+}
+const readGrant = await oauth("library:read"),
+  readToken = readGrant.access_token;
+const initialized = await rpc(readToken, "initialize", {
+  protocolVersion: "2025-11-25",
+  capabilities: {},
+  clientInfo: { name: "Integration test", version: "1.0" },
+});
+assert.equal(initialized.result.serverInfo.name, "one-more-paper");
+const readTools = await rpc(readToken, "tools/list");
+assert.ok(readTools.result.tools.some((tool: any) => tool.name === "fetch"));
+assert.ok(
+  !readTools.result.tools.some((tool: any) => tool.name === "create_job"),
+);
+const fetched = await rpc(readToken, "tools/call", {
+  name: "fetch",
+  arguments: { id },
+});
+assert.equal(fetched.result.structuredContent.text, markdown);
+const writeDenied = await rpc(readToken, "tools/call", {
+  name: "create_job",
+  arguments: { action: "markdown", scope: "new" },
+});
+assert.ok(writeDenied.error || writeDenied.result?.isError);
+const writeGrant = await oauth("library:read jobs:write"),
+  writeToken = writeGrant.access_token;
+const writeTools = await rpc(writeToken, "tools/list");
+assert.ok(
+  writeTools.result.tools.some((tool: any) => tool.name === "create_job"),
+);
+r = await send("/api/bridge/jobs/claim", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${writeToken}`,
+    "Content-Type": "application/json",
+  },
+  body: '{"worker_id":"forbidden"}',
+});
+assert.equal(r.status, 401);
+const narrowed = await parsed(
+  await send("/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: writeGrant.refresh_token,
+      client_id: writeGrant.client_id,
+      scope: "library:read",
+      resource: base + "/mcp",
+    }),
+  }),
+);
+const narrowedTools = await rpc(narrowed.access_token, "tools/list");
+assert.ok(
+  !narrowedTools.result.tools.some((tool: any) => tool.name === "create_job"),
+);
+const state = await parsed(await send("/api/status", { headers: owner }));
+assert.equal(state.capabilities.local_files, false);
+console.log(
+  "PASS: authenticated Markdown/R2 + D1 search, owner CSRF, idempotent jobs, atomic leases, cancellation, OAuth discovery/S256 consent/code/token, MCP initialize/search/fetch and read/write/bridge scope isolation.",
+);

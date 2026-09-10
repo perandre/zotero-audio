@@ -24,3 +24,14 @@ htmlcov/
 # macOS and editors
 .DS_Store
 *.swp
+
+# Cloud app dependencies, local emulation and credentials
+node_modules/
+**/.wrangler/
+**/.dev.vars
+**/.dev.vars.*
+**/.env
+**/.env.*
+!**/.env.example
+cloud/dist/
+cloud/worker-configuration.d.ts

@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "one-more-paper",
+  "account_id": "f1b0b9e6894dd7ffc1500882166b3465",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "minify": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "one-more-paper-library",
+      "database_id": "9920fa05-2d82-4e5c-b2b5-0b5308884740",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "DOCUMENTS", "bucket_name": "one-more-paper-library" },
+  ],
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "8fb1f37ef22c407cb122a1b90423a225" }],
+  "vars": {
+    "MAX_DOCUMENT_BYTES": "524288",
+    "MAX_LIBRARY_BYTES": "134217728",
+    "MAX_ARTICLES": "2000",
+    "MAX_DAILY_UPLOADS": "500",
+    "MAX_ACTIVE_JOBS": "100",
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+}

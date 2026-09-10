@@ -18,11 +18,13 @@ def sync_public(config, records: list[dict]) -> None:
     keys = set()
     for record in records:
         for field in ("audio_url", "image_url", "transcript_url", "transcript_html_url", "chapters_url", "markdown_url"):
-            keys.add(unquote(urlsplit(record[field]).path).lstrip("/"))
-        page_path = unquote(urlsplit(record["page_url"]).path).lstrip("/")
-        keys.add(page_path)
-        if page_path.endswith("/"):
-            keys.add(page_path + "index.html")
+            if record.get(field):
+                keys.add(unquote(urlsplit(record[field]).path).lstrip("/"))
+        if record.get("page_url"):
+            page_path = unquote(urlsplit(record["page_url"]).path).lstrip("/")
+            keys.add(page_path)
+            if page_path.endswith("/"):
+                keys.add(page_path + "index.html")
         keys.add(record["edition"] + "/feed.xml")
     # Show artwork is also referenced by each feed.
     import xml.etree.ElementTree as ET

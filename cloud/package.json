@@ -1,0 +1,32 @@
+{
+  "name": "zotero-audio-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "wrangler types && tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "test:integration": "tsx test/integration.ts",
+    "types": "wrangler types",
+    "migrate:local": "wrangler d1 migrations apply one-more-paper-library --local",
+    "migrate:remote": "wrangler d1 migrations apply one-more-paper-library --remote",
+    "deploy": "wrangler deploy --minify"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.10.3",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260910.1",
+    "@types/node": "22.20.2",
+    "prettier": "3.9.6",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "wrangler": "4.130.0"
+  },
+  "overrides": {
+    "sharp": "^0.35.4"
+  }
+}

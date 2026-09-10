@@ -623,6 +623,29 @@ def bundle_name(structure: dict[str, Any]) -> str:
     return filename_part(f"{prefix}{document['title']} [{identity}]")
 
 
+def render_research_markdown(structure: dict[str, Any]) -> str:
+    """Retain research material that is deliberately omitted from narration.
+
+    The legacy renderer describes a reading. This renderer also includes
+    references, figure/table captions and grids, and extracted footnotes.
+    Source page markers remain available to readers and retrieval tools.
+    """
+    research = {**structure, "blocks": []}
+    redundant = {"continuation-merged", "duplicate-document-title", "duplicate-editorial-front-matter",
+                 "standalone-page-or-chapter-number"}
+    for block in structure.get("blocks", []):
+        research["blocks"].append({**block, "included_in_reading": block.get("omission_reason") not in redundant})
+    for page in structure.get("pages", []):
+        for ordinal, omission in enumerate(page.get("omissions", []), 1):
+            if omission.get("reason") not in {"footnote", "publisher-or-contact-furniture"}:
+                continue
+            research["blocks"].append({"id": f"p{page['pdf_page']:04d}-note{ordinal:04d}",
+                "pdf_page": page["pdf_page"], "type": "paragraph", "text": omission["text"],
+                "included_in_reading": True})
+    return render_markdown(research).replace("schema: zotero-audio-markdown/v1",
+                                             "schema: zotero-audio-research-markdown/v1", 1)
+
+
 def write_extraction(bundle: Path, structure: dict[str, Any], markdown: str) -> None:
     atomic_write_text(bundle / "article.md", markdown)
     atomic_write_json(bundle / "structure.json", structure)

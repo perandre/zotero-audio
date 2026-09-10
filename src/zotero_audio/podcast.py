@@ -209,6 +209,7 @@ class PodcastConfig:
     publishing_enabled: bool = False
     dry_run: bool = True
     r2_bucket: str = ""
+    briefs_publication_policy: str = "license_required"
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
         PODCAST_NAME, "Brief editions containing the authors' abstract and, when suitable, conclusion.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
@@ -241,6 +242,7 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         copyright=str(common.get("copyright", defaults.copyright)),
         publishing_enabled=bool(common.get("publishing_enabled", False)), dry_run=bool(common.get("dry_run", True)),
         r2_bucket=str(common.get("r2_bucket", "")).strip(),
+        briefs_publication_policy=str(common.get("briefs_publication_policy", defaults.briefs_publication_policy)).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
 
 
@@ -949,7 +951,7 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
     ET.SubElement(owner, f"{{{ITUNES_NS}}}email").text = str(show["owner_email"])
     ET.SubElement(channel, f"{{{PODCAST_NS}}}guid").text = str(show["guid"])
     for episode in sorted(episode_list, key=lambda item: _date(item["pub_date"]), reverse=True):
-        needed = ("title", "guid", "page_url", "audio_url", "bytes", "pub_date", "duration", "image_url", "transcript_url")
+        needed = ("title", "guid", "page_url", "audio_url", "bytes", "pub_date", "duration")
         absent = [key for key in needed if not episode.get(key)]
         if absent: raise ValueError(f"episode {episode.get('guid', '?')} lacks {', '.join(absent)}")
         item = ET.SubElement(channel, "item")
@@ -961,13 +963,17 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         ET.SubElement(item, "pubDate").text = _rfc2822(episode["pub_date"])
         ET.SubElement(item, "enclosure", {"url": str(episode["audio_url"]), "length": str(episode["bytes"]), "type": "audio/mp4"})
         ET.SubElement(item, f"{{{ITUNES_NS}}}duration").text = _duration(float(episode["duration"]))
-        ET.SubElement(item, f"{{{ITUNES_NS}}}explicit").text = "false"; ET.SubElement(item, f"{{{ITUNES_NS}}}image", {"href": str(episode["image_url"])})
-        ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_url"]), "type": "text/vtt"})
+        ET.SubElement(item, f"{{{ITUNES_NS}}}explicit").text = "false"
+        if episode.get("image_url") and not episode.get("show_artwork_only"):
+            ET.SubElement(item, f"{{{ITUNES_NS}}}image", {"href": str(episode["image_url"])})
+        if episode.get("transcript_url"):
+            ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_url"]), "type": "text/vtt"})
         if episode.get("transcript_html_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_html_url"]), "type": "text/html", "rel": "alternate"})
         if episode.get("chapters_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}chapters", {"url": str(episode["chapters_url"]), "type": "application/json+chapters"})
-        license_tag = ET.SubElement(item, f"{{{PODCAST_NS}}}license", {"url": str(episode["episode_license_url"])}); license_tag.text = "CC-BY-4.0"
+        if episode.get("episode_license_url"):
+            license_tag = ET.SubElement(item, f"{{{PODCAST_NS}}}license", {"url": str(episode["episode_license_url"])}); license_tag.text = "CC-BY-4.0"
     ET.indent(root); return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
@@ -993,7 +999,10 @@ def _episode_page(record: dict[str, Any]) -> str:
     title = html.escape(str(record["title"]))
     image_url = html.escape(str(record["image_url"]), quote=True)
     audio_url = html.escape(str(record["audio_url"]), quote=True)
-    transcript_url = html.escape(str(record["transcript_url"]), quote=True)
+    resource_url = record.get("transcript_url") or record.get("markdown_url")
+    resource_label = "Timed transcript" if record.get("transcript_url") else "Research Markdown"
+    resource_link = (f'<a href="{html.escape(str(resource_url), quote=True)}">{resource_label}</a>'
+                     if resource_url else "")
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{title}</title><style>"
             ":root{color-scheme:light;--page:#f2efe6;--surface:#faf8f2;--ink:#16212b;--muted:#5c665f;--line:#c9c1b2;--link:#2f5bd3}"
@@ -1014,13 +1023,20 @@ def _episode_page(record: dict[str, Any]) -> str:
             f"<header class=\"episode-header\"><div class=\"eyebrow\">{html.escape(PODCAST_NAME)} · {html.escape(str(record['edition']).upper())}</div><h1>{title}</h1>"
             f"<img class=\"cover\" src=\"{image_url}\" alt=\"Cover for {title}\"><audio controls preload=\"metadata\" src=\"{audio_url}\"></audio></header>"
             f"<section class=\"show-notes\" aria-labelledby=\"show-notes-title\"><h2 id=\"show-notes-title\">Show notes</h2>{notes}</section></article>"
-            f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p><a href=\"{transcript_url}\">Timed transcript</a></footer>"
+            f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p>{resource_link}</footer>"
             "</main></body></html>\n")
 
 
 def _write_site(config: PodcastConfig, manifest: dict[str, Any], *, cover_url: str | None = None) -> None:
     episodes = sorted(manifest.get("episodes", []), key=lambda item: _date(item["pub_date"]), reverse=True)
-    cards = "".join(f'<article><img src="{html.escape(item["image_url"])}" alt=""><div><small>{item["edition"].upper()}</small><h2><a href="{html.escape(item["page_url"])}">{html.escape(item["title"])}</a></h2><p>{html.escape(item["author_label"])}</p></div></article>' for item in episodes)
+    cards = []
+    for item in episodes:
+        # Feed-only imports can deliberately omit per-episode artwork.
+        image_url = item.get("image_url") or cover_url
+        image = f'<img src="{html.escape(str(image_url), quote=True)}" alt="">' if image_url else ""
+        author = item.get("author_label") or ", ".join(item.get("authors") or [])
+        cards.append(f'<article class="episode">{image}<div><small>{html.escape(item["edition"].upper())}</small><h3><a href="{html.escape(item["page_url"], quote=True)}">{html.escape(item["title"])}</a></h3><p>{html.escape(author)}</p></div></article>')
+    cards = "".join(cards)
     escaped_title = html.escape(config.site_title)
     escaped_description = html.escape(config.site_description)
     cover = (f'<img class="site-cover" src="{html.escape(cover_url, quote=True)}" alt="{html.escape(PODCAST_NAME)} cover" '
@@ -1060,6 +1076,11 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
     manifest = load_json(manifest_path) if manifest_path.is_file() else {"schema": "zotero-audio-publication/v1", "episodes": []}
     existing = {(item["guid"], item.get("revision")): item for item in manifest.get("episodes", [])}; public_records = []
     published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    images = {}
+    for edition in EDITIONS:
+        stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
+        copy_podcast_cover(stage, edition=edition)
+        images[edition] = _artifact_url(publisher, stage, "shows")
     for edition, private in private_records.items():
         prefix = f"episodes/{paper_guid}/{source_sha[:16]}/{edition}"; previous = existing.get((private["guid"], source_sha), {})
         paired_edition = EDITION_FULL if edition == EDITION_BRIEF else EDITION_BRIEF
@@ -1069,13 +1090,14 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/index.html" if has_pair else None
         record = {**private, "revision": source_sha, "pub_date": previous.get("pub_date", published_at),
                   "audio_url": _artifact_url(publisher, Path(private["audio"]), prefix),
-                  "image_url": _artifact_url(publisher, Path(private["cover"]), prefix),
-                  "transcript_url": _artifact_url(publisher, Path(private["transcript"]), prefix),
-                  "transcript_html_url": _artifact_url(publisher, Path(private["transcript_html"]), prefix),
-                  "chapters_url": _artifact_url(publisher, Path(private["chapters"]), prefix),
-                  "markdown_url": _artifact_url(publisher, Path(private["markdown"]), prefix),
+                  "image_url": (_artifact_url(publisher, Path(private["cover"]), prefix)
+                                if private.get("cover") else images[edition]),
                   "episode_license_url": license_result["episode_license_url"],
                   "page_url": f"{config.base_url}/papers/{paper_guid}/{edition}/index.html", "bytes": Path(private["audio"]).stat().st_size}
+        for local_key, url_key in (("transcript", "transcript_url"), ("transcript_html", "transcript_html_url"),
+                                   ("chapters", "chapters_url"), ("markdown", "markdown_url")):
+            if private.get(local_key):
+                record[url_key] = _artifact_url(publisher, Path(private[local_key]), prefix)
         if pair_url:
             record["paired_url"] = pair_url
             record["show_notes"] = record["show_notes"] + f"\nPaired edition: {pair_url}"
@@ -1083,10 +1105,6 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         _copy_if_changed(page_stage, config.public_root / "papers" / paper_guid / edition / "index.html")
         public_records.append(record); existing[(record["guid"], source_sha)] = record
     manifest["episodes"] = sorted(existing.values(), key=lambda item: (item["guid"], item.get("revision", "")))
-    images = {}
-    for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
-        stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
-        copy_podcast_cover(stage, edition=edition); images[edition] = _artifact_url(publisher, stage, "shows")
     feed_stages: list[tuple[str, Path]] = []
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         episodes = [item for item in manifest["episodes"] if item["edition"] == edition]
