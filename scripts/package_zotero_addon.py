@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package the local Zotero license add-on outside the source checkout."""
+"""Package the local Zotero Audio add-on outside the source checkout."""
 import argparse
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -15,7 +15,7 @@ def main() -> None:
         parser.error("Write generated packages outside the repository")
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
-        for name in ("manifest.json", "bootstrap.js", "license-status.js"):
+        for name in ("manifest.json", "bootstrap.js", "license-status.js", "feed-api.js"):
             archive.write(root / "zotero-addon" / name, name)
     print(output)
 

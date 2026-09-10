@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Zotero Audio License Status",
-  "version": "0.1.0",
-  "description": "Keep an automatic saved search of PDFs that do not pass the Zotero Audio license gate.",
+  "name": "Zotero Audio",
+  "version": "0.2.0",
+  "description": "Track PDF license status and expose a read-only local API for Zotero feed subscriptions and entries.",
   "applications": {
     "zotero": {
       "id": "audio-license-status@zotero-audio.local",

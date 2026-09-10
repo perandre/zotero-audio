@@ -1,6 +1,6 @@
 # Automatic license folder in Zotero
 
-The local **Zotero Audio License Status** add-on maintains the saved search
+The local **Zotero Audio** add-on maintains the saved search
 **Audio — License blocked** in My Library. Records stay in their existing
 collections. The saved search matches the exact `audio:license:blocked` tag;
 passing records have `audio:license:pass` instead. Missing or unverified rights
@@ -23,6 +23,10 @@ minutes while Zotero is open. Changed item fields, attachment lists, or file
 timestamps during evaluation cause that item to be skipped until the next
 refresh. Removing all PDFs removes the managed metadata on the next refresh.
 Group libraries are outside this add-on's scope.
+
+Version 0.2.0 also provides the [read-only local feed API](zotero-feed-api.md).
+The plugin ID is unchanged from **Zotero Audio License Status** 0.1.0, so
+installing the new package upgrades the existing plugin.
 
 ## Installation
 
@@ -66,5 +70,5 @@ Run the evaluator and metadata-preservation checks with:
 
 ```bash
 "$RUNTIME/venv/bin/python" -m pytest
-node --test tests/test_zotero_addon.cjs
+node --test tests/test_zotero_addon.cjs tests/test_zotero_feed_api.cjs
 ```

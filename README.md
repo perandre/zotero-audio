@@ -213,6 +213,11 @@ automatic **Audio — License blocked** saved search. It applies gate-status tag
 and records license evidence and blocking reasons in Extra for each PDF-backed
 record, while preserving existing Rights and collection membership.
 
+The same add-on exposes a [read-only local feed API](docs/zotero-feed-api.md)
+at `http://localhost:23119/zotero-audio/feeds`. Local tools can list subscriptions
+and read feed entries with read/unread filtering before selecting papers to save.
+Reading a feed through this API does not mark entries read or enqueue audio.
+
 For automatic runs, save the completed file as
 `/Users/pesh/Sites/zotero-audio-runtime/podcast.toml`; the existing launchd job
 auto-detects it. A different location can be supplied by adding these two
