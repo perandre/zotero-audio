@@ -372,6 +372,14 @@ const initialized = await rpc(readToken, "initialize", {
 });
 assert.equal(initialized.result.serverInfo.name, "one-more-paper");
 const readTools = await rpc(readToken, "tools/list");
+assert.ok(meta.scopes_supported.includes("zotero:write"));
+assert.ok(authMeta.scopes_supported.includes("zotero:write"));
+assert.ok(
+  readTools.result.tools.some((tool: any) => tool.name === "lookup_article"),
+);
+assert.ok(
+  !readTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
 assert.ok(readTools.result.tools.some((tool: any) => tool.name === "fetch"));
 assert.ok(
   !readTools.result.tools.some((tool: any) => tool.name === "create_job"),
@@ -389,6 +397,29 @@ assert.ok(writeDenied.error || writeDenied.result?.isError);
 const writeGrant = await oauth("library:read jobs:write"),
   writeToken = writeGrant.access_token;
 const writeTools = await rpc(writeToken, "tools/list");
+assert.ok(
+  !writeTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
+const zoteroGrant = await oauth("library:read zotero:write");
+const zoteroTools = await rpc(zoteroGrant.access_token, "tools/list");
+assert.ok(
+  zoteroTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
+assert.ok(
+  !zoteroTools.result.tools.some((tool: any) =>
+    ["create_job", "save_document"].includes(tool.name),
+  ),
+);
+const zoteroDenied = await rpc(readToken, "tools/call", {
+  name: "add_article",
+  arguments: { source: "10.1234/synthetic", request_id: "forbidden-import" },
+});
+assert.ok(zoteroDenied.error || zoteroDenied.result?.isError);
+const zoteroMissing = await rpc(zoteroGrant.access_token, "tools/call", {
+  name: "article_import_status",
+  arguments: { request_id: "synthetic-missing-import" },
+});
+assert.ok(zoteroMissing.result.isError);
 assert.ok(
   writeTools.result.tools.some((tool: any) => tool.name === "create_job"),
 );
@@ -507,6 +538,9 @@ const jobGrantDenied = await callProject(
 assert.ok(jobGrantDenied.error || jobGrantDenied.result?.isError);
 const docGrant = await oauth("library:read documents:write");
 const docTools = await rpc(docGrant.access_token, "tools/list");
+assert.ok(
+  !docTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
 assert.ok(
   docTools.result.tools.some((tool: any) => tool.name === "save_document"),
 );
