@@ -6,6 +6,7 @@ import { settingsSchema, defaultSettings } from "../src/settings";
 import { idFromPath, integer } from "../src/http";
 import {
   articleYear,
+  readableArticle,
   readableArticleYear,
   unreadableArticleMessage,
 } from "../src/article-recency";
@@ -77,11 +78,14 @@ test("Document object names remain readable while rejecting unsafe path characte
   );
 });
 
-test("Article reading accepts only known 2025-or-newer publications", () => {
+test("Only scoped VIKING research articles use the 2025 reading cutoff", () => {
   assert.equal(articleYear("2026-04"), 2026);
   assert.equal(readableArticleYear("2025"), true);
   assert.equal(readableArticleYear("2024"), false);
   assert.equal(readableArticleYear(null), false);
+  assert.equal(readableArticle({ year: 2024, reading_scope: "general" }), true);
+  assert.equal(readableArticle({ year: 2025, reading_scope: "viking_research" }), true);
+  assert.equal(readableArticle({ year: 2024, reading_scope: "viking_research" }), false);
   assert.match(unreadableArticleMessage("Old paper", 2024), /2025 onward/);
 });
 
