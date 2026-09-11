@@ -14,6 +14,7 @@ export const settingsSchema = z
     brief_voice: z.string().max(100),
     speed: z.number().min(0.5).max(2),
     auto_publish: z.boolean(),
+    auto_generate: z.enum(["off", "markdown", "full", "brief", "both"]),
   })
   .strict();
 export const defaultSettings = {
@@ -29,6 +30,7 @@ export const defaultSettings = {
   brief_voice: "af_heart",
   speed: 1,
   auto_publish: true,
+  auto_generate: "markdown" as const,
 };
 export async function getSettings(env: AppEnv) {
   const row = await env.DB.prepare(

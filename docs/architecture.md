@@ -12,6 +12,7 @@ storage; the Mac supplies extraction and Apple-silicon speech processing.
 | Human CLI | `src/zotero_audio/app_cli.py` | `za` menu, title-based selection, JSON output, lifecycle commands. |
 | Local dashboard/API | `app_server.py`, `cloud/public/` | Loopback HTTP, safe file access, Markdown reader, audio player, job progress and settings. The same assets are served remotely. |
 | Local catalog | `app_state.py`, `app_library.py` | SQLite state/search, saved Zotero discovery, existing-artifact import, safe article serialization. |
+| Zotero monitor | `app_zotero.py` | Independent startup/one-minute GET scans and durable automatic jobs for saved PDFs without output; offline retry and cancellation preservation. |
 | Local worker | `app_worker.py` | One warm TTS backend, durable generation queue, independent publication/iCloud/backup delivery. |
 | Generation | `generation.py` | One-article Markdown/Brief/Full operation and progress callbacks; preserves existing Markdown unless forced. |
 | Extraction and audio | `extract.py`, `segment.py`, `audio.py` | Page-aware extraction, narration filtering, speech segmentation, verified cache reuse, normalization and AAC assembly. |
@@ -202,3 +203,21 @@ human output centered on full titles. The [root quickstart](../README.md) and
 The [PhD document contract](phd-project-mcp.md) describes opt-in folder access,
 private D1 text storage, source revisions, independent document-write consent
 and the durable Mac save/commit/push inbox.
+
+## Automatic Zotero discovery
+
+`LocalWorker.start` starts discovery alongside generation and delivery. Shutdown
+signals and joins all three threads. Scans serialize with explicit sync jobs but
+do not hold SQLite locks during network/file reads. Each successful scan updates
+metadata (including cleared fields), source hashes and `in_zotero`; unavailable
+Zotero retains the cached catalog and last successful check. Catalog revisions
+refresh dashboard listings even when metadata edits do not change article counts.
+
+`auto_generate` defaults to `markdown` and supports `off`, `brief`, `full`, `both`.
+It only selects PDFs without existing Markdown/audio or prior individual jobs.
+A deterministic job ID and atomic queue check prevent duplicate automatic jobs
+across scans/restarts, honor explicit requests and defer to active library runs.
+Generation uses the ordinary queue, caches, QA and publication gates. Previously
+failed/cancelled requests require Retry; changed source PDFs require an explicit
+regeneration. Completed generation preserves a newer source revision discovered
+during processing. No Zotero data or research files are overwritten by discovery.

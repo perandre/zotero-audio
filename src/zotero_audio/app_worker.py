@@ -95,9 +95,11 @@ class LocalWorker:
         self.threads = []
 
     def start(self):
+        from .app_zotero import ZoteroMonitor
         self.store.recover()
         migrate_catalog_markdown(self.store)
-        for target, name in ((self.run, "generation"), (self.deliver, "delivery")):
+        monitor = ZoteroMonitor(self.store, self.stop)
+        for target, name in ((self.run, "generation"), (self.deliver, "delivery"), (monitor.run, "zotero-discovery")):
             thread = threading.Thread(target=target, name=name, daemon=True)
             thread.start()
             self.threads.append(thread)
@@ -175,6 +177,9 @@ class LocalWorker:
             self.store.update_job(job["id"], stage="reading_zotero", message="Refreshing saved Zotero PDFs")
             refresh_zotero(self.store)
         articles = [self.store.article(job["article_id"])] if job["scope"] == "one" else self.store.all_articles()
+        if job.get("automatic") and articles[0].get("in_zotero") is False:
+            self.store.update_job(job["id"], status="cancelled", stage="cancelled", message="The PDF is no longer available in Zotero; existing output is preserved")
+            return
         if job["scope"] != "one":
             articles = [a for a in articles if a.get("in_zotero") is not False]
         if job["scope"] == "new":
@@ -248,7 +253,11 @@ class LocalWorker:
                     spoken_intro=settings["spoken_intro"], full_voice=settings["full_voice"], brief_voice=settings["brief_voice"], speed=settings["speed"],
                     progress=progress, on_edition_ready=ready)
                 with self.store.edit_article(article_id) as current:
-                    current.update(managed=True, source_changed=False, source_sha256=result["source_sha256"],
+                    # Discovery can notice a replacement PDF during synthesis.
+                    # Preserve its hash and warning when finishing older work.
+                    source_changed = current.get("source_sha256") not in {None, original_article.get("source_sha256"), result["source_sha256"]}
+                    current.update(managed=True, source_changed=source_changed,
+                                   source_sha256=current["source_sha256"] if source_changed else result["source_sha256"],
                                    warnings=_merge_warnings(result.get("warnings"), current.get("delivery_warnings")),
                                    license_status="open" if result.get("public_eligible") else "private",
                                    qa_status="warnings" if result.get("warnings") else ("passed" if job["qa"] else "unchecked"), review=result["ai_review"])
