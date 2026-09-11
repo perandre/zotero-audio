@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { decodeHTML, decodeHTMLAttribute } from "entities";
 import { boundedText, HttpError } from "./http";
 
 const creator = z.union([
@@ -141,8 +142,7 @@ export async function publicFetch(
 
 const plain = (value: unknown): string =>
   typeof value === "string"
-    ? value
-        .replace(/<[^>]*>/g, "")
+    ? decodeHTML(value.replace(/<[^>]*>/g, ""))
         .replace(/\s+/g, " ")
         .trim()
     : "";
@@ -233,7 +233,7 @@ export async function citationTags(
           element.getAttribute("property") ??
           ""
         ).toLowerCase();
-        const content = element.getAttribute("content")?.trim();
+        const content = decodeHTMLAttribute(element.getAttribute("content") ?? "").trim();
         if (content && name.startsWith("citation_") && tags.size < 50) {
           const values = tags.get(name) ?? [];
           if (values.length < 500) tags.set(name, [...values, content]);

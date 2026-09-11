@@ -331,7 +331,7 @@ test("DOI metadata preserves titles/authors and rejects mismatched or unsupporte
   const raw = {
     type: "article-journal",
     DOI: doi,
-    title: "Synthetic <i>research</i> title",
+    title: "Synthetic <i>research</i> &amp; evidence title",
     author: [
       { given: "Ada", family: "Example" },
       { literal: "Example Research Group" },
@@ -340,7 +340,7 @@ test("DOI metadata preserves titles/authors and rejects mismatched or unsupporte
     "container-title": "Synthetic Journal",
   };
   const result = cslMetadata(raw, doi);
-  assert.equal(result.title, "Synthetic research title");
+  assert.equal(result.title, "Synthetic research & evidence title");
   assert.equal(result.date, "2025-03-02");
   assert.equal(result.creators.length, 2);
   assert.equal(
