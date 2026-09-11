@@ -294,3 +294,18 @@ def test_export_collision_does_not_overwrite_either_existing_user_file(tmp_path)
     assert destination.read_bytes() == b"existing personal recording"
     assert conflict.read_bytes() == b"another existing personal recording"
     assert any(file.read_bytes() == source.read_bytes() for file in destination.parent.iterdir())
+
+
+def test_generation_completion_preserves_a_source_change_discovered_during_work(article_store, monkeypatch):
+    store, article = article_store
+    real_process = generation.process_article
+
+    def process(*args, **kwargs):
+        result = real_process(*args, **kwargs)
+        store.put_article({'id': article['id'], 'title': article['title'], 'source_sha256': 'b' * 64, 'source_changed': True})
+        return result
+
+    monkeypatch.setattr(generation, 'process_article', process)
+    LocalWorker(store).process(claim(store))
+    assert store.article(article['id'])['source_sha256'] == 'b' * 64
+    assert store.article(article['id'])['source_changed'] is True

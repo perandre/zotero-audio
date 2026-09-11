@@ -94,6 +94,18 @@ r = await send("/api/settings", {
 });
 assert.equal(r.status, 200, await r.text());
 r = await send("/api/settings", {
+  method: "PATCH", headers: owner, body: JSON.stringify({ auto_generate: "both" }),
+});
+assert.equal((await parsed(r)).auto_generate, "both");
+r = await send("/api/settings", {
+  method: "PATCH", headers: owner, body: JSON.stringify({ qa_enabled: false }),
+});
+assert.equal((await parsed(r)).auto_generate, "both", "Unrelated settings edits must preserve automation");
+r = await send("/api/bridge/settings", {
+  method: "PATCH", headers: bridge, body: JSON.stringify({ auto_generate: "markdown", qa_enabled: true }),
+});
+assert.equal((await parsed(r)).auto_generate, "markdown");
+r = await send("/api/settings", {
   method: "PATCH",
   headers: {
     Cookie: cookie,
@@ -372,6 +384,14 @@ const initialized = await rpc(readToken, "initialize", {
 });
 assert.equal(initialized.result.serverInfo.name, "one-more-paper");
 const readTools = await rpc(readToken, "tools/list");
+assert.ok(meta.scopes_supported.includes("zotero:write"));
+assert.ok(authMeta.scopes_supported.includes("zotero:write"));
+assert.ok(
+  readTools.result.tools.some((tool: any) => tool.name === "lookup_article"),
+);
+assert.ok(
+  !readTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
 assert.ok(readTools.result.tools.some((tool: any) => tool.name === "fetch"));
 assert.ok(
   !readTools.result.tools.some((tool: any) => tool.name === "create_job"),
@@ -389,6 +409,29 @@ assert.ok(writeDenied.error || writeDenied.result?.isError);
 const writeGrant = await oauth("library:read jobs:write"),
   writeToken = writeGrant.access_token;
 const writeTools = await rpc(writeToken, "tools/list");
+assert.ok(
+  !writeTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
+const zoteroGrant = await oauth("library:read zotero:write");
+const zoteroTools = await rpc(zoteroGrant.access_token, "tools/list");
+assert.ok(
+  zoteroTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
+assert.ok(
+  !zoteroTools.result.tools.some((tool: any) =>
+    ["create_job", "save_document"].includes(tool.name),
+  ),
+);
+const zoteroDenied = await rpc(readToken, "tools/call", {
+  name: "add_article",
+  arguments: { source: "10.1234/synthetic", request_id: "forbidden-import" },
+});
+assert.ok(zoteroDenied.error || zoteroDenied.result?.isError);
+const zoteroMissing = await rpc(zoteroGrant.access_token, "tools/call", {
+  name: "article_import_status",
+  arguments: { request_id: "synthetic-missing-import" },
+});
+assert.ok(zoteroMissing.result.isError);
 assert.ok(
   writeTools.result.tools.some((tool: any) => tool.name === "create_job"),
 );
@@ -508,6 +551,9 @@ assert.ok(jobGrantDenied.error || jobGrantDenied.result?.isError);
 const docGrant = await oauth("library:read documents:write");
 const docTools = await rpc(docGrant.access_token, "tools/list");
 assert.ok(
+  !docTools.result.tools.some((tool: any) => tool.name === "add_article"),
+);
+assert.ok(
   docTools.result.tools.some((tool: any) => tool.name === "save_document"),
 );
 assert.ok(
@@ -596,6 +642,14 @@ console.log(
 
 const state = await parsed(await send("/api/status", { headers: owner }));
 assert.equal(state.capabilities.local_files, false);
+assert.equal(typeof state.counts.catalog_revision, "string");
+await parsed(await send(`/api/bridge/articles/${id}`, {
+  method: "PUT", headers: bridge,
+  body: JSON.stringify({ article: { ...article, title: article.title + " — Updated" } }),
+}));
+const revisedState = await parsed(await send("/api/status", { headers: owner }));
+assert.equal(revisedState.counts.total, state.counts.total);
+assert.notEqual(revisedState.counts.catalog_revision, state.counts.catalog_revision);
 console.log(
   "PASS: authenticated Markdown/R2 + D1 search, owner CSRF, idempotent jobs, atomic leases, cancellation, OAuth discovery/S256 consent/code/token, MCP initialize/search/fetch and read/write/bridge scope isolation.",
 );

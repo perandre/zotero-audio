@@ -78,6 +78,7 @@ function fixture() {
     failBeforePublish: false,
     race: false,
     failGet: false,
+    redirect: false,
     calls: [] as string[],
   };
   const advance = (path: string, text: string) => {
@@ -101,11 +102,16 @@ function fixture() {
       new Headers(init?.headers).get("Authorization"),
       "Bearer synthetic-repository-token",
     );
-    assert.equal(init?.redirect, "error");
+    assert.equal(init?.redirect, "manual");
     assert.equal(init?.cache, "no-store");
     const method = init?.method ?? "GET",
       path = url.pathname.replace("/repos/perandre/phd", "");
     state.calls.push(`${method} ${path}`);
+    if (state.redirect)
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://other.example.test/private" },
+      });
     if (state.failGet && method === "GET")
       return Response.json(
         { message: "synthetic private error must not leak" },
@@ -387,6 +393,27 @@ test("Repository failure is explicit and never falls back to the Mac's text or q
   );
   delete f.env.PROJECT_GITHUB_TOKEN;
   await assert.rejects(save(f), /repository credential/);
+});
+test("GitHub redirects fail without forwarding credentials or queuing a save", async () => {
+  const f = fixture();
+  const originalHead = f.state.head;
+  f.state.redirect = true;
+  await assert.rejects(
+    projects.readDocument(f.env, "NOW.md", origin),
+    /GitHub returned HTTP 302/,
+  );
+  await assert.rejects(save(f), /GitHub returned HTTP 302/);
+  assert.deepEqual(f.state.calls, [
+    "GET /git/ref/heads/main",
+    "GET /git/ref/heads/main",
+  ]);
+  assert.equal(f.state.head, originalHead);
+  assert.equal(f.state.writes, 0);
+  assert.equal(f.state.puts, 0);
+  assert.equal(
+    f.db.prepare("SELECT count(*) AS n FROM project_changes").get()!.n,
+    0,
+  );
 });
 test("PDF extraction is served only when its source blob equals current GitHub", async () => {
   const f = fixture();

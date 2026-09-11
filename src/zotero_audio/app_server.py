@@ -31,9 +31,11 @@ def status(store: Store, worker=None):
               "queued": sum(j["status"] == "queued" for j in jobs), "running": sum(j["status"] == "running" for j in jobs)}
     return {"worker": {"online": worker is not None, "last_seen": now() if worker else store.state("last_seen"),
                        "current_job_id": getattr(worker, "current_job_id", None)}, "counts": counts,
-            "cloud": store.state("cloud", {"online": False, "configured": False}), "cloud_lease": store.state("cloud_lease", {}), "zotero": store.state("zotero", {}),
+            "cloud": store.state("cloud", {"online": False, "configured": False}), "cloud_lease": store.state("cloud_lease", {}),
+            "zotero": {**store.state("zotero", {}), "auto_generate": store.settings()["auto_generate"]},
             "deliveries": {r["kind"]: r["count"] for r in pending}, "capabilities": {"local_files": True, "authenticated": True, "remote": False},
             "project": store.state("project_sync", {}), "project_error": store.state("project_sync_error"),
+            "catalog_revision": max((a.get("updated_at", "") for a in articles), default=""),
             "version": "0.2.0"}
 
 

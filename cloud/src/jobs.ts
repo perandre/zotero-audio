@@ -243,7 +243,7 @@ export async function status(env: AppEnv) {
       "SELECT * FROM worker_status ORDER BY last_seen DESC LIMIT 1",
     ),
     env.DB.prepare(
-      "SELECT count(*) AS total,sum(markdown_key IS NOT NULL) AS markdown,sum(audio_status IN ('ready','completed','published')) AS audio,sum(qa_status IN ('warnings','failed')) AS warnings FROM articles",
+      "SELECT count(*) AS total,sum(markdown_key IS NOT NULL) AS markdown,sum(audio_status IN ('ready','completed','published')) AS audio,sum(qa_status IN ('warnings','failed')) AS warnings,max(updated_at) AS catalog_revision FROM articles",
     ),
     env.DB.prepare("SELECT status,count(*) AS count FROM jobs GROUP BY status"),
     env.DB.prepare("SELECT content_bytes,articles FROM budget WHERE id=1"),

@@ -203,13 +203,15 @@ export async function authorize(request: Request, env: AppEnv) {
     );
   const requested = auth.scope.length ? auth.scope : ["library:read"];
   const scopes = requested.filter((s) =>
-    ["library:read", "jobs:write", "documents:write"].includes(s),
+    ["library:read", "jobs:write", "documents:write", "zotero:write"].includes(
+      s,
+    ),
   );
   if (!scopes.includes("library:read")) scopes.unshift("library:read");
   if (request.method === "GET")
     return page(
       "Connect your research library",
-      `<p><strong>${escaped(client.clientName ?? "MCP client")}</strong> is requesting access to your library.</p><p>Access includes private articles and the PhD project documents (plans, notes, drafts and extracted source text). Requested content is shared with the connected client.</p><ul><li>Search and read articles, PhD project documents, quality reports and job status.</li>${scopes.includes("jobs:write") ? "<li>Queue, cancel and retry processing jobs on your Mac.</li>" : ""}${scopes.includes("documents:write") ? (env.PROJECT_GITHUB_REPO ? "<li>Save Markdown notes and update PhD documents directly in the private GitHub repository, including while your Mac is offline.</li>" : "<li>Save Markdown notes and update PhD documents on your Mac, with commits and pushes to the project repository.</li>") : ""}</ul><form method="post" action="${escaped(url.pathname + url.search)}"><input type="hidden" name="csrf" value="${escaped(session.csrf)}"><button name="decision" value="allow">Allow connection</button> <button name="decision" value="deny">Cancel</button></form>`,
+      `<p><strong>${escaped(client.clientName ?? "MCP client")}</strong> is requesting access to your library.</p><p>Access includes private articles and the PhD project documents (plans, notes, drafts and extracted source text). Requested content is shared with the connected client.</p><ul><li>Search and read articles, PhD project documents, quality reports and job status.</li>${scopes.includes("jobs:write") ? "<li>Queue, cancel and retry processing jobs on your Mac.</li>" : ""}${scopes.includes("documents:write") ? (env.PROJECT_GITHUB_REPO ? "<li>Save Markdown notes and update PhD documents directly in the private GitHub repository, including while your Mac is offline.</li>" : "<li>Save Markdown notes and update PhD documents on your Mac, with commits and pushes to the project repository.</li>") : ""}${scopes.includes("zotero:write") ? "<li>Save article references directly to your personal Zotero library online, and add requested collections and tags to matching references.</li>" : ""}</ul><form method="post" action="${escaped(url.pathname + url.search)}"><input type="hidden" name="csrf" value="${escaped(session.csrf)}"><button name="decision" value="allow">Allow connection</button> <button name="decision" value="deny">Cancel</button></form>`,
       200,
       auth.redirectUri,
     );

@@ -8,6 +8,7 @@ are available to AI agents through MCP and a portable agent plugin.
 
 - **On your Mac:** run `za dashboard`, or open [the local dashboard](http://127.0.0.1:8765).
 - **From another device:** [open your private library](https://one-more-paper.perandre.workers.dev).
+- **Save references online:** ask MCP to add a DOI or article URL to Zotero, even with the laptop closed. PDF processing and audio are separate.
 - **Remote MCP:** `https://one-more-paper.perandre.workers.dev/mcp`.
 
 The owner login key is stored outside Git in
@@ -40,6 +41,24 @@ or `--json` for machine-readable results. Noninteractive callers must supply an
 unambiguous title or an ID returned by `za list --json`; human output always
 includes the full title.
 
+The service checks Zotero on startup and every minute while Zotero is open,
+independently of generation and delivery. Newly available saved PDFs appear in
+the library automatically; an open dashboard refreshes itself. The local library
+shows when Zotero was last checked, separately from the Mac connection status.
+When Zotero is closed or unavailable, the cached library remains usable and
+checks retry automatically.
+
+**Settings → Zotero automation** selects Markdown (the default), Markdown plus
+Brief/Full/both audio editions, or no automatic generation. Discovery always
+continues. New PDFs without existing output get one durable generation job;
+restarts resume it and repeated scans do not duplicate it. Existing research,
+imported audio and explicit failed/cancelled jobs are preserved. Inspect Activity
+for failed work and use Retry after addressing its cause. Replaced source PDFs
+require explicit regeneration to preserve research edits. This catalog covers
+locally available saved PDFs; feed entries and records without a downloaded PDF
+are not generation sources. Removed PDFs retain their historical output/search
+records and are excluded from future whole-Zotero jobs.
+
 The dashboard’s command palette offers the same common actions. It distinguishes
 **Markdown ready**, **Audio ready**, **Publishing**, and **iCloud/backup pending**.
 Opening local files in Finder requires the local dashboard. Private audio can
@@ -70,10 +89,11 @@ Brief, Full edition or article can publish while other work continues. Only
 show-level artwork is needed; chapters and timed transcripts are not required
 by this new generation path.
 
-**`auto_publish` applies to explicitly requested audio jobs.** With it enabled,
+**`auto_publish` applies to requested audio jobs, including the audio editions
+selected in Zotero automation.** With it enabled,
 new `full`, `brief` and `both` jobs express publication intent, while the existing
 source-bound licensing rules and podcast configuration still decide eligibility.
-Importing existing files or refreshing Zotero never publishes them automatically.
+Importing existing files or refreshing metadata never selects old output for publication.
 Private and unverified material remains available for local listening and
 private research access.
 
@@ -122,7 +142,8 @@ za dashboard
 ```
 
 `za install` installs a per-user `launchd` worker and disables the previous
-five-minute scheduler at cutover. It preserves models and generated files.
+five-minute scheduler at cutover. The persistent service owns the new one-minute
+Zotero monitor. It preserves models and generated files.
 For foreground development, use `za serve` instead of installing the service.
 One generation worker owns the model and the runtime lock; do not run a legacy
 batch against the same runtime concurrently.
@@ -208,5 +229,5 @@ See [architecture and maintainer map](docs/architecture.md),
 [legacy commands and batch examples](docs/legacy-cli.md),
 [Zotero license status](docs/zotero-license-status.md),
 [the read-only Zotero feed inbox](docs/zotero-feed-api.md), and
-[Kokoro evaluation](docs/tts-evaluation.md). Broader article discovery and saving
-new research remain Zotero responsibilities in this version.
+[Kokoro evaluation](docs/tts-evaluation.md), and
+[direct Zotero reference imports](docs/zotero-cloud-import.md).

@@ -1,5 +1,22 @@
 # Background sync troubleshooting
 
+The installed 1 More Paper service checks the supported Zotero GET API on startup
+and every minute in a dedicated thread, even during generation. No browser window
+or manual Sync action is required. Zotero must be open with local API access
+enabled and PDFs downloaded locally. `za status --json` includes `zotero.online`,
+`checked_at`, `last_success_at` and the selected `auto_generate` mode; the local
+Library displays freshness and connection failures. A closed/unavailable Zotero
+retries every minute while preserving the cached library. Activity shows queued,
+running and failed automatic work with full article titles.
+
+Generation defaults to Markdown; choose other outputs in Settings → Zotero
+automation. Turning it off still updates the library. Existing output and prior
+cancelled/failed requests are preserved. Use Retry for a failed job or an explicit
+regeneration when a source PDF changed.
+
+The following notification details apply to the legacy scheduled sync scripts,
+which `za install` disables when the persistent service takes over.
+
 The launchd job does not load interactive shell profiles. At startup, the sync
 process preserves its existing PATH and adds installed Homebrew and NVM tool
 directories. This makes FFmpeg, Node, and npx available to child processes too.

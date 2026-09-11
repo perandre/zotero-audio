@@ -432,7 +432,7 @@ async function openFile(article, artifact, reveal, edition) {
 
 async function loadStatus() {
   const result = await api('/api/status');
-  if (JSON.stringify(result.counts) !== JSON.stringify(state.status.counts)) state.catalogDirty = true;
+  if (JSON.stringify(result.counts) !== JSON.stringify(state.status.counts) || result.catalog_revision !== state.status.catalog_revision) state.catalogDirty = true;
   state.status = result;
   state.capabilities = { ...state.capabilities, ...result.capabilities };
   renderSyncDiagnostics(result);
@@ -442,6 +442,18 @@ async function loadStatus() {
   $('#worker-status').replaceChildren(element('span', { class: 'status-dot', 'aria-hidden': 'true' }), online ? 'Your Mac is online' : 'Your Mac is offline');
   $('#connection-banner').hidden = online;
   $('#connection-banner').textContent = 'Your synced Markdown is still available. New processing jobs will wait until your Mac is online.';
+  const zotero = result.zotero;
+  $('#zotero-status').hidden = !zotero;
+  if (zotero) {
+    const checked = zotero.last_success_at || (zotero.online ? zotero.checked_at : null);
+    const lastCheck = checked ? `Last checked Zotero ${new Date(checked).toLocaleString()}.` : 'Waiting for the first Zotero check.';
+    const automatic = { off: 'Automatic generation is off.', markdown: 'New PDFs become Markdown automatically.', full: 'New PDFs become Markdown and Full audio automatically.', brief: 'New PDFs become Markdown and Brief audio automatically.', both: 'New PDFs become Markdown, Brief and Full audio automatically.' }[zotero.auto_generate] || '';
+    const stale = checked && Date.now() - Date.parse(checked) > 180000;
+    $('#zotero-status').textContent = !online ? `${lastCheck} Checks resume when your Mac is online.`
+      : zotero.online === false ? `${lastCheck} ${zotero.message || 'Open Zotero to resume automatic updates.'} Retrying automatically.`
+      : stale ? `${lastCheck} Zotero updates are delayed; check Activity for service status.`
+      : `${lastCheck} Checks run every minute while Zotero is open. ${automatic}`;
+  }
   const counts = result.counts || {};
   $('#count-articles').textContent = number(counts.articles ?? counts.total ?? state.total);
   $('#count-markdown').textContent = number(counts.markdown ?? counts.markdown_ready ?? 0);
@@ -530,9 +542,9 @@ async function jobAction(id, action) {
 async function loadSettings() {
   const result = await api('/api/settings'); state.settings = result.settings || result;
   if (state.settingsDirty) return;
-  for (const name of ['qa_enabled', 'opening_sound', 'closing_sound', 'icloud_folder', 'backup_enabled', 'backup_folder', 'tts_model', 'spoken_intro', 'auto_publish']) {
+  for (const name of ['qa_enabled', 'opening_sound', 'closing_sound', 'icloud_folder', 'backup_enabled', 'backup_folder', 'tts_model', 'spoken_intro', 'auto_publish', 'auto_generate']) {
     const input = $(`[name="${name}"]`, $('#settings-form')); if (!input) continue;
-    const fallback = { qa_enabled: true, opening_sound: 'typing', closing_sound: 'none', tts_model: 'kokoro', spoken_intro: true, auto_publish: true }[name];
+    const fallback = { qa_enabled: true, opening_sound: 'typing', closing_sound: 'none', tts_model: 'kokoro', spoken_intro: true, auto_publish: true, auto_generate: 'markdown' }[name];
     const value = state.settings[name] ?? fallback ?? '';
     if (input.type === 'checkbox') input.checked = Boolean(value); else input.value = value;
   }

@@ -5,6 +5,8 @@ export type AppEnv = Env & {
   OWNER_ACCESS_KEY: string;
   SESSION_SECRET: string;
   BRIDGE_TOKEN: string;
+  ZOTERO_API_KEY?: string;
+  ZOTERO_USER_ID?: string;
   OAUTH_PROVIDER: OAuthHelpers;
 };
 export type Permissions = { userId: "owner"; scopes: string[] };

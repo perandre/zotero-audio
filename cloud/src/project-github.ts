@@ -86,7 +86,7 @@ async function gh<T>(
   try {
     response = await fetch(`https://api.github.com${path}`, {
       method,
-      redirect: "error",
+      redirect: "manual",
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
       headers: {

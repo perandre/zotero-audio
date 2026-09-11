@@ -49,6 +49,21 @@ Without MCP, the short human commands are `za`, `za markdown new`, `za full`,
 `za brief`, `za status`, `za review`, and `za settings`. The interactive menu and
 dashboard expose progress and files without requiring an AI account.
 
+## Add references to Zotero online
+
+On the hosted MCP, use `lookup_article` for DOI/URL metadata and duplicate checks,
+then `add_article` for a user-requested save. Use `zotero_collections` to choose
+the requested collection by name and exact key. Supply verified metadata only
+when automatic lookup fails; never invent missing bibliographic facts. Writes
+require separate `zotero:write` consent and work with the Mac offline.
+
+Give each save a unique `request_id`; retry with identical arguments and the
+same ID. Check `article_import_status` after an interruption. Report the full
+title, returned Zotero link and actual receipt. An existing item retains its
+metadata; requested tags/collections are additive. A saved reference does not
+mean a PDF was downloaded or Markdown/audio generated. Those are separate
+steps, and Mac processing waits when offline.
+
 ## PhD project work
 
 Use `whats_next` for current priorities in `NOW.md` and optional `NEXT.md`.

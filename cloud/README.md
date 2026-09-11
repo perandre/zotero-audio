@@ -45,13 +45,20 @@ Use `https://<deployed-worker>/mcp` as the remote MCP URL. The official `@modelc
 - `library:read`: search, full article/project text, browse library and PhD documents, quality reports and processing status.
 - `documents:write`: commit revision-checked PhD Markdown updates and meeting notes directly to GitHub, without the Mac.
 - `jobs:write`: create, cancel and retry Mac jobs. Request this alongside `library:read` for phone control.
+- `zotero:write`: save references directly to the personal Zotero library online, with optional collection/tag additions. Works while the Mac is off. Read tools include `lookup_article`, `zotero_collections` and `article_import_status`.
 - No OAuth scope grants Mac bridge ingestion rights or arbitrary filesystem/shell access.
 
-Authorize each client through the owner login and consent screen. Consent states that full private Markdown is shared with the client. Read-only grants expose only read tools; token refresh narrowing updates the effective tool permissions. The OAuth provider supports `/oauth/token/revoke`; clients can revoke their own tokens. ChatGPT account/workspace policy may govern adding custom MCP servers and must be checked in the target account. The local integration checks do not substitute for connecting the actual phone client.
+Authorize each client through the owner login and consent screen. Consent states that full private Markdown is shared with the client. Read-only grants expose only read tools; token refresh narrowing updates the effective tool permissions. The OAuth provider supports revocation at `/oauth/token`; clients can revoke their own tokens. ChatGPT account/workspace policy may govern adding custom MCP servers and must be checked in the target account. The local integration checks do not substitute for connecting the actual phone client.
 
 Tools: `search`, `fetch`, `library`, `status`, `review`, plus `create_job`, `cancel_job`, `retry_job` with write consent. Search/fetch return standard structured results and matching text JSON. Citation URLs are authenticated Markdown reader URLs. Complete files are returned within the upload bound; there is no silent truncation. Research content and QA excerpts are explicitly described as reference data, not agent instructions.
 
 ## REST and Mac bridge contract
+
+For direct reference imports, configure the optional `ZOTERO_API_KEY` and
+`ZOTERO_USER_ID` Worker secrets and reconnect MCP clients for `zotero:write`.
+See [Zotero cloud imports](../docs/zotero-cloud-import.md) for setup, tools,
+duplicate/retry guarantees and PDF limitations. These imports do not use the
+Mac job queue. Migration `0006_zotero_imports.sql` stores private receipts.
 
 Owner-cookie REST endpoints:
 
@@ -83,7 +90,7 @@ Bridge requests use **only** `Authorization: Bearer <BRIDGE_TOKEN>`:
 
 An ingested article requires a full `title`. Supported fields: `id`, `authors:string[]`, `year:number|null`, `source_url`, `license_status`, `markdown_status`, `audio_status`, `qa_status`, `warnings:array`, `audio_url`, `editions`, `zotero_url`, `collection`, `publish_status`, `icloud_status`, `backup_status`. `audio_url`/edition audio URLs must refer only to already published, license-eligible public audio. Never provide filesystem paths as cloud playback URLs. Private AAC files are not uploaded to R2. The body may omit Markdown/review for metadata-only synchronization; existing documents are preserved. Send Markdown at its completion, independently of audio. Article sync is serialized using a short per-article lease to keep storage accounting and revisions consistent.
 
-A claimed job additionally contains `worker_id`, `lease_token`, and `lease_expires`. Renew before expiry, including during long synthesis. After a claim, the Mac resumes/reuses local work for that cloud job ID. Stop if a lease update returns `409 lease_lost`. Only one successful claim can own a job. A running cancel request returns `cancel_requested` during lease updates; acknowledge `cancelled` after a safe checkpoint. If a lease expires, another process may reclaim the job. Settings return `configured:false,updated_at:null` until first saved: seed from local defaults only then; later compare `updated_at` and apply the newest intentional user change.
+A claimed job additionally contains `worker_id`, `lease_token`, and `lease_expires`. Renew before expiry, including during long synthesis. After a claim, the Mac resumes/reuses local work for that cloud job ID. Stop if a lease update returns `409 lease_lost`. Only one successful claim can own a job. A running cancel request returns `cancel_requested` during lease updates; acknowledge `cancelled` after a safe checkpoint. If a lease expires, another process may reclaim the job. Settings include `auto_generate` (`off`, `markdown`, `brief`, `full`, `both`; default `markdown`) for the Mac’s independent Zotero monitor. Older settings safely use the default. Deploy the cloud schema before a Mac begins syncing this field. Settings return `configured:false,updated_at:null` until first saved: seed from local defaults only then; later compare `updated_at` and apply the newest intentional user change.
 
 Errors have `{error:{code,message,request_id?}}`. No article bodies, access keys, tokens or private URL query strings are logged. The response request ID connects user-visible failures to structured Workers logs.
 
