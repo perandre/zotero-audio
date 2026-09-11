@@ -326,3 +326,24 @@ def test_publication_creates_feed_with_show_art_only_and_no_optional_sidecars(bu
     assert item.find("{https://podcastindex.org/namespace/1.0}transcript") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}chapters") is None
     assert len(assemblies) == 1
+
+
+def test_license_recheck_preserves_markdown_and_finished_audio_cache(bundle, assemblies, monkeypatch):
+    structure = json.loads((bundle / 'structure.json').read_text())
+    structure['document'].pop('rights')
+    atomic_write_json(bundle / 'structure.json', structure)
+    monkeypatch.setattr(generation, 'source_pdf_rights', lambda *args: (None, None))
+    first = generation.process_article(bundle, mode='both', backend=Backend(), metadata={'podcast_selected': True})
+    assert first['public_eligible'] is False
+    before_md = Path(first['markdown']).read_bytes()
+    before_audio = {e: r['audio_sha256'] for e, r in first['editions'].items()}
+    calls = len(assemblies)
+    monkeypatch.setattr(generation, 'source_pdf_rights', lambda *args: ('https://creativecommons.org/licenses/by/4.0/', 'pdf-text'))
+    second = generation.process_article(bundle, mode='both', backend=Backend(), metadata={'podcast_selected': True})
+    assert second['public_eligible'] is True
+    assert second['license_record']['source_sha256'] == structure['source']['sha256']
+    assert second['license_record']['content_version'] == 'local-pdf-license-v1'
+    assert {e: r['audio_sha256'] for e, r in second['editions'].items()} == before_audio
+    assert all(r['cached'] for r in second['editions'].values())
+    assert len(assemblies) == calls
+    assert Path(second['markdown']).read_bytes() == before_md

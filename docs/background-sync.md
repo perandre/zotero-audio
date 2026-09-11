@@ -11,7 +11,8 @@ running and failed automatic work with full article titles.
 
 Generation defaults to Markdown; choose other outputs in Settings → Zotero
 automation. Turning it off still updates the library. Existing output and prior
-cancelled/failed requests are preserved. Use Retry for a failed job or an explicit
+cancelled/failed requests are preserved. A finished Markdown file does not block
+automatic creation of the selected audio editions. Use Retry for a failed job or an explicit
 regeneration when a source PDF changed.
 
 The following notification details apply to the legacy scheduled sync scripts,

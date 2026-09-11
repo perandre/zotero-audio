@@ -47,11 +47,20 @@ class ZoteroMonitor:
     def queue_article(self, article, action, qa):
         if not article.get("in_zotero") or article.get("source_changed"):
             return
-        # Enabling automation never selects imported/completed output for audio
-        # generation or publication. Existing research remains authoritative.
-        if article.get("markdown") and Path(article["markdown"]).is_file():
+        if not article.get("source_sha256"):
             return
-        if article.get("editions") or not article.get("source_sha256"):
-            return
-        job_id = "zotero-" + digest({"article": article["id"], "source": article["source_sha256"]})[:32]
+        if action == "markdown":
+            if article.get("markdown") and Path(article["markdown"]).is_file():
+                return
+        else:
+            wanted = {"brief", "full"} if action == "both" else {action}
+            missing = [edition for edition in sorted(wanted)
+                       if not (article.get("editions", {}).get(edition, {}).get("audio")
+                               and Path(article["editions"][edition]["audio"]).is_file())]
+            if not missing:
+                return
+            # Request only missing editions: importing existing audio must never
+            # select it for publication as a side effect of making another one.
+            action = "both" if len(missing) == 2 else missing[0]
+        job_id = "zotero-" + digest({"article": article["id"], "source": article["source_sha256"], "action": action})[:32]
         self.store.create_job({"action": action, "scope": "one", "article_id": article["id"], "qa": qa}, job_id=job_id, automatic=True)

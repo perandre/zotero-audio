@@ -130,3 +130,39 @@ def test_publisher_front_matter_without_abstract_heading_is_bounded():
     found, source = _infer_abstract(page)
     assert found == abstract
     assert source == "pdf-implicit-front-matter"
+
+
+@pytest.mark.parametrize('notice', [
+    'This work is licensed under a Creative Commons Attribution 4.0 International License.',
+    'This work is licensed under a Creative Commons Attribution 4.0 Interna-\ntional License.',
+    'Creative Commons Attribution International License 4.0',
+    'CC BY 4.0',
+])
+def test_explicit_cc_by_notice_variants_are_recognized(notice):
+    from zotero_audio.extract import _inferred_license
+    assert _inferred_license([notice]) == ('https://creativecommons.org/licenses/by/4.0/', 'pdf-text')
+
+
+@pytest.mark.parametrize('notice', [
+    'Creative Commons Attribution-NonCommercial 4.0 International License',
+    'Creative Commons Attribution-NoDerivatives 4.0 International License',
+    'Creative Commons Attribution-ShareAlike 4.0 International License',
+    'Creative Commons Attribution 3.0 International License',
+    'All rights reserved',
+])
+def test_license_detection_does_not_relax_the_allowlist(notice):
+    from zotero_audio.extract import _inferred_license
+    assert _inferred_license([notice]) == (None, None)
+
+
+def test_cached_source_license_requires_matching_pdf_bytes(tmp_path):
+    import pymupdf
+    from zotero_audio.extract import source_pdf_rights
+    from zotero_audio.util import sha256_file
+    pdf = tmp_path / 'Synthetic license.pdf'
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_text((50, 50), 'This work is licensed under a Creative Commons Attribution 4.0 International License.', fontsize=9)
+        doc.save(pdf)
+    assert source_pdf_rights(pdf, sha256_file(pdf))[0] == 'https://creativecommons.org/licenses/by/4.0/'
+    assert source_pdf_rights(pdf, '0' * 64) == (None, None)

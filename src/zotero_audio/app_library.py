@@ -192,12 +192,20 @@ def _refresh_zotero(store: Store) -> dict:
         rights = metadata.get("rights", "") or ""
         stat = [source.stat().st_size, source.stat().st_mtime_ns]
         source_sha = previous.get("source_sha256") if previous.get("source_stat") == stat else sha256_file(source)
+        license_status = "open" if "creativecommons.org/licenses/by/4.0" in rights.lower() or "creativecommons.org/publicdomain/zero" in rights.lower() else "private"
+        if not rights and previous.get("bundle"):
+            # Empty Zotero Rights does not invalidate independently verified PDF
+            # evidence. Never reuse a parent assertion or evidence for old bytes.
+            from .podcast import resolve_license
+            evidence = read_json(Path(previous["bundle"]) / "generation.json").get("license_record") or {}
+            if evidence.get("content_version") == "local-pdf-license-v1" and resolve_license(evidence, source_sha256=source_sha).get("allowed"):
+                license_status = "open"
         changed = bool(previous.get("source_sha256") and source_sha != previous["source_sha256"])
         article = {**previous, "id": key, "title": title, "authors": metadata.get("authors", previous.get("authors", [])),
                    "year": metadata.get("publication_year", previous.get("year")), "source_path": str(source),
                    "source_sha256": source_sha, "source_stat": stat, "source_changed": changed or previous.get("source_changed", False),
                    "source_url": metadata.get("url", previous.get("source_url")), "metadata": {**previous.get("metadata", {}), **metadata},
-                   "license_status": "open" if "creativecommons.org/licenses/by/4.0" in rights.lower() or "creativecommons.org/publicdomain/zero" in rights.lower() else "private",
+                   "license_status": license_status,
                    "markdown_status": previous.get("markdown_status", "not_started"), "audio_status": previous.get("audio_status", "not_started"),
                    "qa_status": previous.get("qa_status", "unchecked"), "warnings": previous.get("warnings", []),
                    "editions": previous.get("editions", {}), "artifacts": previous.get("artifacts", {"markdown": False, "audio": False, "review": False}),

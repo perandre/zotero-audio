@@ -292,13 +292,19 @@ class Store:
             if automatic:
                 # Serialize with CLI/cloud queue inserts, including requests
                 # created by another Store connection during a Zotero scan.
-                prior_request = db.execute("""SELECT 1 FROM jobs
+                prior_requests = db.execute("""SELECT data FROM jobs
                     WHERE json_extract(data,'$.action') != 'sync' AND
                     (json_extract(data,'$.article_id') = ? OR
                      (json_extract(data,'$.scope') != 'one' AND status IN ('queued','running','cancel_requested')))
-                    LIMIT 1""", (article_id,)).fetchone()
-                if prior_request:
-                    return None
+                    """, (article_id,)).fetchall()
+                requested_outputs = {"brief", "full"} if action == "both" else {action}
+                for row in prior_requests:
+                    prior = json.loads(row[0])
+                    previous_outputs = {"brief", "full"} if prior["action"] == "both" else {prior["action"]}
+                    # Completed Markdown does not satisfy an audio request. A
+                    # prior failure/cancellation still requires intentional Retry.
+                    if prior["status"] != "completed" or requested_outputs & previous_outputs:
+                        return None
             if idem:
                 for row in db.execute("SELECT data FROM jobs"):
                     old = json.loads(row[0])

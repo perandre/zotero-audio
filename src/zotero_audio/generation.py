@@ -17,7 +17,7 @@ from .audio import (SpeechBackend, assemble_m4a, canonical_synthesis_config, epi
                     loudness_is_competitive, measure_loudness, synthesize_plan)
 from .article_files import episode_title_for, research_markdown_path, review_markdown_path
 from .branding import PODCAST_NAME
-from .extract import extract_pdf, normalize_speech_text, render_research_markdown
+from .extract import extract_pdf, normalize_speech_text, render_research_markdown, source_pdf_rights
 from .podcast import (EDITION_VOICES, PodcastConfig, _authors, _episode_guid,
                       _publish, _seed_source_audio, _show_notes, content_quality_gate,
                       create_edition_plan, episode_title, extract_brief, resolve_license,
@@ -288,6 +288,17 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
     source_sha = original["source"]["sha256"]
     zotero_key = zotero_key or original["source"].get("zotero_key") or str(metadata.get("zotero_key") or source_sha[:12])
     license_record = license_record_from_metadata(original["document"], source_sha)
+    if license_record and original["document"].get("rights_source") == "pdf-text" and not metadata.get("rights"):
+        license_record["content_version"] = "local-pdf-license-v1"
+    if license_record is None:
+        # Recheck the original PDF when older extraction missed a license notice.
+        # Keep this separate from research/plan metadata so finished audio and
+        # manually edited Markdown retain their exact hashes and cache keys.
+        source_path = pdf or (Path(original["source"]["path"]) if original["source"].get("path") else None)
+        rights, rights_source = source_pdf_rights(source_path, source_sha) if source_path else (None, None)
+        if rights:
+            license_record = license_record_from_metadata({**original["document"], "rights": rights, "rights_source": rights_source}, source_sha)
+            license_record["content_version"] = "local-pdf-license-v1"
     if license_record and metadata.get("source_sha256") and metadata["source_sha256"] != source_sha:
         license_record["conflict"] = True
     license_result = resolve_license(license_record, source_sha256=source_sha)
