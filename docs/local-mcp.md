@@ -25,6 +25,12 @@ The tools are:
 | `retry_job(id)` | Resume failed/cancelled work without force; retries are idempotent. |
 | `review_article(id)` | Complete QA findings and the AI review brief. |
 
+Article `search`, `list_library`, `fetch` and the Markdown resource are limited
+to records with a known publication year of 2025 or later. Results prefer 2026
+and then newer eligible years; 2024 and older records, and records without a
+known year, are not returned or readable. This policy does not filter PhD
+project documents or erase historical local artifacts.
+
 The `article://{article_id}/markdown` resource also exposes complete Markdown.
 Tool results have both `structuredContent` and a JSON text content block for
 clients that need either representation. Full text is never silently truncated
