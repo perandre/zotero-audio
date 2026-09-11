@@ -18,6 +18,7 @@ storage; the Mac supplies extraction and Apple-silicon speech processing.
 | Extraction and audio | `extract.py`, `segment.py`, `audio.py` | Page-aware extraction, narration filtering, speech segmentation, verified cache reuse, normalization and AAC assembly. |
 | Publishing | `generation.publish_finished_episode`, `podcast.py`, `publish_sync.py`, `feed_only.py` | Source-bound licensing, finished-file publication, public object synchronization and feed-only updates. |
 | Mac/cloud bridge | `app_bridge.py` | Outbound authenticated sync and job polling; separate lease renewal; no inbound Mac port exposed online. |
+| Zotero reference imports | `cloud/src/zotero.ts`, `article-metadata.ts`, `zotero-mcp.ts` | Direct personal-library Web API saves with separate OAuth consent, DOI/URL duplicate checks and durable D1 receipts. Independent of the Mac. |
 | Remote service | `cloud/src/` | Worker REST/MCP/OAuth, private R2 documents, D1 FTS/job/settings tables, OAuth KV. |
 | Local MCP/plugin | `app_mcp.py`, `plugins/one-more-paper/` | Official Python MCP stdio and the Agent Plugins 1.0.0 package. |
 | Project workspace | `app_projects.py`, `cloud/src/projects.ts`, `cloud/src/project-mcp.ts` | Explicit PhD folder, local extraction/private text mirror, document search and revision-checked Markdown changes. Separate from article generation. |
@@ -29,7 +30,8 @@ they do not define a second product control plane.
 
 ## Document and generation flow
 
-Zotero remains responsible for collecting articles, downloading PDFs,
+The hosted MCP can save article references directly through Zotero’s Web API;
+see [cloud imports](zotero-cloud-import.md). Zotero remains responsible for downloading PDFs,
 bibliographic metadata, collections/tags and attachment synchronization. The
 Python integration prefers **GET requests to Zotero’s local API** at
 `http://localhost:23119/api/`, including linked PDF attachment paths. Legacy

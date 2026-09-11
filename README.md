@@ -8,6 +8,7 @@ are available to AI agents through MCP and a portable agent plugin.
 
 - **On your Mac:** run `za dashboard`, or open [the local dashboard](http://127.0.0.1:8765).
 - **From another device:** [open your private library](https://one-more-paper.perandre.workers.dev).
+- **Save references online:** ask MCP to add a DOI or article URL to Zotero, even with the laptop closed. PDF processing and audio are separate.
 - **Remote MCP:** `https://one-more-paper.perandre.workers.dev/mcp`.
 
 The owner login key is stored outside Git in
@@ -227,5 +228,5 @@ See [architecture and maintainer map](docs/architecture.md),
 [legacy commands and batch examples](docs/legacy-cli.md),
 [Zotero license status](docs/zotero-license-status.md),
 [the read-only Zotero feed inbox](docs/zotero-feed-api.md), and
-[Kokoro evaluation](docs/tts-evaluation.md). Broader article discovery and saving
-new research remain Zotero responsibilities in this version.
+[Kokoro evaluation](docs/tts-evaluation.md), and
+[direct Zotero reference imports](docs/zotero-cloud-import.md).

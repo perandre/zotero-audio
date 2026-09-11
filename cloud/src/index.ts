@@ -232,12 +232,22 @@ export default {
         authorizeEndpoint: "/authorize",
         tokenEndpoint: "/oauth/token",
         clientRegistrationEndpoint: "/oauth/register",
-        scopesSupported: ["library:read", "jobs:write", "documents:write"],
+        scopesSupported: [
+          "library:read",
+          "jobs:write",
+          "documents:write",
+          "zotero:write",
+        ],
         resourceMetadata: {
           resource: `${url.origin}/mcp`,
           authorization_servers:
             url.protocol === "https:" ? [url.origin] : undefined,
-          scopes_supported: ["library:read", "jobs:write", "documents:write"],
+          scopes_supported: [
+            "library:read",
+            "jobs:write",
+            "documents:write",
+            "zotero:write",
+          ],
           resource_name: "One More Paper research library",
         },
         clientIdMetadataDocumentEnabled: true,

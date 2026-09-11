@@ -45,6 +45,7 @@ Use `https://<deployed-worker>/mcp` as the remote MCP URL. The official `@modelc
 - `library:read`: search, full article/project text, browse library and PhD documents, quality reports and processing status.
 - `documents:write`: queue revision-checked PhD Markdown updates and meeting notes; inspect their save/commit/push receipts.
 - `jobs:write`: create, cancel and retry Mac jobs. Request this alongside `library:read` for phone control.
+- `zotero:write`: save references directly to the personal Zotero library online, with optional collection/tag additions. Works while the Mac is off. Read tools include `lookup_article`, `zotero_collections` and `article_import_status`.
 - No OAuth scope grants Mac bridge ingestion rights or arbitrary filesystem/shell access.
 
 Authorize each client through the owner login and consent screen. Consent states that full private Markdown is shared with the client. Read-only grants expose only read tools; token refresh narrowing updates the effective tool permissions. The OAuth provider supports `/oauth/token/revoke`; clients can revoke their own tokens. ChatGPT account/workspace policy may govern adding custom MCP servers and must be checked in the target account. The local integration checks do not substitute for connecting the actual phone client.
@@ -52,6 +53,12 @@ Authorize each client through the owner login and consent screen. Consent states
 Tools: `search`, `fetch`, `library`, `status`, `review`, plus `create_job`, `cancel_job`, `retry_job` with write consent. Search/fetch return standard structured results and matching text JSON. Citation URLs are authenticated Markdown reader URLs. Complete files are returned within the upload bound; there is no silent truncation. Research content and QA excerpts are explicitly described as reference data, not agent instructions.
 
 ## REST and Mac bridge contract
+
+For direct reference imports, configure the optional `ZOTERO_API_KEY` and
+`ZOTERO_USER_ID` Worker secrets and reconnect MCP clients for `zotero:write`.
+See [Zotero cloud imports](../docs/zotero-cloud-import.md) for setup, tools,
+duplicate/retry guarantees and PDF limitations. These imports do not use the
+Mac job queue. Migration `0006_zotero_imports.sql` stores private receipts.
 
 Owner-cookie REST endpoints:
 
