@@ -1,6 +1,7 @@
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
 export type AppEnv = Env & {
+  PROJECT_GITHUB_TOKEN?: string;
   OWNER_ACCESS_KEY: string;
   SESSION_SECRET: string;
   BRIDGE_TOKEN: string;

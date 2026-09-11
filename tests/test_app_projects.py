@@ -160,6 +160,29 @@ def test_sync_uploads_only_changed_documents(project):
     assert [data["document"]["path"] for method, _, data in calls if method == "PUT"] == ["NOW.md"]
 
 
+def test_github_mode_only_uploads_source_bound_extraction_and_never_applies_mac_queue(project):
+    from pypdf import PdfWriter
+    root, docs = project
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(root / "source.pdf")
+    git(root, "add", "source.pdf")
+    original = (root / "NOW.md").read_bytes()
+    calls = []
+    bridge = SimpleNamespace(worker_id="test-worker", worker=SimpleNamespace(stop=threading.Event()))
+    def request(method, path, data=None):
+        calls.append((method, path, data))
+        assert method != "GET", "GitHub mode must never claim old Mac document changes"
+        return {"ok": True, "source": "github"}
+    bridge.request = request
+    docs.sync(bridge)
+    uploads = [data["document"] for method, _, data in calls if method == "PUT"]
+    assert [doc["path"] for doc in uploads] == ["source.pdf"]
+    assert uploads[0]["source_blob_sha"] == git(root, "hash-object", "source.pdf").stdout.decode().strip()
+    assert (root / "NOW.md").read_bytes() == original
+    assert docs.store.state("project_sync")["source"] == "github"
+
+
 def test_lost_acknowledgement_uses_durable_receipt_after_restart(project):
     root, docs = project
     request = change(docs)

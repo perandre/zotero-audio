@@ -9,7 +9,7 @@ Requires Node 22 or newer. From this directory:
 ```sh
 npm ci
 npm run migrate:local
-npm run dev -- --port 8797 --ip 127.0.0.1
+npm run dev -- --port 8797 --ip 127.0.0.1 --var PROJECT_GITHUB_REPO:
 ```
 
 Generate independent random values of at least 32 characters for `OWNER_ACCESS_KEY`, `SESSION_SECRET`, and `BRIDGE_TOKEN`, and place them in ignored `.dev.vars` with permissions `0600`. Do not reuse your Cloudflare API token as any application credential. The owner access key is a single-owner password intended to be generated with high entropy and saved in a password manager. Login uses a signed, HttpOnly, SameSite cookie; neither dashboard nor browser localStorage stores an API token. Session secret rotation signs out browsers. All three production values are Workers secrets, never configuration variables or committed files.
@@ -43,7 +43,7 @@ Open `/login`, enter the owner access key, and use the dashboard normally. Every
 Use `https://<deployed-worker>/mcp` as the remote MCP URL. The official `@modelcontextprotocol/sdk` implements stateless Streamable HTTP using the stable `2025-11-25` protocol plus its supported prior protocol versions. The official `@cloudflare/workers-oauth-provider` implements OAuth 2.1, protected-resource/authorization-server discovery, S256 PKCE, audience validation, refresh-token rotation, revocation, Client ID Metadata Documents and a Dynamic Client Registration compatibility endpoint. We deliberately declare the protocol actually implemented by the stable SDK, rather than claiming every newer optional MCP extension.
 
 - `library:read`: search, full article/project text, browse library and PhD documents, quality reports and processing status.
-- `documents:write`: queue revision-checked PhD Markdown updates and meeting notes; inspect their save/commit/push receipts.
+- `documents:write`: commit revision-checked PhD Markdown updates and meeting notes directly to GitHub, without the Mac.
 - `jobs:write`: create, cancel and retry Mac jobs. Request this alongside `library:read` for phone control.
 - No OAuth scope grants Mac bridge ingestion rights or arbitrary filesystem/shell access.
 
@@ -89,21 +89,25 @@ Errors have `{error:{code,message,request_id?}}`. No article bodies, access keys
 
 ## Private PhD project documents
 
-See [PhD project MCP](../docs/phd-project-mcp.md) for tools, local opt-in
-configuration, supported formats, limits, permissions and recovery. Migration
-`0004_project_documents.sql` adds private project text/FTS and a durable edit
-inbox independently of article queues. Existing MCP `search`/`fetch` include
-project results; dedicated project tools expose exact paths and source revisions.
+See [PhD project MCP](../docs/phd-project-mcp.md) for direct GitHub reads/saves,
+source revisions, permissions, credentials, limits and recovery. Set
+`PROJECT_GITHUB_REPO`, `PROJECT_GITHUB_BRANCH` and the repository-scoped
+`PROJECT_GITHUB_TOKEN` secret before deployment. Apply additive migration
+`0005_project_github.sql`. The endpoint and OAuth grants remain unchanged.
 
-Bridge-only endpoints (same bridge bearer credential):
+In GitHub mode the bridge's project manifest returns `source: github` without
+changing the repository cache. Document uploads accept only PDF/DOCX extraction
+with `source_blob_sha` matching the current GitHub file; text uploads are ignored.
+Pending changes returns an empty list and acknowledgements are refused. Existing
+Mac requests remain inspectable with instructions to reread GitHub and resubmit.
+Local PhD checkout edits are preserved; no automatic pull, stash or overwrite.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/api/bridge/project/manifest` | `{worker_id,title,paths,warnings}` registers the one PhD writer and reconciles removed mirror paths. |
-| PUT | `/api/bridge/project/document` | `{worker_id,document:{path,title,text,revision,format,source_modified_at}}` uploads changed text. |
-| GET | `/api/bridge/project/changes?worker_id=...` | Returns the oldest queued immutable `{id,path,text,expected_revision}` request. |
-| PATCH | `/api/bridge/project/changes/:id` | `{worker_id,status,result}` acknowledges completed/conflict/failed with safe message and optional revision, commit, pushed. |
+Without `PROJECT_GITHUB_REPO`, the legacy opt-in Mac mirror and durable edit
+inbox remain available. The Wrangler OAuth regression suite selects this mode
+using `--var PROJECT_GITHUB_REPO:` and synthetic local secrets. Node tests cover
+the direct GitHub path through the actual MCP handler with synthetic GitHub
+responses and SQLite. No test uses a production GitHub credential by default.
 
-Owner-authenticated `GET /api/project/document?path=...` provides a plain-text
-citation URL. Only the configured bridge writer can ingest or acknowledge changes.
-OAuth never grants bridge rights; `documents:write` never grants generation rights.
+Owner-authenticated `GET /api/project/document?path=...` provides the current
+plain-text citation URL. OAuth never grants bridge rights; `documents:write`
+never grants generation rights.

@@ -19,7 +19,7 @@ storage; the Mac supplies extraction and Apple-silicon speech processing.
 | Mac/cloud bridge | `app_bridge.py` | Outbound authenticated sync and job polling; separate lease renewal; no inbound Mac port exposed online. |
 | Remote service | `cloud/src/` | Worker REST/MCP/OAuth, private R2 documents, D1 FTS/job/settings tables, OAuth KV. |
 | Local MCP/plugin | `app_mcp.py`, `plugins/one-more-paper/` | Official Python MCP stdio and the Agent Plugins 1.0.0 package. |
-| Project workspace | `app_projects.py`, `cloud/src/projects.ts`, `cloud/src/project-mcp.ts` | Explicit PhD folder, local extraction/private text mirror, document search and revision-checked Markdown changes. Separate from article generation. |
+| Project workspace | `app_projects.py`, `cloud/src/projects.ts`, `cloud/src/project-github.ts`, `cloud/src/project-mcp.ts` | Direct GitHub project reads/commits; local source-bound PDF/DOCX extraction. Separate from article generation. |
 | Installation | `app_install.py` | Per-user launchd service and cutover from the legacy scheduler. |
 
 Paths without a directory in the table are under `src/zotero_audio/`. The
@@ -200,5 +200,5 @@ human output centered on full titles. The [root quickstart](../README.md) and
 [legacy reference](legacy-cli.md) contain operational commands.
 
 The [PhD document contract](phd-project-mcp.md) describes opt-in folder access,
-private D1 text storage, source revisions, independent document-write consent
-and the durable Mac save/commit/push inbox.
+direct GitHub reads and commits, private caches, source-bound PDF/DOCX extraction,
+independent document-write consent and recovery after interrupted cloud saves.

@@ -1,7 +1,8 @@
 """Private, explicitly configured project documents and revision-checked edits.
 
-Project text never enters the article/audio pipeline. The filesystem remains
-authoritative; the cloud is a bounded private mirror, with a durable edit inbox.
+Project text never enters the article/audio pipeline. Local stdio reads the
+filesystem. Remote document tools use GitHub directly when configured; the Mac
+then supplies only extraction tied to the exact committed binary blob.
 """
 from __future__ import annotations
 
@@ -99,7 +100,7 @@ class ProjectDocuments:
                     raise ValueError("The project exceeds the 500-document mirror limit")
                 stat = path.stat()
                 signature = [str(root), stat.st_mtime_ns, stat.st_size]
-                if cached.get(relative, {}).get("signature") == signature:
+                if cached.get(relative, {}).get("signature") == signature and cached[relative]["document"].get("source_blob_sha"):
                     record = cached[relative]["document"]
                 else:
                     if stat.st_size > (20 * 1024 * 1024 if suffix in {".pdf", ".docx"} else MAX_BYTES):
@@ -137,6 +138,7 @@ class ProjectDocuments:
                     heading = re.search(r"^#\s+(.+)", text, re.MULTILINE) if suffix == ".md" else None
                     record = {"path": relative, "title": (heading.group(1) if heading else path.stem)[:500],
                               "text": text, "revision": sha(content), "format": format_,
+                              "source_blob_sha": hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest(),
                               "source_modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat().replace("+00:00", "Z")}
                 documents[relative] = record
                 next_cache[relative] = {"signature": signature, "document": record}
@@ -303,8 +305,11 @@ class ProjectDocuments:
         documents, warnings = self.inventory()
         # Refresh the manifest at least every poll so clients can distinguish an
         # unchanged current workspace from an offline Mac; uploads are changes only.
-        bridge.request("POST", "/api/bridge/project/manifest", {"worker_id": bridge.worker_id,
+        manifest = bridge.request("POST", "/api/bridge/project/manifest", {"worker_id": bridge.worker_id,
             "title": self.config().get("title", "VIKING PhD project"), "paths": list(documents), "warnings": warnings})
+        github_source = manifest.get("source") == "github"
+        if github_source:
+            documents = {path: doc for path, doc in documents.items() if doc["format"] in {"pdf", "docx"}}
         uploaded = self.store.state("project_uploaded", {})
         uploaded = {path: value for path, value in uploaded.items() if path in documents}
         self.store.set_state("project_uploaded", uploaded)
@@ -318,16 +323,16 @@ class ProjectDocuments:
             sent += 1
             if sent >= 15 or bridge.worker.stop.is_set():
                 break
-        changes = bridge.request("GET", f"/api/bridge/project/changes?worker_id={bridge.worker_id}")
+        changes = {"changes": []} if github_source else bridge.request("GET", f"/api/bridge/project/changes?worker_id={bridge.worker_id}")
         for change in changes.get("changes", []):
             receipt = self.apply_change(change)
             if receipt["result"].get("revision"):
                 # A completed save is immediately readable from the cloud, even
                 # when there are many other documents waiting for first sync.
                 fresh = self.read_document(change["path"])
-                fresh = {key: fresh[key] for key in ("path", "title", "text", "revision", "format", "source_modified_at")}
+                fresh = {key: fresh[key] for key in ("path", "title", "text", "revision", "format", "source_modified_at", "source_blob_sha")}
                 bridge.request("PUT", "/api/bridge/project/document", {"worker_id": bridge.worker_id, "document": fresh})
                 uploaded[change["path"]] = digest(fresh)
                 self.store.set_state("project_uploaded", uploaded)
             bridge.request("PATCH", f"/api/bridge/project/changes/{change['id']}", {"worker_id": bridge.worker_id, **receipt})
-        self.store.set_state("project_sync", {"synced_at": now(), "documents": len(documents), "uploaded": len(uploaded), "warnings": warnings})
+        self.store.set_state("project_sync", {"source": "github" if github_source else "mac", "synced_at": now(), "documents": len(documents), "uploaded": len(uploaded), "warnings": warnings})

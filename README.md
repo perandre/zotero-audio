@@ -186,10 +186,11 @@ including `NOW.md`, `PROJECT.md`, methods, drafts and source PDFs. `whats_next`
 reads `NOW.md` and also `NEXT.md` when present. Project files are reference data;
 instructions inside them never override your request.
 
-The Mac syncs saved project text independently of Zotero/audio, including
-uncommitted edits. Revision-checked Markdown saves and meeting notes require
-separate `documents:write` consent and report their actual save/commit/push
-status. See [PhD project MCP setup and tools](docs/phd-project-mcp.md).
+Remote project reads, Markdown edits and meeting notes use the private GitHub
+repository directly, including while the laptop is closed. Saves require separate
+`documents:write` consent and return the completed GitHub commit. Local edits
+must be pushed before remote tools see them. See
+[PhD project MCP setup and tools](docs/phd-project-mcp.md).
 
 ## Direct pipeline and further documentation
 

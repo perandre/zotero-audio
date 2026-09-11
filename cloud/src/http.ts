@@ -14,7 +14,7 @@ export function json(data: unknown, status = 200): Response {
   });
 }
 export async function boundedText(
-  request: Request,
+  request: Pick<Request, "headers" | "body">,
   limit = 1_100_000,
 ): Promise<string> {
   if (Number(request.headers.get("Content-Length") || 0) > limit)

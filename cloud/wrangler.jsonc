@@ -25,6 +25,8 @@
   ],
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "8fb1f37ef22c407cb122a1b90423a225" }],
   "vars": {
+    "PROJECT_GITHUB_REPO": "perandre/phd",
+    "PROJECT_GITHUB_BRANCH": "main",
     "MAX_DOCUMENT_BYTES": "524288",
     "MAX_LIBRARY_BYTES": "134217728",
     "MAX_ARTICLES": "2000",
