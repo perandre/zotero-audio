@@ -129,3 +129,12 @@ def test_atomic_article_edit_rolls_back_data_and_search_on_failure(store):
     assert store.article("ARTICLE1") == original
     assert store.search("productivity")["results"][0]["id"] == "ARTICLE1"
     assert not store.search("Replacement")["results"]
+
+
+def test_automatic_generation_settings_validate_choices_and_upgrade_existing_settings(store):
+    assert store.settings()['auto_generate'] == 'markdown'
+    for action in ('off', 'markdown', 'brief', 'full', 'both'):
+        assert store.update_settings({'auto_generate': action})['auto_generate'] == action
+    for action in ('delete', True, None):
+        with pytest.raises(ValueError):
+            store.update_settings({'auto_generate': action})
