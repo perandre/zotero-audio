@@ -31,7 +31,7 @@ from .audio import (
 from .segment import chunk_text, create_speech_plan
 from .branding import PODCAST_NAME
 from .literature import EVIDENCE_FIELDS, brief_blocks, brief_sections, extract_report_brief, is_report, report_organisation
-from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
+from .util import atomic_write_json, atomic_write_text, episode_title, json_digest, load_json, sha256_file, sha256_text
 from .zotero import (
     license_record_from_metadata,
     load_bundle_metadata,
@@ -244,25 +244,6 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         r2_bucket=str(common.get("r2_bucket", "")).strip(),
         briefs_publication_policy=str(common.get("briefs_publication_policy", defaults.briefs_publication_policy)).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
-
-
-def _surname(name: str) -> str:
-    clean = re.sub(r"\s+", " ", name.strip())
-    if "," in clean:
-        return clean.split(",", 1)[0].strip()
-    parts = clean.split()
-    if len(parts) > 1 and parts[-2].casefold() in {"da", "de", "del", "der", "di", "la", "le", "van", "von"}:
-        return " ".join(parts[-2:])
-    return parts[-1] if parts else ""
-
-
-def episode_title(title: str, authors: Iterable[str] = (), year: str | int | None = None, *, institution: str | None = None) -> str:
-    names = [_surname(str(author)) for author in authors if str(author).strip()]
-    label = names[0] if len(names) == 1 else f"{names[0]} & {names[1]}" if len(names) == 2 else f"{names[0]} et al." if names else ""
-    if institution:
-        label = institution.strip()
-    suffix = " ".join(part for part in (label, f"({str(year).strip()})" if year else "") if part)
-    return f"{title.strip()} — {suffix}" if suffix else title.strip()
 
 
 def spoken_authors(authors: Iterable[str]) -> str:

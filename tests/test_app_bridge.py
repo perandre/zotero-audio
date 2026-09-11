@@ -149,6 +149,7 @@ def test_private_markdown_and_review_sync_without_audio_paths_and_only_on_change
     assert bridge.sync_articles() == 1
     value = calls[0][1]
     assert value["article"]["year"] == 2025
+    assert value["article"]["episode_title"] == "Private company research — Author (2025)"
     assert value["article"]["source_url"] == ""
     assert value["markdown"] == markdown.read_text()
     assert value["review"] == review.read_text()

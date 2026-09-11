@@ -7,7 +7,7 @@ import re
 import tempfile
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 def sha256_file(path: Path) -> str:
@@ -65,3 +65,30 @@ def filename_part(value: str, max_length: int = 180) -> str:
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " - ", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
     return value[:max_length].rstrip(" .") or "document"
+
+
+def _surname(name: str) -> str:
+    clean = re.sub(r"\s+", " ", name.strip())
+    if "," in clean:
+        return clean.split(",", 1)[0].strip()
+    parts = clean.split()
+    if len(parts) > 1 and parts[-2].casefold() in {"da", "de", "del", "der", "di", "la", "le", "van", "von"}:
+        return " ".join(parts[-2:])
+    return parts[-1] if parts else ""
+
+
+def episode_title(title: str, authors: Iterable[str] = (), year: str | int | None = None,
+                  *, institution: str | None = None) -> str:
+    """Return the human-facing title shared by audio and document artifacts."""
+    names = [_surname(str(author)) for author in authors if str(author).strip()]
+    label = names[0] if len(names) == 1 else f"{names[0]} & {names[1]}" if len(names) == 2 else f"{names[0]} et al." if names else ""
+    if institution:
+        label = institution.strip()
+    suffix = " ".join(part for part in (label, f"({str(year).strip()})" if year else "") if part)
+    return f"{title.strip()} — {suffix}" if suffix else title.strip()
+
+
+def readable_markdown_filename(title: str, *, review: bool = False) -> str:
+    """Make a safe, human-readable Markdown filename from an episode title."""
+    suffix = " — AI review" if review else ""
+    return filename_part(f"{title}{suffix}") + ".md"

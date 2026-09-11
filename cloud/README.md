@@ -1,6 +1,6 @@
 # One More Paper cloud service
 
-The Cloudflare Worker hosts the private dashboard, ordinary REST API and authenticated MCP at `/mcp`. D1 indexes research Markdown and stores durable jobs. R2 Standard stores Markdown and quality reports. Extraction, Kokoro synthesis, audio assembly, public podcast publishing and iCloud copying run on the Mac. No AI service is required to operate the dashboard, CLI, search or job queue.
+The Cloudflare Worker hosts the private dashboard, ordinary REST API and authenticated MCP at `/mcp`. D1 indexes research Markdown and stores durable jobs. R2 Standard stores the current full research Markdown and quality reports under human-readable episode-title filenames. Extraction, Kokoro synthesis, audio assembly, public podcast publishing and iCloud copying run on the Mac. No AI service is required to operate the dashboard, CLI, search or job queue.
 
 ## Development
 
@@ -32,7 +32,7 @@ npm run migrate:remote
 npm run deploy
 ```
 
-The app limits the private library to 128 MiB of current Markdown/review content, 2,000 articles, 512 KiB per document, 500 changed-article uploads a day and 100 active jobs. It replaces old R2 mirror objects after the new object and D1 index commit; local processing retains source evidence and revisions. These limits provide substantial headroom inside the free allowances. They are not an account-wide billing cap: other Workers, R2 podcast files and other services share Cloudflare allowances. The Mac must poll no more frequently than once a minute when idle and sync only changed articles. Search uses FTS5 and metadata queries, not R2 bucket scans. CPU-intensive processing never runs in Workers.
+The app limits the private library to 128 MiB of current Markdown/review content, 2,000 articles, 512 KiB per document, 500 changed-article uploads a day and 100 active jobs. It replaces old R2 mirror objects after the new human-readable object and D1 index commit; local processing retains source evidence and revisions. A sync-schema bump migrates existing current objects from ID/hash keys to episode-title keys. These limits provide substantial headroom inside the free allowances. They are not an account-wide billing cap: other Workers, R2 podcast files and other services share Cloudflare allowances. The Mac must poll no more frequently than once a minute when idle and sync only changed articles. Search uses FTS5 and metadata queries, not R2 bucket scans. CPU-intensive processing never runs in Workers.
 
 Current free-plan references: [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/). Validate these and the account’s actual usage before changing storage limits. The pinned Sharp override fixes the dev-only transitive libheif advisory in Wrangler/Miniflare; no image transformations run in the deployed app.
 

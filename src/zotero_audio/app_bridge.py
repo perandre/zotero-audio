@@ -29,7 +29,8 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class CloudBridge:
-    SYNC_SCHEMA_VERSION = 2
+    # Forces one upload after the R2 object-key naming migration.
+    SYNC_SCHEMA_VERSION = 3
     POLL_SECONDS = 60
     LEASE_SECONDS = 300
     RENEW_SECONDS = 15

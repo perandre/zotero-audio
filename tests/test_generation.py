@@ -10,7 +10,7 @@ from zotero_audio import generation
 from zotero_audio.audio import TARGET_SAMPLE_RATE, synthesize_plan
 from zotero_audio.extract import render_research_markdown
 from zotero_audio.podcast import PodcastConfig
-from zotero_audio.util import atomic_write_json, json_digest, sha256_file
+from zotero_audio.util import atomic_write_json, episode_title, json_digest, readable_markdown_filename, sha256_file
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def bundle(tmp_path):
                                      "heading_level": 2, "included_in_reading": True})
     structure["structure_sha256"] = json_digest(structure)
     atomic_write_json(tmp_path / "structure.json", structure)
-    (tmp_path / "article.md").write_text(render_research_markdown(structure))
+    (tmp_path / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))).write_text(render_research_markdown(structure))
     return tmp_path
 
 
@@ -80,7 +80,7 @@ def assemblies(monkeypatch):
 
 
 def test_markdown_is_first_class_and_preserves_manual_edits_and_references(bundle, monkeypatch):
-    path = bundle / "article.md"
+    path = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))
     before = path.read_text().replace("useful improvements", "important measured improvements")
     path.write_text(before)
     monkeypatch.setattr(generation, "extract_pdf", lambda *a, **kw: pytest.fail("must preserve existing Markdown"))
@@ -91,7 +91,18 @@ def test_markdown_is_first_class_and_preserves_manual_edits_and_references(bundl
     assert not result["editions"]
     assert events[-1]["stage"] == "markdown_ready"
     assert events[-1]["markdown"] == str(path)
-    assert before in (bundle / "ai-review.md").read_text()
+    review = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"), review=True)
+    assert before in review.read_text()
+
+
+def test_legacy_article_name_is_migrated_to_episode_title(bundle):
+    readable = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))
+    legacy = bundle / "article.md"
+    readable.replace(legacy)
+    result = generation.process_article(bundle)
+    assert Path(result["markdown"]) == readable
+    assert readable.is_file()
+    assert not legacy.exists()
 
 
 def test_each_edition_is_ready_independently_and_narration_excludes_references(bundle, assemblies):
@@ -216,7 +227,7 @@ def test_markdown_edits_invalidate_audio_but_reuse_unchanged_segments(bundle, as
     backend = Backend()
     generation.process_article(bundle, mode="full", backend=backend)
     before = len(backend.texts)
-    path = bundle / "article.md"
+    path = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))
     path.write_text(path.read_text().replace("careful adoption", "careful, measured adoption"))
     result = generation.process_article(bundle, mode="full", backend=backend)
     assert len(backend.texts) == before + 1
@@ -293,7 +304,7 @@ def test_brief_failure_does_not_hold_back_full_and_cancellation_propagates(bundl
 
 
 def test_known_hyphen_artifacts_repaired_without_changing_real_compounds(bundle, assemblies):
-    path = bundle / "article.md"
+    path = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))
     path.write_text(path.read_text().replace("careful adoption", "so-cial and long-term adop-tion"))
     backend = Backend()
     generation.process_article(bundle, mode="full", backend=backend)

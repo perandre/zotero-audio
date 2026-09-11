@@ -11,6 +11,7 @@ from typing import Any
 
 from pypdf import PdfReader
 
+from .article_files import research_markdown_path
 from .util import atomic_write_json, atomic_write_text, filename_part, json_digest, sha256_file, sha256_text
 from .zotero import merge_document_metadata
 from .zotero_local import zotero_attachment_path
@@ -646,6 +647,8 @@ def render_research_markdown(structure: dict[str, Any]) -> str:
                                              "schema: zotero-audio-research-markdown/v1", 1)
 
 
-def write_extraction(bundle: Path, structure: dict[str, Any], markdown: str) -> None:
-    atomic_write_text(bundle / "article.md", markdown)
+def write_extraction(bundle: Path, structure: dict[str, Any], markdown: str) -> Path:
+    markdown_path = research_markdown_path(bundle, structure.get("document", {}), migrate=True)
+    atomic_write_text(markdown_path, markdown)
     atomic_write_json(bundle / "structure.json", structure)
+    return markdown_path

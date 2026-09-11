@@ -6,8 +6,11 @@ supports `markdown`, `brief`, `full`, and `both` modes. Markdown-only needs no
 speech model. Audio receives a `SpeechBackend` or a lazy `backend_factory`;
 the worker owns the model's lifetime so it remains warm between articles.
 
-Existing `article.md` is authoritative and is never overwritten unless the
-caller explicitly sets `force=True`. New extraction preserves references,
+The research Markdown is stored as a readable filename matching the episode
+title, such as `How companies use AI - Author (2025).md`, inside the article
+bundle. Legacy `article.md` files are migrated when the bundle is next opened.
+The named Markdown is authoritative and is never overwritten unless the caller
+explicitly sets `force=True`. New extraction preserves references,
 links, figure/table captions and extracted footnotes. The source PDF hash and
 page markers remain available. Each edition derives its own narration from
 the current Markdown, omitting references, raw links, citation markers and
@@ -31,10 +34,10 @@ status `failed`.
 
 Artifacts are ordinary files:
 
-- `article.md` and `structure.json`: research source and original extraction.
+- `<episode title>.md` and `structure.json`: research source and original extraction.
 - `generation.json`: current artifact paths, title, source hashes, licensing,
   settings, statuses and completed editions.
-- `qa-report.json` and `ai-review.md`: machine-readable findings and a
+- `qa-report.json` and `<episode title> - AI review.md`: machine-readable findings and a
   self-contained AI review brief with complete Markdown, instructions,
   evidence, configuration and paths to the original PDF/audio.
 - `editions/brief/` and `editions/full/`: independent speech plans, narration,

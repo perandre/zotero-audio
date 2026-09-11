@@ -6,6 +6,7 @@ const articleSchema = z
   .object({
     id: z.string().optional(),
     title: z.string().min(1).max(2000),
+    episode_title: z.string().min(1).max(2000).optional(),
     authors: z.array(z.string().max(500)).max(100).default([]),
     year: z.number().int().min(1).max(3000).nullable().optional(),
     source_url: z.string().max(4000).default(""),
@@ -65,6 +66,19 @@ export function articleJson(row: ArticleRow, origin: string) {
         !!extra.audio_url,
     },
   };
+}
+
+export function readableDocumentFilename(title: string): string {
+  const normalized = title
+    .normalize("NFKC")
+    .replace(/[–—]/g, " - ")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " - ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[ .]+$/, "")
+    .slice(0, 180)
+    .trim();
+  return `${normalized || "Research article"}.md`;
 }
 export async function getArticle(env: AppEnv, id: string): Promise<ArticleRow> {
   const row = await env.DB.prepare("SELECT * FROM articles WHERE id=?")
@@ -179,6 +193,7 @@ async function ingestLocked(
       "empty_markdown",
       "Empty Markdown is not a finished research document.",
     );
+  const episodeTitle = article.episode_title?.trim() || article.title;
   const mdHash =
     data.markdown === undefined
       ? (existing?.markdown_hash ?? null)
@@ -187,12 +202,20 @@ async function ingestLocked(
     data.review === undefined
       ? (existing?.review_hash ?? null)
       : await digest(data.review);
-  const mdKey = mdHash ? `${id}/markdown/${mdHash}.md` : null,
-    reviewKey = reviewHash ? `${id}/review/${reviewHash}.md` : null;
+  const nextMdKey = mdHash
+      ? `${id}/markdown/${readableDocumentFilename(episodeTitle)}`
+      : null,
+    nextReviewKey = reviewHash
+      ? `${id}/review/${readableDocumentFilename(`${episodeTitle} — AI review`)}`
+      : null,
+    mdKey = data.markdown === undefined ? (existing?.markdown_key ?? nextMdKey) : nextMdKey,
+    reviewKey = data.review === undefined ? (existing?.review_key ?? nextReviewKey) : nextReviewKey;
   const changesMd =
-    data.markdown !== undefined && mdHash !== existing?.markdown_hash;
+    data.markdown !== undefined &&
+    (mdHash !== existing?.markdown_hash || mdKey !== existing?.markdown_key);
   const changesReview =
-    data.review !== undefined && reviewHash !== existing?.review_hash;
+    data.review !== undefined &&
+    (reviewHash !== existing?.review_hash || reviewKey !== existing?.review_key);
   const oldMetadata = existing ? JSON.parse(existing.metadata) : {};
   const mdBytes =
     data.markdown === undefined
@@ -256,6 +279,7 @@ async function ingestLocked(
     const metadata = {
       ...oldMetadata,
       audio_url: article.audio_url ?? oldMetadata.audio_url,
+      episode_title: episodeTitle,
       editions: article.editions ?? oldMetadata.editions,
       zotero_url: article.zotero_url,
       collection: article.collection,
@@ -360,9 +384,9 @@ export async function documentResponse(
       "The stored document is unavailable. Retry the Mac sync.",
     );
   const filename =
-    article.title.replace(/[\r\n<>:"/\\|?*]/g, " ").slice(0, 180) +
-    (kind === "review" ? " — Quality report" : "") +
-    ".md";
+    readableDocumentFilename(
+      `${JSON.parse(article.metadata).episode_title ?? article.title}${kind === "review" ? " — AI review" : ""}`,
+    );
   return new Response(object.body, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",

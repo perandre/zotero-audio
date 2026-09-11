@@ -23,7 +23,8 @@ python scripts/preview_brief.py /absolute/path/paper.pdf --output /absolute/path
 ```
 
 Optional `--metadata` and `--zotero-key` arguments supply bibliographic metadata and
-provenance. The output includes `brief.md`, extracted `article.md`, `structure.json`,
+provenance. The output includes `brief.md`, the episode-titled research Markdown,
+`structure.json`,
 and the brief speech plan. Compare the brief to the PDF page before audio synthesis.
 Existing published audio and transcripts require a separate rebuild to adopt changes.
 

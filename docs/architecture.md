@@ -37,7 +37,8 @@ maintains its own status tags/saved search and exposes a read-only feed inbox;
 those existing add-on responsibilities are separate from core GET discovery.
 
 `generation.process_article` resolves source metadata, extracts the PDF when
-needed, and writes `article.md`. Research Markdown retains references, links,
+needed, and writes a human-readable Markdown filename matching the episode
+title. Research Markdown retains references, links,
 page markers and extracted supporting text. It is editable source material for
 subsequent work. Normal reruns preserve it; `force=True` explicitly replaces it
 from the source PDF. A changed PDF is surfaced for an explicit regeneration
@@ -77,7 +78,7 @@ technical prerequisites still reject unusable input/output. Quality evidence
 records what was checked, skipped or measured; there is no claim that loudness
 measurement verifies semantic accuracy or that an ASR check ran when it did not.
 
-A bundle contains `qa-report.json` and `ai-review.md` with findings, complete
+A bundle contains `qa-report.json` and a human-readable `<episode title> - AI review.md` with findings, complete
 research Markdown, settings, provenance and repair/reproduction instructions.
 The original article text inside a report remains untrusted reference content.
 An artifact path in a report is not proof an agent has inspected that artifact.
@@ -115,12 +116,12 @@ control/
   Cloud login.txt       owner browser login instructions/key (private)
 full-library/bundles/
   <bundle>/
-    article.md
+    <episode title>.md
     structure.json
     metadata.json
     generation.json
     qa-report.json
-    ai-review.md
+    <episode title> - AI review.md
     editions/brief/...
     editions/full/...
 venv/                   editable Python installation
