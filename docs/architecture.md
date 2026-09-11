@@ -216,10 +216,20 @@ Zotero retains the cached catalog and last successful check. Catalog revisions
 refresh dashboard listings even when metadata edits do not change article counts.
 
 `auto_generate` defaults to `markdown` and supports `off`, `brief`, `full`, `both`.
-It only selects PDFs without existing Markdown/audio or prior individual jobs.
+It selects missing outputs for saved PDFs. Completed Markdown does not block audio,
+and a completed Brief does not block a missing Full. Only missing editions enter
+the job, so imported audio is never selected for publication as a side effect.
 A deterministic job ID and atomic queue check prevent duplicate automatic jobs
 across scans/restarts, honor explicit requests and defer to active library runs.
 Generation uses the ordinary queue, caches, QA and publication gates. Previously
 failed/cancelled requests require Retry; changed source PDFs require an explicit
 regeneration. Completed generation preserves a newer source revision discovered
 during processing. No Zotero data or research files are overwritten by discovery.
+
+When cached research has no license record, generation checks the original PDF's
+first two pages for an allowlisted license notice and verifies the exact source
+hash before and after reading. This also repairs older missed ACM CC BY 4.0
+notices, including line-wrapped “International”. The evidence remains separate
+from research Markdown and speech-plan metadata, so a corrected publication gate
+reuses the finished audio bytes without synthesis or another encode. Explicit
+restrictive licenses are not replaced by this fallback.

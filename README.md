@@ -50,9 +50,9 @@ checks retry automatically.
 
 **Settings → Zotero automation** selects Markdown (the default), Markdown plus
 Brief/Full/both audio editions, or no automatic generation. Discovery always
-continues. New PDFs without existing output get one durable generation job;
+continues. Missing selected outputs get a durable generation job, even when Markdown is already ready;
 restarts resume it and repeated scans do not duplicate it. Existing research,
-imported audio and explicit failed/cancelled jobs are preserved. Inspect Activity
+imported audio and explicit failed/cancelled jobs are preserved. Existing audio editions are never selected for publication just because another edition is missing. Inspect Activity
 for failed work and use Retry after addressing its cause. Replaced source PDFs
 require explicit regeneration to preserve research edits. This catalog covers
 locally available saved PDFs; feed entries and records without a downloaded PDF

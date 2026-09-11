@@ -55,7 +55,7 @@ def test_discovery_queues_selected_outputs_once_across_scans_and_restart(catalog
     assert store.job(job['id'])['status'] == 'queued'
 
 
-@pytest.mark.parametrize('terminal', ['failed', 'cancelled', 'completed'])
+@pytest.mark.parametrize('terminal', ['failed', 'cancelled'])
 def test_polling_respects_previous_requests_even_after_settings_change(catalog, terminal):
     store, _, monitor = catalog
     monitor.cycle()
@@ -127,9 +127,10 @@ def test_existing_output_changed_sources_and_removed_pdfs_are_never_auto_generat
     markdown = tmp_path / 'Existing.md'
     markdown.write_text('# Existing edited article\n')
     store.put_article({'id': 'NEWPAPER', 'title': source['metadata']['title'], 'markdown': str(markdown)})
-    store.update_settings({'auto_generate': 'both'})
+    store.update_settings({'auto_generate': 'markdown'})
     monitor.cycle()
     assert not store.jobs()['jobs']
+    store.update_settings({'auto_generate': 'both'})
     source['items'][0][1].write_bytes(b'a replaced source PDF')
     monitor.cycle()
     assert store.article('NEWPAPER')['source_changed']
@@ -212,3 +213,55 @@ def test_removed_automatic_job_does_not_generate(catalog, monkeypatch):
     monkeypatch.setattr(generation, 'process_article', lambda *a, **k: pytest.fail('Removed source must not generate'))
     LocalWorker(store).process(job)
     assert store.job(job['id'])['status'] == 'cancelled'
+
+
+def test_completed_markdown_does_not_block_missing_audio(catalog, tmp_path):
+    store, _, monitor = catalog
+    monitor.cycle()
+    job = store.jobs()['jobs'][0]
+    store.update_job(job['id'], status='completed')
+    markdown = tmp_path / 'Edited research.md'
+    markdown.write_text('# Keep my edits\n')
+    store.put_article({'id': 'NEWPAPER', 'title': job['title'], 'markdown': str(markdown)})
+    store.update_settings({'auto_generate': 'both'})
+    monitor.cycle()
+    audio = [j for j in store.jobs()['jobs'] if j['action'] == 'both']
+    assert len(audio) == 1
+    assert markdown.read_text() == '# Keep my edits\n'
+    store.update_job(audio[0]['id'], status='completed')
+    monitor.cycle()
+    assert len(store.jobs()['jobs']) == 2  # Do not retry unavailable editions every minute.
+
+
+def test_existing_audio_is_not_selected_for_publication_when_filling_another_edition(catalog, tmp_path):
+    store, _, monitor = catalog
+    store.update_settings({'auto_generate': 'off'})
+    monitor.cycle()
+    audio = tmp_path / 'Existing Full.m4a'
+    audio.write_bytes(b'existing finished audio')
+    store.put_article({'id': 'NEWPAPER', 'title': 'A complete synthetic research article title',
+                       'editions': {'full': {'audio': str(audio), 'origin': 'existing'}}})
+    store.update_settings({'auto_generate': 'both'})
+    monitor.cycle()
+    assert [j['action'] for j in store.jobs()['jobs']] == ['brief']
+    assert audio.read_bytes() == b'existing finished audio'
+
+
+def test_refresh_preserves_only_current_pdf_license_evidence(catalog):
+    import json
+    store, source, monitor = catalog
+    store.update_settings({'auto_generate': 'off'})
+    source['metadata']['rights'] = None
+    monitor.cycle()
+    article = store.article('NEWPAPER')
+    bundle = Path(article['bundle'])
+    bundle.mkdir(parents=True)
+    record = {'source_sha256': article['source_sha256'], 'license_url': 'CC BY 4.0',
+              'read_url': 'https://example.org/paper', 'evidence_sha256': 'e' * 64,
+              'content_version': 'local-pdf-license-v1'}
+    (bundle / 'generation.json').write_text(json.dumps({'license_record': record}))
+    monitor.cycle()
+    assert store.article('NEWPAPER')['license_status'] == 'open'
+    source['items'][0][1].write_bytes(b'replaced source bytes')
+    monitor.cycle()
+    assert store.article('NEWPAPER')['license_status'] == 'private'

@@ -347,10 +347,13 @@ def _front_matter_replaced_with_abstract(first_page: str, abstract: str, source:
 
 
 def _inferred_license(page_texts: list[str]) -> tuple[str | None, str | None]:
-    raw = re.sub(r"\s+", " ", "\n".join(page_texts)).casefold()
+    # Repair this known license word only; preserve substantive PDF wording.
+    joined = re.sub(r"(?i)\binterna-\s+tional\b", "international", "\n".join(page_texts))
+    raw = re.sub(r"\s+", " ", joined).casefold()
     text = re.sub(r"\s+", " ", normalize_speech_text("\n".join(page_texts))).casefold()
     if re.search(
         r"creative commons attribution(?: international)? license\s*4\.0"
+        r"|creative commons attribution\s+4\.0\s+(?:international\s+)?license"
         r"|\bcc\s*[- ]?by\s*4\.0\b"
         r"|creativecommons\.org/licenses/by/4\.0",
         raw + " " + text,
@@ -359,6 +362,18 @@ def _inferred_license(page_texts: list[str]) -> tuple[str | None, str | None]:
     if re.search(r"\bcc0(?:\s+1\.0)?\b", raw + " " + text):
         return "https://creativecommons.org/publicdomain/zero/1.0/", "pdf-text"
     return None, None
+
+
+def source_pdf_rights(pdf: Path, source_sha256: str) -> tuple[str | None, str | None]:
+    """Read front-page rights for cached research, bound to the exact PDF bytes."""
+    if not pdf.is_file() or sha256_file(pdf) != source_sha256:
+        return None, None
+    try:
+        reader = PdfReader(pdf)
+        rights = _inferred_license([page.extract_text() or "" for page in reader.pages[:2]])
+    except Exception:
+        return None, None
+    return rights if sha256_file(pdf) == source_sha256 else (None, None)
 
 
 def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
