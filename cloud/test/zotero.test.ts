@@ -60,6 +60,7 @@ function fixture() {
     rejectGet: false,
     conflictPatch: false,
     backoff: false,
+    redirect: false,
     total: 0,
     drift: false,
   };
@@ -71,8 +72,9 @@ function fixture() {
       new Headers(init?.headers).get("Zotero-API-Key"),
       env.ZOTERO_API_KEY,
     );
-    assert.equal(init?.redirect, "error");
+    assert.equal(init?.redirect, "manual");
     assert.equal(url.searchParams.has("key"), false);
+    if (state.redirect) return new Response(null, { status: 302, headers: { Location: "https://elsewhere.example.org/collect" } });
     const method = init?.method ?? "GET";
     const data = init?.body ? JSON.parse(String(init.body)) : null;
     if (state.rejectGet && method === "GET")
@@ -432,4 +434,10 @@ test("Read/jobs/document scopes cannot mutate Zotero; Zotero scope does not gran
     );
     assert.ok(tools.includes("lookup_article"));
   }
+});
+
+test("Zotero redirects are rejected without forwarding the credential", async () => {
+  const {env,state}=fixture();state.redirect=true;
+  await assert.rejects(listZoteroCollections(env), /did not accept/);
+  assert.equal(state.writes,0);
 });

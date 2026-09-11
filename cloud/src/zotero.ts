@@ -94,7 +94,7 @@ async function api(
   try {
     response = await fetch(`https://api.zotero.org/users/${user}${path}`, {
       method,
-      redirect: "error",
+      redirect: "manual",
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
       headers: {
