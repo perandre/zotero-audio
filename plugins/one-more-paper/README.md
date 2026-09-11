@@ -35,5 +35,7 @@ client to verify its installation behavior. The authoritative schemas are
 and [mcp.schema.json](https://agent-plugins.org/schemas/1.0.0/mcp.schema.json).
 
 The configured PhD workspace also supports current priorities, document
-browsing/reading/search and revision-checked Markdown saves. See
+browsing/reading/search and revision-checked Markdown saves. Remote tools read
+and commit directly to GitHub while the Mac is asleep; local stdio uses the
+local checkout. See
 [the project document guide](../../docs/phd-project-mcp.md).

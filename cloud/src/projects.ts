@@ -3,33 +3,15 @@ import { digest, HttpError } from "./http";
 import { searchExpression } from "./library";
 import type { AppEnv } from "./types";
 
-const MAX_BYTES = 524288;
+import {
+  MAX_BYTES,
+  projectPath,
+  revision,
+  changeSchema,
+} from "./project-contracts";
+export { projectPath, changeSchema } from "./project-contracts";
+import * as github from "./project-github";
 const MAX_PROJECT_BYTES = 8 * 1024 * 1024;
-export const projectPath = z
-  .string()
-  .min(1)
-  .max(500)
-  .refine(
-    (path) =>
-      !/[\\\x00-\x1f\x7f]/.test(path) &&
-      path
-        .split("/")
-        .every(
-          (part) =>
-            part.length > 0 && !part.startsWith(".") && !part.includes(":"),
-        ),
-    "Use a relative document path without hidden components or traversal.",
-  );
-const revision = z.string().regex(/^[a-f0-9]{64}$/);
-export const changeSchema = z.object({
-  path: projectPath.refine(
-    (path) => path.toLowerCase().endsWith(".md"),
-    "Only Markdown documents can be saved.",
-  ),
-  text: z.string().min(1).max(MAX_BYTES),
-  expected_revision: revision.nullable(),
-  request_id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{7,127}$/),
-});
 const uploadSchema = z.object({
   path: projectPath,
   title: z.string().min(1).max(500),
@@ -37,6 +19,10 @@ const uploadSchema = z.object({
   revision,
   format: z.enum(["markdown", "text", "pdf", "docx"]),
   source_modified_at: z.string().datetime(),
+  source_blob_sha: z
+    .string()
+    .regex(/^[a-f0-9]{40}$/)
+    .optional(),
 });
 type Document = z.infer<typeof uploadSchema> & {
   project: string;
@@ -57,6 +43,7 @@ type Change = {
 };
 
 export async function projectStatus(env: AppEnv) {
+  if (github.enabled(env)) return github.status(env);
   const row = await env.DB.prepare(
     "SELECT * FROM projects WHERE id='phd'",
   ).first<{ title: string; synced_at: string; warnings: string }>();
@@ -83,6 +70,8 @@ export async function listDocuments(
   offset = 0,
   limit = 100,
 ) {
+  if (github.enabled(env))
+    return github.listDocuments(env, prefix, offset, limit);
   const state = await projectStatus(env);
   const query =
     "FROM project_documents WHERE project='phd' AND substr(path,1,length(?))=?";
@@ -106,6 +95,7 @@ export async function listDocuments(
 }
 export async function readDocument(env: AppEnv, path: string, origin: string) {
   projectPath.parse(path);
+  if (github.enabled(env)) return github.readDocument(env, path, origin);
   const row = await env.DB.prepare(
     "SELECT * FROM project_documents WHERE project='phd' AND path=?",
   )
@@ -127,6 +117,7 @@ export async function readDocument(env: AppEnv, path: string, origin: string) {
   };
 }
 export async function whatsNext(env: AppEnv, origin: string) {
+  if (github.enabled(env)) return github.whatsNext(env, origin);
   const state = await projectStatus(env);
   const found = await env.DB.prepare(
     "SELECT path FROM project_documents WHERE project='phd' AND path IN ('NOW.md','NEXT.md') ORDER BY path DESC",
@@ -146,6 +137,7 @@ export async function searchDocuments(
   query: string,
   origin: string,
 ) {
+  if (github.enabled(env)) return github.searchDocuments(env, query, origin);
   const state = await projectStatus(env),
     expression = searchExpression(query);
   if (!expression) return { ...state, results: [] };
@@ -156,7 +148,7 @@ export async function searchDocuments(
     WHERE project_search MATCH ? AND s.project='phd' ORDER BY rank LIMIT 30`,
   )
     .bind(expression)
-    .all<{ path: string }>();
+    .all<{ path: string; snippet: string }>();
   return {
     ...state,
     results: found.results.map((row) => ({
@@ -167,6 +159,7 @@ export async function searchDocuments(
   };
 }
 export async function syncManifest(env: AppEnv, input: unknown) {
+  if (github.enabled(env)) return { ok: true, source: "github" };
   const data = z
     .object({
       title: z.string().min(1).max(200),
@@ -225,6 +218,7 @@ export async function uploadDocument(env: AppEnv, input: unknown) {
   const data = z
     .object({ worker_id: z.string(), document: uploadSchema })
     .parse(input);
+  if (github.enabled(env)) return github.uploadExtraction(env, data.document);
   await checkWorker(env, data.worker_id);
   const doc = data.document,
     bytes = new TextEncoder().encode(doc.text).length;
@@ -248,7 +242,7 @@ export async function uploadDocument(env: AppEnv, input: unknown) {
   const timestamp = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO project_documents VALUES('phd',?,?,?,?,?,?,?,?) ON CONFLICT(project,path) DO UPDATE SET
+      `INSERT INTO project_documents(project,path,title,text,revision,format,source_modified_at,synced_at,bytes) VALUES('phd',?,?,?,?,?,?,?,?) ON CONFLICT(project,path) DO UPDATE SET
       title=excluded.title,text=excluded.text,revision=excluded.revision,format=excluded.format,source_modified_at=excluded.source_modified_at,synced_at=excluded.synced_at,bytes=excluded.bytes`,
     ).bind(
       doc.path,
@@ -270,6 +264,10 @@ export async function uploadDocument(env: AppEnv, input: unknown) {
   return { ok: true, revision: doc.revision };
 }
 export async function getChange(env: AppEnv, id: string) {
+  if (github.enabled(env)) {
+    const result = await github.getChange(env, id);
+    if (result) return result;
+  }
   const row = await env.DB.prepare(
     "SELECT * FROM project_changes WHERE id=? AND project='phd'",
   )
@@ -281,6 +279,16 @@ export async function getChange(env: AppEnv, id: string) {
       "change_not_found",
       "This document change was not found.",
     );
+  if (github.enabled(env) && row.status === "queued")
+    return {
+      request_id: row.id,
+      path: row.path,
+      status: "conflict",
+      result: {
+        message:
+          "This old Mac request was not applied. Read the current GitHub document and save with a new request_id.",
+      },
+    };
   return {
     request_id: row.id,
     path: row.path,
@@ -291,6 +299,7 @@ export async function getChange(env: AppEnv, id: string) {
   };
 }
 export async function saveDocument(env: AppEnv, input: unknown) {
+  if (github.enabled(env)) return github.saveDocument(env, input);
   const data = changeSchema.parse(input);
   if (new TextEncoder().encode(data.text).length > MAX_BYTES)
     throw new HttpError(
@@ -352,6 +361,7 @@ export async function saveDocument(env: AppEnv, input: unknown) {
   return saveDocument(env, data);
 }
 export async function pendingChanges(env: AppEnv, workerId: string) {
+  if (github.enabled(env)) return { changes: [], source: "github" };
   await checkWorker(env, workerId);
   const rows = await env.DB.prepare(
     "SELECT id,path,text,expected_revision FROM project_changes WHERE project='phd' AND status='queued' ORDER BY created_at LIMIT 1",
@@ -359,6 +369,12 @@ export async function pendingChanges(env: AppEnv, workerId: string) {
   return { changes: rows.results };
 }
 export async function finishChange(env: AppEnv, id: string, input: unknown) {
+  if (github.enabled(env))
+    throw new HttpError(
+      409,
+      "github_authoritative",
+      "Document changes now commit directly to GitHub; this Mac request is retired.",
+    );
   const data = z
     .object({
       worker_id: z.string(),
