@@ -94,6 +94,18 @@ r = await send("/api/settings", {
 });
 assert.equal(r.status, 200, await r.text());
 r = await send("/api/settings", {
+  method: "PATCH", headers: owner, body: JSON.stringify({ auto_generate: "both" }),
+});
+assert.equal((await parsed(r)).auto_generate, "both");
+r = await send("/api/settings", {
+  method: "PATCH", headers: owner, body: JSON.stringify({ qa_enabled: false }),
+});
+assert.equal((await parsed(r)).auto_generate, "both", "Unrelated settings edits must preserve automation");
+r = await send("/api/bridge/settings", {
+  method: "PATCH", headers: bridge, body: JSON.stringify({ auto_generate: "markdown", qa_enabled: true }),
+});
+assert.equal((await parsed(r)).auto_generate, "markdown");
+r = await send("/api/settings", {
   method: "PATCH",
   headers: {
     Cookie: cookie,
@@ -630,6 +642,14 @@ console.log(
 
 const state = await parsed(await send("/api/status", { headers: owner }));
 assert.equal(state.capabilities.local_files, false);
+assert.equal(typeof state.counts.catalog_revision, "string");
+await parsed(await send(`/api/bridge/articles/${id}`, {
+  method: "PUT", headers: bridge,
+  body: JSON.stringify({ article: { ...article, title: article.title + " — Updated" } }),
+}));
+const revisedState = await parsed(await send("/api/status", { headers: owner }));
+assert.equal(revisedState.counts.total, state.counts.total);
+assert.notEqual(revisedState.counts.catalog_revision, state.counts.catalog_revision);
 console.log(
   "PASS: authenticated Markdown/R2 + D1 search, owner CSRF, idempotent jobs, atomic leases, cancellation, OAuth discovery/S256 consent/code/token, MCP initialize/search/fetch and read/write/bridge scope isolation.",
 );

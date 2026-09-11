@@ -81,3 +81,14 @@ test("Search indexes the article, while provenance stays in its original file", 
   assert.ok(text.includes("Company success"));
   assert.ok(text.includes("---\nReferences remain."));
 });
+
+test("Automatic generation preserves older settings and validates output choices", () => {
+  const { auto_generate: _automatic, ...legacy } = defaultSettings;
+  assert.equal(settingsSchema.parse({ ...defaultSettings, ...legacy }).auto_generate, "markdown");
+  assert.equal(Object.hasOwn(settingsSchema.partial().parse(legacy), "auto_generate"), false);
+  for (const action of ["off", "markdown", "brief", "full", "both"]) {
+    assert.equal(settingsSchema.parse({ ...legacy, auto_generate: action }).auto_generate, action);
+  }
+  assert.equal(settingsSchema.safeParse({ ...legacy, auto_generate: "delete" }).success, false);
+  assert.equal(settingsSchema.safeParse({ ...legacy, auto_generate: true }).success, false);
+});

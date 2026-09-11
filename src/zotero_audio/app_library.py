@@ -154,13 +154,20 @@ def migrate_catalog_markdown(store: Store) -> int:
 
 def refresh_zotero(store: Store) -> dict:
     """Read the supported Zotero GET API; leave the cached library usable offline."""
+    # Explicit jobs and background discovery must not commit scans out of order.
+    # Network I/O never holds the control database lock.
+    with store.zotero_lock:
+        return _refresh_zotero(store)
+
+
+def _refresh_zotero(store: Store) -> dict:
     from .zotero_local import ZoteroLocalAPI, ZoteroLocalAPIError
     from .app_state import now
     api = ZoteroLocalAPI(timeout=5)
     try:
         discovered = api.pdf_attachments()
     except ZoteroLocalAPIError as exc:
-        store.set_state("zotero", {"online": False, "message": str(exc), "checked_at": now()})
+        store.set_state("zotero", {**store.state("zotero", {}), "online": False, "message": str(exc), "checked_at": now()})
         return {"online": False, "count": 0, "message": str(exc)}
     count = 0
     discovered_keys = {key for key, _ in discovered}
@@ -182,21 +189,20 @@ def refresh_zotero(store: Store) -> dict:
             except Exception:
                 title = ""
             title = title or source.stem.replace("_", " ")
-        rights = metadata.get("rights") or previous.get("metadata", {}).get("rights") or ""
+        rights = metadata.get("rights", "") or ""
         stat = [source.stat().st_size, source.stat().st_mtime_ns]
         source_sha = previous.get("source_sha256") if previous.get("source_stat") == stat else sha256_file(source)
         changed = bool(previous.get("source_sha256") and source_sha != previous["source_sha256"])
-        article = {**previous, "id": key, "title": title, "authors": metadata.get("authors") or previous.get("authors", []),
-                   "year": metadata.get("publication_year") or previous.get("year"), "source_path": str(source),
+        article = {**previous, "id": key, "title": title, "authors": metadata.get("authors", previous.get("authors", [])),
+                   "year": metadata.get("publication_year", previous.get("year")), "source_path": str(source),
                    "source_sha256": source_sha, "source_stat": stat, "source_changed": changed or previous.get("source_changed", False),
-                   "source_url": metadata.get("url") or previous.get("source_url"), "metadata": {**previous.get("metadata", {}), **metadata},
+                   "source_url": metadata.get("url", previous.get("source_url")), "metadata": {**previous.get("metadata", {}), **metadata},
                    "license_status": "open" if "creativecommons.org/licenses/by/4.0" in rights.lower() or "creativecommons.org/publicdomain/zero" in rights.lower() else "private",
                    "markdown_status": previous.get("markdown_status", "not_started"), "audio_status": previous.get("audio_status", "not_started"),
                    "qa_status": previous.get("qa_status", "unchecked"), "warnings": previous.get("warnings", []),
                    "editions": previous.get("editions", {}), "artifacts": previous.get("artifacts", {"markdown": False, "audio": False, "review": False}),
                    "bundle": previous.get("bundle", str(store.runtime / "library" / key))}
-        if not metadata.get("title"):
-            article["metadata_warning"] = "No parent article title in Zotero; showing the PDF title."
+        article["metadata_warning"] = None if metadata.get("title") else "No parent article title in Zotero; showing the PDF title."
         if previous:
             with store.edit_article(key) as current:
                 for field in ("title", "authors", "year", "source_path", "source_sha256", "source_stat", "source_changed", "source_url", "metadata", "license_status", "metadata_warning"):
@@ -213,7 +219,8 @@ def refresh_zotero(store: Store) -> dict:
         if article["id"] not in discovered_keys and article.get("in_zotero") is not False:
             with store.edit_article(article["id"]) as current:
                 current["in_zotero"] = False
-    store.set_state("zotero", {"online": True, "count": count, "checked_at": now()})
+    checked_at = now()
+    store.set_state("zotero", {"online": True, "count": count, "checked_at": checked_at, "last_success_at": checked_at})
     return {"online": True, "count": count}
 
 

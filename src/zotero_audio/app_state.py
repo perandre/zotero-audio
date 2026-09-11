@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "speed": 1.0,
     "tts_model": "kokoro",
     "auto_publish": True,
+    "auto_generate": "markdown",
     "icloud_folder": "",
     "backup_enabled": False,
     "backup_folder": "",
@@ -68,6 +69,8 @@ def validate_settings(value: dict) -> dict:
             raise ValueError(f"{key} must be text")
         if key in {"opening_sound", "closing_sound"} and val not in {"none", "typing"}:
             raise ValueError("Sound must be none or typing")
+        if key == "auto_generate" and val not in {"off", "markdown", "full", "brief", "both"}:
+            raise ValueError("Automatic generation must be off, markdown, full, brief or both")
         if key in {"icloud_folder", "backup_folder"} and val:
             path = Path(val).expanduser()
             if not path.is_absolute():
@@ -84,6 +87,7 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = self.root / "library.sqlite3"
         self._lock = threading.RLock()
+        self.zotero_lock = threading.RLock()
         with self.db() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -269,7 +273,7 @@ class Store:
         return {"results": [{"id": d["id"], "title": d["title"], "authors": d.get("authors", []), "year": d.get("year"),
                              "url": f"/articles/{d['id']}", "snippet": row["snippet"]} for row in rows for d in [json.loads(row["data"])]]}
 
-    def create_job(self, request: dict, *, job_id: str | None = None, remote: dict | None = None):
+    def create_job(self, request: dict, *, job_id: str | None = None, remote: dict | None = None, automatic=False):
         action, scope = request.get("action"), request.get("scope", "one")
         if action not in ACTIONS or scope not in {"new", "all", "one"}:
             raise ValueError("Choose markdown, full, brief, both or sync and a valid scope")
@@ -285,6 +289,16 @@ class Store:
             raise ValueError("Idempotency key must be 1–200 characters")
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
+            if automatic:
+                # Serialize with CLI/cloud queue inserts, including requests
+                # created by another Store connection during a Zotero scan.
+                prior_request = db.execute("""SELECT 1 FROM jobs
+                    WHERE json_extract(data,'$.action') != 'sync' AND
+                    (json_extract(data,'$.article_id') = ? OR
+                     (json_extract(data,'$.scope') != 'one' AND status IN ('queued','running','cancel_requested')))
+                    LIMIT 1""", (article_id,)).fetchone()
+                if prior_request:
+                    return None
             if idem:
                 for row in db.execute("SELECT data FROM jobs"):
                     old = json.loads(row[0])
@@ -300,6 +314,8 @@ class Store:
                    "idempotency_key": idem, "title": title, "status": "queued", "stage": "queued", "progress": 0,
                    "message": "Waiting for the local worker", "created_at": timestamp, "updated_at": timestamp,
                    "remote": remote}
+            if automatic:
+                job["automatic"] = True
             prior = db.execute("SELECT data FROM jobs WHERE id=?", (job["id"],)).fetchone()
             if prior:
                 return json.loads(prior[0])
