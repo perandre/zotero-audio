@@ -4,6 +4,7 @@ import type { AppEnv, ArticleRow } from "./types";
 import {
   MINIMUM_ARTICLE_YEAR,
   PREFERRED_ARTICLE_YEAR,
+  VIKING_RESEARCH_SCOPE,
 } from "./article-recency";
 
 const articleSchema = z
@@ -28,6 +29,7 @@ const articleSchema = z
     editions: z.record(z.string(), z.unknown()).optional(),
     zotero_url: z.string().max(4000).optional(),
     collection: z.string().max(1000).optional(),
+    reading_scope: z.enum(["general", VIKING_RESEARCH_SCOPE]).optional(),
     publish_status: z.string().max(100).optional(),
     publication_status: z.string().max(100).optional(),
     icloud_status: z.string().max(100).optional(),
@@ -122,13 +124,23 @@ export async function search(
   const rows = await env.DB.prepare(
     `SELECT a.id,a.title,a.year,snippet(article_search,2,'','', ' … ',40) AS snippet
     FROM article_search JOIN articles a ON a.id=article_search.article_id
-    WHERE article_search MATCH ? AND a.year >= ?
-    ORDER BY CASE WHEN a.year = ? THEN 0 ELSE 1 END, a.year DESC, bm25(article_search,0,5,1) LIMIT ?`,
+    WHERE article_search MATCH ?
+      AND (COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') != ? OR a.year >= ?)
+    ORDER BY
+      CASE WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? AND a.year = ? THEN 0
+           WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? THEN 1
+           ELSE 2 END,
+      CASE WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? THEN a.year ELSE 0 END DESC,
+      bm25(article_search,0,5,1) LIMIT ?`,
   )
     .bind(
       expression,
+      VIKING_RESEARCH_SCOPE,
       MINIMUM_ARTICLE_YEAR,
+      VIKING_RESEARCH_SCOPE,
       PREFERRED_ARTICLE_YEAR,
+      VIKING_RESEARCH_SCOPE,
+      VIKING_RESEARCH_SCOPE,
       Math.min(limit, 50),
     )
     .all<{ id: string; title: string; year: number; snippet: string }>();
@@ -150,31 +162,57 @@ export async function listArticles(env: AppEnv, url: URL) {
     const [rows, count] = await env.DB.batch<Record<string, unknown>>([
       env.DB.prepare(
         `SELECT a.* FROM article_search JOIN articles a ON a.id=article_search.article_id
-         WHERE article_search MATCH ? AND a.year >= ?
-         ORDER BY CASE WHEN a.year = ? THEN 0 ELSE 1 END, a.year DESC, bm25(article_search,0,5,1) LIMIT ? OFFSET ?`,
+         WHERE article_search MATCH ?
+           AND (COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') != ? OR a.year >= ?)
+         ORDER BY
+           CASE WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? AND a.year = ? THEN 0
+                WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? THEN 1
+                ELSE 2 END,
+           CASE WHEN COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') = ? THEN a.year ELSE 0 END DESC,
+           bm25(article_search,0,5,1) LIMIT ? OFFSET ?`,
       ).bind(
         expression,
+        VIKING_RESEARCH_SCOPE,
         MINIMUM_ARTICLE_YEAR,
+        VIKING_RESEARCH_SCOPE,
         PREFERRED_ARTICLE_YEAR,
+        VIKING_RESEARCH_SCOPE,
+        VIKING_RESEARCH_SCOPE,
         limit,
         offset,
       ),
       env.DB.prepare(
         `SELECT count(*) AS total FROM article_search JOIN articles a ON a.id=article_search.article_id
-         WHERE article_search MATCH ? AND a.year >= ?`,
-      ).bind(expression, MINIMUM_ARTICLE_YEAR),
+         WHERE article_search MATCH ?
+           AND (COALESCE(json_extract(a.metadata, '$.reading_scope'), 'general') != ? OR a.year >= ?)`,
+      ).bind(expression, VIKING_RESEARCH_SCOPE, MINIMUM_ARTICLE_YEAR),
     ]);
     items = rows.results as ArticleRow[];
     total = Number(count.results[0]?.total ?? 0);
   } else {
     const [rows, count] = await env.DB.batch<Record<string, unknown>>([
       env.DB.prepare(
-        `SELECT * FROM articles WHERE year >= ?
-         ORDER BY CASE WHEN year = ? THEN 0 ELSE 1 END, year DESC, updated_at DESC LIMIT ? OFFSET ?`,
-      ).bind(MINIMUM_ARTICLE_YEAR, PREFERRED_ARTICLE_YEAR, limit, offset),
+        `SELECT * FROM articles
+         WHERE COALESCE(json_extract(metadata, '$.reading_scope'), 'general') != ? OR year >= ?
+         ORDER BY
+           CASE WHEN COALESCE(json_extract(metadata, '$.reading_scope'), 'general') = ? AND year = ? THEN 0
+                WHEN COALESCE(json_extract(metadata, '$.reading_scope'), 'general') = ? THEN 1
+                ELSE 2 END,
+           CASE WHEN COALESCE(json_extract(metadata, '$.reading_scope'), 'general') = ? THEN year ELSE 0 END DESC,
+           updated_at DESC LIMIT ? OFFSET ?`,
+      ).bind(
+        VIKING_RESEARCH_SCOPE,
+        MINIMUM_ARTICLE_YEAR,
+        VIKING_RESEARCH_SCOPE,
+        PREFERRED_ARTICLE_YEAR,
+        VIKING_RESEARCH_SCOPE,
+        VIKING_RESEARCH_SCOPE,
+        limit,
+        offset,
+      ),
       env.DB.prepare(
-        "SELECT count(*) AS total FROM articles WHERE year >= ?",
-      ).bind(MINIMUM_ARTICLE_YEAR),
+        "SELECT count(*) AS total FROM articles WHERE COALESCE(json_extract(metadata, '$.reading_scope'), 'general') != ? OR year >= ?",
+      ).bind(VIKING_RESEARCH_SCOPE, MINIMUM_ARTICLE_YEAR),
     ]);
     items = rows.results as ArticleRow[];
     total = Number(count.results[0]?.total ?? 0);
@@ -312,6 +350,7 @@ async function ingestLocked(
       editions: article.editions ?? oldMetadata.editions,
       zotero_url: article.zotero_url,
       collection: article.collection,
+      reading_scope: article.reading_scope ?? oldMetadata.reading_scope ?? "general",
       publish_status: article.publish_status,
       publication_status: article.publication_status,
       icloud_status: article.icloud_status,

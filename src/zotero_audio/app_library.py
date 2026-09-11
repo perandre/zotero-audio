@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from .article_files import episode_title_for, research_markdown_path, review_markdown_path
+from .article_recency import reading_scope
 from .app_state import Store
 from .util import sha256_file
 
@@ -23,6 +24,7 @@ def visible_article(article: dict, *, local: bool = True) -> dict:
               "qa_status", "warnings", "updated_at", "artifacts", "source_sha256", "markdown_sha256", "editions",
               "publication_status", "icloud_status", "backup_status", "source_changed", "metadata_warning")
     value = {key: article[key] for key in fields if key in article}
+    value["reading_scope"] = reading_scope(article)
     value["episode_title"] = episode_title_for(article)
     value["editions"] = {
         name: {key: record[key] for key in ("edition", "title", "duration", "audio_sha256", "audio_url", "status", "publication_status", "qa_status") if key in record}

@@ -1,3 +1,4 @@
+export const VIKING_RESEARCH_SCOPE = "viking_research";
 export const MINIMUM_ARTICLE_YEAR = 2025;
 export const PREFERRED_ARTICLE_YEAR = 2026;
 
@@ -18,10 +19,17 @@ export function readableArticleYear(value: unknown): boolean {
   return year !== null && year >= MINIMUM_ARTICLE_YEAR;
 }
 
+export function readableArticle(article: {
+  year: unknown;
+  reading_scope?: unknown;
+}): boolean {
+  return article.reading_scope !== VIKING_RESEARCH_SCOPE || readableArticleYear(article.year);
+}
+
 export function unreadableArticleMessage(
   title: string,
   value: unknown,
 ): string {
   const year = articleYear(value);
-  return `${title}: article reading is limited to publications from ${MINIMUM_ARTICLE_YEAR} onward (prefer ${PREFERRED_ARTICLE_YEAR}); this record has ${year ?? "an unknown year"}.`;
+  return `${title}: VIKING research-article reading is limited to publications from ${MINIMUM_ARTICLE_YEAR} onward (prefer ${PREFERRED_ARTICLE_YEAR}); this record has ${year ?? "an unknown year"}.`;
 }
