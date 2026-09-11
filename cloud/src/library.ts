@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { digest, HttpError, integer } from "./http";
 import type { AppEnv, ArticleRow } from "./types";
+import {
+  MINIMUM_ARTICLE_YEAR,
+  PREFERRED_ARTICLE_YEAR,
+} from "./article-recency";
 
 const articleSchema = z
   .object({
@@ -116,12 +120,18 @@ export async function search(
   const expression = searchExpression(query.slice(0, 500));
   if (!expression) return { results: [] };
   const rows = await env.DB.prepare(
-    `SELECT a.id,a.title,snippet(article_search,2,'','', ' … ',40) AS snippet
+    `SELECT a.id,a.title,a.year,snippet(article_search,2,'','', ' … ',40) AS snippet
     FROM article_search JOIN articles a ON a.id=article_search.article_id
-    WHERE article_search MATCH ? ORDER BY bm25(article_search,0,5,1) LIMIT ?`,
+    WHERE article_search MATCH ? AND a.year >= ?
+    ORDER BY CASE WHEN a.year = ? THEN 0 ELSE 1 END, a.year DESC, bm25(article_search,0,5,1) LIMIT ?`,
   )
-    .bind(expression, Math.min(limit, 50))
-    .all<{ id: string; title: string; snippet: string }>();
+    .bind(
+      expression,
+      MINIMUM_ARTICLE_YEAR,
+      PREFERRED_ARTICLE_YEAR,
+      Math.min(limit, 50),
+    )
+    .all<{ id: string; title: string; year: number; snippet: string }>();
   return {
     results: rows.results.map((row) => ({
       ...row,
@@ -139,20 +149,32 @@ export async function listArticles(env: AppEnv, url: URL) {
   if (expression) {
     const [rows, count] = await env.DB.batch<Record<string, unknown>>([
       env.DB.prepare(
-        `SELECT a.* FROM article_search JOIN articles a ON a.id=article_search.article_id WHERE article_search MATCH ? ORDER BY bm25(article_search,0,5,1) LIMIT ? OFFSET ?`,
-      ).bind(expression, limit, offset),
+        `SELECT a.* FROM article_search JOIN articles a ON a.id=article_search.article_id
+         WHERE article_search MATCH ? AND a.year >= ?
+         ORDER BY CASE WHEN a.year = ? THEN 0 ELSE 1 END, a.year DESC, bm25(article_search,0,5,1) LIMIT ? OFFSET ?`,
+      ).bind(
+        expression,
+        MINIMUM_ARTICLE_YEAR,
+        PREFERRED_ARTICLE_YEAR,
+        limit,
+        offset,
+      ),
       env.DB.prepare(
-        `SELECT count(*) AS total FROM article_search WHERE article_search MATCH ?`,
-      ).bind(expression),
+        `SELECT count(*) AS total FROM article_search JOIN articles a ON a.id=article_search.article_id
+         WHERE article_search MATCH ? AND a.year >= ?`,
+      ).bind(expression, MINIMUM_ARTICLE_YEAR),
     ]);
     items = rows.results as ArticleRow[];
     total = Number(count.results[0]?.total ?? 0);
   } else {
     const [rows, count] = await env.DB.batch<Record<string, unknown>>([
       env.DB.prepare(
-        "SELECT * FROM articles ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-      ).bind(limit, offset),
-      env.DB.prepare("SELECT articles AS total FROM budget WHERE id=1"),
+        `SELECT * FROM articles WHERE year >= ?
+         ORDER BY CASE WHEN year = ? THEN 0 ELSE 1 END, year DESC, updated_at DESC LIMIT ? OFFSET ?`,
+      ).bind(MINIMUM_ARTICLE_YEAR, PREFERRED_ARTICLE_YEAR, limit, offset),
+      env.DB.prepare(
+        "SELECT count(*) AS total FROM articles WHERE year >= ?",
+      ).bind(MINIMUM_ARTICLE_YEAR),
     ]);
     items = rows.results as ArticleRow[];
     total = Number(count.results[0]?.total ?? 0);
@@ -208,14 +230,21 @@ async function ingestLocked(
     nextReviewKey = reviewHash
       ? `${id}/review/${readableDocumentFilename(`${episodeTitle} — AI review`)}`
       : null,
-    mdKey = data.markdown === undefined ? (existing?.markdown_key ?? nextMdKey) : nextMdKey,
-    reviewKey = data.review === undefined ? (existing?.review_key ?? nextReviewKey) : nextReviewKey;
+    mdKey =
+      data.markdown === undefined
+        ? (existing?.markdown_key ?? nextMdKey)
+        : nextMdKey,
+    reviewKey =
+      data.review === undefined
+        ? (existing?.review_key ?? nextReviewKey)
+        : nextReviewKey;
   const changesMd =
     data.markdown !== undefined &&
     (mdHash !== existing?.markdown_hash || mdKey !== existing?.markdown_key);
   const changesReview =
     data.review !== undefined &&
-    (reviewHash !== existing?.review_hash || reviewKey !== existing?.review_key);
+    (reviewHash !== existing?.review_hash ||
+      reviewKey !== existing?.review_key);
   const oldMetadata = existing ? JSON.parse(existing.metadata) : {};
   const mdBytes =
     data.markdown === undefined
@@ -383,10 +412,9 @@ export async function documentResponse(
       "document_unavailable",
       "The stored document is unavailable. Retry the Mac sync.",
     );
-  const filename =
-    readableDocumentFilename(
-      `${JSON.parse(article.metadata).episode_title ?? article.title}${kind === "review" ? " — AI review" : ""}`,
-    );
+  const filename = readableDocumentFilename(
+    `${JSON.parse(article.metadata).episode_title ?? article.title}${kind === "review" ? " — AI review" : ""}`,
+  );
   return new Response(object.body, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",

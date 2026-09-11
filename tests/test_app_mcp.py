@@ -29,6 +29,11 @@ def library(tmp_path):
                        "authors": ["Anna Author"], "year": "2025", "markdown": str(path),
                        "review": str(review), "qa_status": "warnings", "license_status": "private",
                        "editions": {}, "artifacts": {"markdown": True, "review": True}}, markdown=markdown)
+    old_path = tmp_path / "old.md"
+    old_path.write_text("# Historical productivity evidence\n")
+    store.put_article({"id": "OLD24", "title": "Historical productivity evidence",
+                       "authors": ["Old Author"], "year": "2024", "markdown": str(old_path),
+                       "editions": {}, "artifacts": {"markdown": True}}, markdown=old_path.read_text())
     return store, markdown
 
 
@@ -61,6 +66,7 @@ def test_official_stdio_handshake_discovery_full_private_retrieval_and_errors(li
                 data = found.structuredContent
                 assert data["results"][0]["title"] == "A company that successfully adopted AI"
                 assert data["results"][0]["url"] == "http://127.0.0.1:8765/articles/PRIVATE01"
+                assert all(item["id"] != "OLD24" for item in data["results"])
                 fetched = await session.call_tool("fetch", {"id": data["results"][0]["id"]})
                 assert fetched.structuredContent["text"] == markdown
                 assert json.loads(fetched.content[0].text)["text"] == markdown
@@ -74,6 +80,8 @@ def test_official_stdio_handshake_discovery_full_private_retrieval_and_errors(li
 
                 missing = await session.call_tool("fetch", {"id": "../../etc/passwd"})
                 assert missing.isError
+                old = await session.call_tool("fetch", {"id": "OLD24"})
+                assert old.isError
                 invalid = await session.call_tool("create_job", {"action": "shell", "scope": "all"})
                 assert invalid.isError
                 page = await session.call_tool("list_library", {"limit": 1})
