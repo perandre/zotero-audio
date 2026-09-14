@@ -79,7 +79,12 @@ Zotero GET API → extraction → research Markdown → optional text QA
 
 Research Markdown preserves links, citations and provenance. Narration omits
 long URLs, citation markers, reference lists and contact boilerplate without
-asking an LLM to rewrite the research. Optional checks run on Markdown before
+asking an LLM to rewrite the research. Narration also recognizes inline IEEE
+abstracts and plain reference headings, omits bounded repository cover pages,
+decodes HTML entities and repairs known PDF word splits. Existing research
+Markdown stays unchanged. Rerunning an audio edition applies the current policy;
+changed speech invalidates its cache while unchanged segments remain reusable.
+Optional checks run on Markdown before
 speech and on the finished audio afterward. Usable results remain available
 with warnings; basic failures such as empty or invalid audio still fail clearly.
 

@@ -26,11 +26,11 @@ from .segment import create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import license_record_from_metadata, load_bundle_metadata, merge_document_metadata
 
-NARRATION_POLICY = "research-markdown-narration-v1"
+NARRATION_POLICY = "research-markdown-narration-v2"
 ASSEMBLY_POLICY = "final-edition-aac-once-v1"
 QA_POLICY = "optional-warning-first-v1"
 Event = Callable[[dict[str, Any]], None]
-REFERENCE_HEADING = re.compile(r"(?i)^(?:\d+[.)]?\s+)?(?:references|bibliography|works cited|literature cited|endnotes)\s*[:.]?$")
+REFERENCE_HEADING = re.compile(r"(?i)^(?:\d+[.)]?\s+)?(?:references?|bibliography|works cited|literature cited|endnotes)\s*[:.]?$")
 CONTACT_LINE = re.compile(r"(?i)^(?:correspond(?:ence|ing author)|author(?:s)?(?:['’] addresses| affiliations)|e-?mail|orcid|copyright|©)\b")
 AUTHOR_YEAR_CITATION = re.compile(r"\((?:[A-ZÀ-ÖØ-Þ][\w’'’-]+(?:\s+(?:et al\.|and|&|[A-ZÀ-ÖØ-Þ][\w’'’-]+))*[,;]?\s+(?:19|20)\d{2}[a-z]?(?:\s*[,;]\s*[^()]{1,120})?)\)")
 # Exact, unambiguous typesetting splits only. Broad hyphen removal would
@@ -90,6 +90,8 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
 
     def append(text: str, heading: int | None = None) -> None:
         nonlocal section, reference_section
+        if REFERENCE_HEADING.fullmatch(text):
+            heading = heading or 2
         if heading:
             section = text
             reference_section = bool(REFERENCE_HEADING.fullmatch(text))
@@ -103,7 +105,7 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
         spoken = re.sub(r"[*_`]+", "", spoken)
         spoken, transformations = sanitize_spoken_text(normalize_speech_text(spoken), section=section)
         old = source_blocks.get(normalize_speech_text(text), {})
-        omit = (reference_section or bool(CONTACT_LINE.match(text)) or
+        omit = (reference_section or text == "Index Terms" or bool(CONTACT_LINE.match(text)) or
                 bool(re.match(r"^\[\^[^\]]+\]:", text)) or
                 old.get("omission_reason") in {"probable-table-grid", "table-or-figure-caption", "table-or-figure-note"} or
                 bool(re.match(r"^\s*\|?\s*:?-{3,}", text)) or text.count("|") >= 3)
@@ -127,6 +129,22 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
             pending.clear()
 
     for line in lines[cursor:]:
+        # IEEE abstracts and section labels are often plain PDF paragraphs.
+        inline_abstract = re.match(r"^Abstract\s*[—–:]\s*(.+)$", line, re.I)
+        if inline_abstract:
+            flush()
+            append("Abstract", 2)
+            append(inline_abstract.group(1))
+            continue
+        if re.match(r"^(?:Index Terms|Keywords)\s*[—–:]", line, re.I):
+            flush()
+            append("Index Terms", 2)
+            continue
+        if re.fullmatch(r"(?:[IVX]+\.\s+[A-Z][A-Z &-]{4,80}|ABSTRACT|INTRODUCTION|CONCLUSIONS?|ACKNOWLEDGMENTS?|REFERENCES?)", line.strip()):
+            flush()
+            title = re.sub(r"^([IVX]+\.\s+)I NTRODUCTION$", r"\1INTRODUCTION", line.strip())
+            append(title, 2)
+            continue
         page_match = re.fullmatch(r"\s*<!--\s*pdf-page:\s*(\d+)\s*-->\s*", line)
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
         if page_match:
@@ -146,6 +164,20 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
         else:
             pending.append(line)
     flush()
+    abstract_start = next((i for i, b in enumerate(blocks) if b["type"] == "heading" and b["text"].casefold() == "abstract"), None)
+    if (abstract_start is not None
+            and all(b["pdf_page"] == 1 for b in blocks[:abstract_start])
+            and sum(len(b["markdown_text"].split()) for b in blocks[:abstract_start]) <= 150):
+        for block in blocks[:abstract_start]:
+            block["included_in_reading"] = False
+            block["omission_reason"] = "article-front-matter"
+    if any("This is an electronic reprint of the original article" in b["markdown_text"] for b in blocks):
+        start = next((i for i, b in enumerate(blocks) if b["type"] == "heading" and
+                      re.fullmatch(r"(?:1[.)]?\s+)?Introduction", b["text"], re.I)), None)
+        if start is not None:
+            for block in blocks[:start]:
+                block["included_in_reading"] = False
+                block["omission_reason"] = "repository-cover"
     # If Markdown contains a bounded abstract, use it ahead of stale extracted
     # metadata. This makes manual edits effective for Brief as well as Full.
     if any(block["type"] == "heading" and block["text"].casefold().rstrip(".:") == "abstract" for block in blocks):
