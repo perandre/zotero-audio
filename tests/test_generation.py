@@ -347,3 +347,68 @@ def test_license_recheck_preserves_markdown_and_finished_audio_cache(bundle, ass
     assert all(r['cached'] for r in second['editions'].values())
     assert len(assemblies) == calls
     assert Path(second['markdown']).read_bytes() == before_md
+
+
+def test_ieee_abstract_overrides_stale_introduction_metadata(bundle):
+    original = generation._read_json(bundle / 'structure.json')
+    original['document']['abstract'] = 'Wrong introduction from stale extraction.'
+    markdown = '''# How companies use AI
+
+A. Author, Department of Computing
+
+Abstract—We evaluated sup-porting controls with 30 records.
+
+Index Terms—AI, governance, risk.
+
+I. I NTRODUCTION
+
+This introduction must not become the brief.
+
+REFERENCE
+
+A. Author. A cited study. doi:10.0000/test
+'''
+    parsed = generation._markdown_structure(markdown, original)
+    brief = generation.extract_brief(parsed)
+    assert [b['text'] for b in brief['abstract']] == ['We evaluated supporting controls with 30 records.']
+    spoken = ' '.join(b['text'] for b in parsed['blocks'] if b['included_in_reading'])
+    assert 'Department' not in spoken
+    assert 'Index Terms' not in spoken
+    assert 'doi:' not in spoken
+    assert 'introduction must' in spoken
+    assert original['document']['abstract'].startswith('Wrong')
+
+
+def test_repository_cover_and_plain_references_are_not_narrated(bundle):
+    original = generation._read_json(bundle / 'structure.json')
+    parsed = generation._markdown_structure('''# How companies use AI
+
+This is an electronic reprint of the original article.
+
+Please cite the original version:
+
+A. Author, 2026, Journal of Examples.
+
+## 1. Introduction
+
+Useful results (Adams, Brown, & Clark, 2024) remain.
+
+REFERENCE
+
+A. Author. Bibliographic entry.
+''', original)
+    spoken = ' '.join(b['text'] for b in parsed['blocks'] if b['included_in_reading'])
+    assert spoken == '1. Introduction Useful results remain.'
+
+
+def test_spoken_cleanup_preserves_meaningful_compounds_and_numbers():
+    spoken, transformations = generation.sanitize_spoken_text(
+        'Innovation &amp; governance: ethical ten- sions in organiza-tional work '
+        '(Adams, Brown, & Clark, 2024; Davis et al., 2023). '
+        'Keep human-in-the-loop, long-term, re-form, 27%, (n = 30), and (2024).'
+    )
+    assert 'ethical tensions in organizational work.' in spoken
+    assert 'Adams' not in spoken
+    assert '&amp;' not in spoken
+    assert 'human-in-the-loop, long-term, re-form, 27%, (n = 30), and (2024).' in spoken
+    assert 'repair-typesetting-split' in transformations

@@ -111,8 +111,24 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
     spoken podcast narration, where raw links, contact addresses, and numeric
     citation markers are distracting and not useful to listeners.
     """
-    text = str(value)
-    transformations: list[str] = []
+    text = html.unescape(str(value))
+    transformations: list[str] = ["decode-html-entities"] if text != str(value) else []
+    # Only attested typesetting splits: never collapse arbitrary compounds.
+    split_words = r"\b(?:organiza-\s*tional|con-\s*cern|vari-\s*able|concep-\s*tual|devel-\s*oping|empir-\s*ical|char-\s*acterize|gover-\s*nance|ten-\s*sions|utiliz-\s*ing|ele-\s*ments|sup-\s*porting|estab-\s*lished|mod-\s*eling)\b"
+    text, count = re.subn(split_words, lambda m: re.sub(r"-\s*", "", m[0]), text, flags=re.I)
+    if count:
+        transformations.append("repair-typesetting-split")
+    # Restrict parenthetical removal to author lists ending in publication years.
+    author = r"[A-ZÀ-ÖØ-Þ][\w’'’-]+"
+    citation = rf"{author}(?:(?:,?\s+(?:and\s+|&\s+)?){author}|\s+et al\.)*,?\s+(?:19|20)\d{{2}}[a-z]?"
+    text, count = re.subn(rf"\((?:e\.g\.,?\s*)?{citation}(?:;\s*{citation})*\)", "", text)
+    if count:
+        transformations.append("omit-author-year-citation")
+    if re.match(r"^(?:☆\s*)?(?:This article is part of a Special issue|This is an open access article under|Published by Elsevier|Manuscript received|Corresponding author\.)", text, re.I):
+        return "", transformations + ["omit-publisher-front-matter"]
+    text, count = re.subn(r"arXiv:\d{4}\.\d{4,5}(?:v\d+)?\s*\[[^]\n]+\]\s*\d{1,2}\s+[A-Za-z]+\s+\d{4}", "", text)
+    if count:
+        transformations.append("omit-arxiv-page-stamp")
 
     if SPOKEN_KEYWORD_LIST_RE.match(text) or _looks_like_keyword_list(text, section):
         return "", ["omit-keyword-list"]
@@ -177,6 +193,7 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
     text = re.sub(r"(?i)(https?://[A-Za-z0-9.-]+)\s+(?=[A-Za-z]{2,}(?:[/\s]|$))", r"\1", text)
     text = SPOKEN_WEB_RE.sub(replace_web, text)
     text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r",\s*([.;:!?])", r"\1", text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text, transformations
@@ -695,7 +712,7 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
         for value in chunk_text(text, max_chars, preserve_sentences=True):
             segments.append(_new_segment(value, len(segments) + 1, kind, section, ids=ids, pages=pages,
                                          pause=pause, transformations=transformations))
-    append(intro, "intro", "Introduction", pause=700)
+    append(sanitize_spoken_text(intro)[0], "intro", "Introduction", pause=700)
     if edition == EDITION_FULL:
         # Rebuild boundaries from source blocks, including for older cached plans.
         full_plan = create_speech_plan(structure, max_chars=max_chars) if structure.get("blocks") and structure.get("source") else source_plan
