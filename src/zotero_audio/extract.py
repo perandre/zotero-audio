@@ -303,6 +303,23 @@ def _infer_abstract(first_page: str) -> tuple[str | None, str | None]:
     return abstract, source
 
 
+def _infer_front_abstract(raw_pages: list[str], reader: Any) -> tuple[str | None, str | None, int]:
+    """Inspect article front matter, allowing one recognized repository cover."""
+    candidates = [0]
+    if len(raw_pages) > 1 and re.search(
+        r"(?i)research\.chalmers\.se|HAL Id:.*hal-", raw_pages[0]
+    ):
+        candidates.append(1)
+    for index in candidates:
+        abstract, source = _infer_abstract(raw_pages[index])
+        if not abstract:
+            # Native text can retain an abstract panel omitted by layout detection.
+            abstract, source = _infer_abstract(reader.pages[index].extract_text() or "")
+        if abstract and (index == 0 or source == "pdf-explicit-heading"):
+            return abstract, source, index
+    return None, None, 0
+
+
 def _front_matter_replaced_with_abstract(first_page: str, abstract: str, source: str | None) -> str:
     if not source:
         return first_page
@@ -426,18 +443,13 @@ def extract_pdf(pdf: Path, *, zotero_key: str | None, include_references: bool,
             break
 
     edge_keys = _running_edge_keys(raw_pages)
-    inferred_abstract, abstract_source = (None, None) if report else _infer_abstract(raw_pages[0])
-    if not report and not inferred_abstract:
-        # A few publisher PDFs expose the abstract in the logical PDF text
-        # order but their layout extractor places the adjacent article-info
-        # column before it. Use the page's native text as a narrow fallback
-        # for Brief detection while retaining layout spans for the article.
-        native_first_page = reader.pages[0].extract_text() or ""
-        inferred_abstract, abstract_source = _infer_abstract(native_first_page)
+    inferred_abstract, abstract_source, abstract_page = (
+        (None, None, 0) if report else _infer_front_abstract(raw_pages, reader)
+    )
     processed_pages = list(raw_pages)
     if inferred_abstract:
-        processed_pages[0] = _front_matter_replaced_with_abstract(
-            raw_pages[0], inferred_abstract, abstract_source
+        processed_pages[abstract_page] = _front_matter_replaced_with_abstract(
+            raw_pages[abstract_page], inferred_abstract, abstract_source
         )
     pages: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []

@@ -412,3 +412,17 @@ def test_spoken_cleanup_preserves_meaningful_compounds_and_numbers():
     assert '&amp;' not in spoken
     assert 'human-in-the-loop, long-term, re-form, 27%, (n = 30), and (2024).' in spoken
     assert 'repair-typesetting-split' in transformations
+
+
+@pytest.mark.parametrize('label', ['A B S T R A C T', 'Abstract', 'ABSTRACT'])
+@pytest.mark.parametrize('boundary', ['Keywords', 'Keywords AI, governance, testing', 'CCS Concepts', 'ACM Reference Format:', '1 | Introduction Body retained for Full.', '1 Introduction'])
+def test_plain_abstract_boundaries_preserve_full_text(bundle, label, boundary):
+    original = generation._read_json(bundle / 'structure.json')
+    parsed = generation._markdown_structure(
+        f'# Synthetic article\n\n{label}\n\nWe found a useful result.\n\n{boundary}\n\nArticle body continues.\n', original)
+    brief = generation.extract_brief(parsed)
+    assert brief['available']
+    assert [b['text'] for b in brief['abstract']] == ['We found a useful result.']
+    assert any('Article body continues.' in b['text'] for b in parsed['blocks'])
+    if 'Body retained' in boundary:
+        assert any('Body retained for Full.' in b['text'] for b in parsed['blocks'])

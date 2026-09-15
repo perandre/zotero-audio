@@ -525,3 +525,64 @@ def test_end_to_end_private_public_and_idempotent_feed(tmp_path: Path, monkeypat
 ])
 def test_loudness_gate(measurement, expected):
     assert loudness_pass(measurement) is expected
+
+
+@pytest.mark.parametrize('source', ['metadata', 'heading', 'role'])
+def test_all_abstract_sources_reject_overlong_content_without_truncation(source):
+    text = ' '.join(['substantive'] * 1501)
+    structure = {'document': {}, 'blocks': []}
+    if source == 'metadata':
+        structure['document']['abstract'] = text
+    elif source == 'heading':
+        structure['blocks'] = [{'type': 'heading', 'text': 'Abstract'}, {'text': text}]
+    else:
+        structure['blocks'] = [{'role': 'abstract', 'text': text}]
+    assert not extract_brief(structure)['available']
+    assert text in str(structure)
+
+
+@pytest.mark.parametrize('boundary', ['Keywords AI governance', 'CCS Concepts', 'ACM Reference Format:', '1 | Introduction body text'])
+def test_brief_stops_at_plain_metadata_and_introduction_blocks(boundary):
+    structure = {'document': {}, 'blocks': [
+        {'type': 'heading', 'text': 'Abstract'},
+        {'text': 'The authors found a useful result.'},
+        {'text': boundary},
+        {'text': 'Later substantive body text.'},
+    ]}
+    brief = extract_brief(structure)
+    assert brief['available']
+    assert [b['text'] for b in brief['abstract']] == ['The authors found a useful result.']
+
+
+def test_empty_abstract_does_not_reenter_after_keyword_boundary():
+    structure = {'document': {}, 'blocks': [
+        {'type': 'heading', 'text': 'Abstract'},
+        {'text': 'Keywords AI governance'},
+        {'text': 'Later substantive body text.'},
+    ]}
+    assert not extract_brief(structure)['available']
+
+
+def test_excluded_keyword_block_still_ends_abstract():
+    structure = {'document': {}, 'blocks': [
+        {'type': 'heading', 'text': 'Abstract'},
+        {'text': 'The authors found a useful result.'},
+        {'text': '', 'markdown_text': 'Keywords AI governance', 'included_in_reading': False},
+        {'text': 'Later substantive body text.'},
+    ]}
+    assert [b['text'] for b in extract_brief(structure)['abstract']] == ['The authors found a useful result.']
+
+
+def test_role_fallback_cannot_repopulate_an_empty_bounded_abstract():
+    structure = {'document': {}, 'blocks': [
+        {'type': 'heading', 'text': 'Abstract'},
+        {'text': 'Keywords AI governance'},
+        {'role': 'abstract', 'text': 'Later body incorrectly tagged as abstract.'},
+    ]}
+    assert not extract_brief(structure)['available']
+
+
+def test_overlong_metadata_uses_valid_bounded_abstract():
+    structure = _structure()
+    structure['document']['abstract'] = ' '.join(['substantive'] * 1501)
+    assert [b['text'] for b in extract_brief(structure)['abstract']] == ['The authors found a careful result.']

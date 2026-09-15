@@ -81,8 +81,13 @@ Research Markdown preserves links, citations and provenance. Narration omits
 long URLs, citation markers, reference lists and contact boilerplate without
 asking an LLM to rewrite the research. Narration also recognizes inline IEEE
 abstracts and plain reference headings, omits bounded repository cover pages,
-decodes HTML entities and repairs known PDF word splits. Existing research
-Markdown stays unchanged. Rerunning an audio edition applies the current policy;
+decodes HTML entities and repairs known PDF word splits. PDF extraction also checks
+the article page behind a recognized repository cover. Brief recognizes spaced
+abstract labels, plain keyword/ACM metadata and numbered
+introduction boundaries. Its ten-minute text budget applies to every abstract
+source; oversized extracts are rejected for source review, never silently
+truncated into a summary. Existing research Markdown stays unchanged. Rerunning
+an audio edition applies the current policy;
 changed speech invalidates its cache while unchanged segments remain reusable.
 Optional checks run on Markdown before
 speech and on the finished audio afterward. Usable results remain available
