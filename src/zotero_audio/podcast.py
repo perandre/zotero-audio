@@ -360,10 +360,14 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
                 continue
             if in_abstract:
                 break
-        if in_abstract and block.get("included_in_reading", True):
-            if _looks_like_keyword_list(text, "Abstract") or SPOKEN_KEYWORD_LIST_RE.match(text):
+        if in_abstract:
+            boundary_text = str(block.get("markdown_text", text)).strip()
+            if (_looks_like_keyword_list(boundary_text, "Abstract")
+                    or SPOKEN_KEYWORD_LIST_RE.match(boundary_text)
+                    or re.match(r"(?i)^(?:CCS Concepts|ACM Reference Format|Index Terms)\b", boundary_text)
+                    or re.match(r"(?i)^(?:\d+[.)]?|[IVX]+\.)\s*(?:\|\s*)?Introduction\b", boundary_text)):
                 break
-            if text:
+            if text and block.get("included_in_reading", True):
                 structured_abstract.append(block)
     # A page-flat extractor can append keywords, author contact details, and
     # the start of the introduction to an otherwise valid abstract metadata
@@ -382,28 +386,29 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
     }] if metadata_abstract else [])
     if not abstract and structured_abstract:
         abstract = structured_abstract
-    # Keep the Brief bounded even when PDF metadata or a malformed front-page
-    # boundary contains more than an abstract. This is especially important
-    # for publisher PDFs whose first page is exposed as one large text block.
+    # Role-tagged extraction is a fallback, never a way around a rejected
+    # boundary or length limit. Do not re-scan headings and re-add keyword
+    # furniture that the bounded scan above already excluded.
+    if not abstract and not any(
+            block.get("type") == "heading" and str(block.get("text", "")).casefold().rstrip(".: ") == "abstract"
+            for block in structure.get("blocks", [])):
+        abstract = [block for block in structure.get("blocks", [])
+                    if str(block.get("role", "")).casefold() == "abstract"
+                    and block.get("included_in_reading", True)
+                    and block.get("type") != "heading"]
     word_count = lambda blocks: sum(len(str(item.get("text", "")).split()) for item in blocks)
-    if metadata_abstract and word_count(abstract) / 150 * 60 > max_seconds:
-        abstract = []
-    document_abstract = bool(abstract)
+    if word_count(abstract) / 150 * 60 > max_seconds:
+        abstract = structured_abstract if word_count(structured_abstract) / 150 * 60 <= max_seconds else []
     conclusion: list[dict[str, Any]] = []
-    section: str | None = None
+    in_conclusion = False
     for block in structure.get("blocks", []):
         role = str(block.get("role", "")).casefold()
         text = str(block.get("text", block.get("source_text", ""))).strip()
-        heading = text.casefold().rstrip(".: ")
-        if role == "abstract" and not document_abstract:
-            abstract.append(block); continue
-        if role in {"conclusion", "conclusions"}:
-            conclusion.append(block); continue
+        heading = re.sub(r"^(?:\d+(?:\.\d+)*[.)]?|[ivx]+\.)\s*(?:\|\s*)?", "", text.casefold()).rstrip(".: ")
         if block.get("type") == "heading":
-            section = "abstract" if heading == "abstract" else "conclusion" if heading in {"conclusion", "conclusions"} else None
-        elif block.get("included_in_reading", True) and section:
-            if section == "conclusion" or not document_abstract:
-                (abstract if section == "abstract" else conclusion).append(block)
+            in_conclusion = heading in {"conclusion", "conclusions"}
+        elif block.get("included_in_reading", True) and (in_conclusion or role in {"conclusion", "conclusions"}):
+            conclusion.append(block)
     if not abstract:
         return {"available": False, "reason": "abstract-not-detected", "abstract": [], "conclusion": []}
     include_conclusion = bool(conclusion) and (word_count(abstract) + word_count(conclusion)) / 150 * 60 <= max_seconds

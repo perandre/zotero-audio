@@ -26,7 +26,7 @@ from .segment import create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import license_record_from_metadata, load_bundle_metadata, merge_document_metadata
 
-NARRATION_POLICY = "research-markdown-narration-v2"
+NARRATION_POLICY = "research-markdown-narration-v3"
 ASSEMBLY_POLICY = "final-edition-aac-once-v1"
 QA_POLICY = "optional-warning-first-v1"
 Event = Callable[[dict[str, Any]], None]
@@ -90,6 +90,8 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
 
     def append(text: str, heading: int | None = None) -> None:
         nonlocal section, reference_section
+        if heading and re.fullmatch(r"A\s+B\s+S\s+T\s+R\s+A\s+C\s+T", text, re.I):
+            text = "Abstract"
         if REFERENCE_HEADING.fullmatch(text):
             heading = heading or 2
         if heading:
@@ -129,6 +131,22 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
             pending.clear()
 
     for line in lines[cursor:]:
+        # PDF typography can flatten spaced labels and numbered section titles.
+        if re.fullmatch(r"\s*(?:Abstract|A\s+B\s+S\s+T\s+R\s+A\s+C\s+T)\s*[:.]?\s*", line, re.I):
+            flush()
+            append("Abstract", 2)
+            continue
+        introduction = re.match(r"^\s*(?:(?:\d+[.)]?|[IVX]+\.)\s*(?:\|\s*)?)?(Introduction)\b(.*)$", line, re.I)
+        if introduction and (not introduction.group(2).strip() or re.match(r"^\s*(?:\d+[.)]?|[IVX]+\.)\s", line)):
+            flush()
+            append("Introduction", 2)
+            if introduction.group(2).strip():
+                pending.append(introduction.group(2).strip())
+            continue
+        if re.fullmatch(r"\s*(?:CCS Concepts|ACM Reference Format)\s*:?\s*", line, re.I):
+            flush()
+            append(line.strip().rstrip(":"), 2)
+            continue
         # IEEE abstracts and section labels are often plain PDF paragraphs.
         inline_abstract = re.match(r"^Abstract\s*[—–:]\s*(.+)$", line, re.I)
         if inline_abstract:
@@ -136,7 +154,7 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
             append("Abstract", 2)
             append(inline_abstract.group(1))
             continue
-        if re.match(r"^(?:Index Terms|Keywords)\s*[—–:]", line, re.I):
+        if re.match(r"^(?:Index Terms|Keywords)(?:\s*[—–:]|\s|$)", line, re.I):
             flush()
             append("Index Terms", 2)
             continue

@@ -166,3 +166,33 @@ def test_cached_source_license_requires_matching_pdf_bytes(tmp_path):
         doc.save(pdf)
     assert source_pdf_rights(pdf, sha256_file(pdf))[0] == 'https://creativecommons.org/licenses/by/4.0/'
     assert source_pdf_rights(pdf, '0' * 64) == (None, None)
+
+
+def test_repository_cover_abstract_uses_native_article_page_and_preserves_cover():
+    from types import SimpleNamespace
+    from zotero_audio.extract import _infer_front_abstract, _front_matter_replaced_with_abstract
+
+    body = " ".join(["We studied how teams review results and retain responsibility for their decisions."] * 5)
+    cover = "Downloaded from research.chalmers.se. Citation for the original published paper."
+    layout = "A B S T R A C T\n\nA R T I C L E I N F O\n\n1. Introduction\nArticle body."
+    native = "A B S T R A C T\n" + body + "\n1. Introduction\nArticle body."
+    reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: cover),
+                                    SimpleNamespace(extract_text=lambda: native)])
+    raw = [cover, layout]
+    abstract, source, page = _infer_front_abstract(raw, reader)
+    assert (abstract, source, page) == (body, "pdf-explicit-heading", 1)
+    repaired = _front_matter_replaced_with_abstract(raw[page], abstract, source)
+    assert body in repaired and "1. Introduction\nArticle body." in repaired
+    assert raw[0] == cover
+
+
+def test_abstract_search_does_not_scan_arbitrary_later_pages():
+    from types import SimpleNamespace
+    from zotero_audio.extract import _infer_front_abstract
+
+    body = " ".join(["This is a cited abstract from a different article and must not become our summary."] * 5)
+    first = "1. Introduction\nThis article has no abstract."
+    later = "Abstract\n" + body + "\n1. Introduction"
+    reader = SimpleNamespace(pages=[SimpleNamespace(extract_text=lambda: first),
+                                    SimpleNamespace(extract_text=lambda: later)])
+    assert _infer_front_abstract([first, later], reader) == (None, None, 0)
