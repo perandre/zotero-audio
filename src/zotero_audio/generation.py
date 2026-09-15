@@ -26,7 +26,7 @@ from .segment import create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import license_record_from_metadata, load_bundle_metadata, merge_document_metadata
 
-NARRATION_POLICY = "research-markdown-narration-v3"
+NARRATION_POLICY = "research-markdown-narration-v4"
 ASSEMBLY_POLICY = "final-edition-aac-once-v1"
 QA_POLICY = "optional-warning-first-v1"
 Event = Callable[[dict[str, Any]], None]

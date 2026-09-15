@@ -84,6 +84,21 @@ SPOKEN_ORCID_RE = re.compile(r"(?i)/?orcid(?:\d{4}-){3}\d{3,4}")
 SPOKEN_COPYRIGHT_RE = re.compile(
     r"(?is)©\s*\d{4}\s+Copyright[^\n]{0,500}?CC\s*BY\s*\d(?:\.\d)?\s*\)?[.?!]?"
 )
+# Publisher notices belong in research Markdown and show notes, not speech.
+SPOKEN_LICENSE_NOTICE_RE = re.compile(
+    r"(?i)^\s*(?:Open Access\s+)?(?:"
+    r"This (?:article|work) is (?:licensed|provided) under (?:a )?Creative Commons\b|"
+    r"Permission to make digital or hard copies\b|"
+    r"Published under the following licen[cs]e\s*:|"
+    r"This material is protected by copyright\b)"
+)
+BRIEF_BACK_MATTER_RE = re.compile(
+    r"(?i)^\s*(?:Supplementary Information|Funding|Data availability|Declarations|"
+    r"Competing interests|Conflict(?:s)? of interest|Acknowledg(?:e)?ments|Open Access)"
+    r"(?:\s|[:.]|$)"
+)
+
+
 SPOKEN_FUSED_WORD_RE = re.compile(
     r"(?i)\b(?:retrievalaugmented|human-inthe-loop|domainspecific|crosssection)\b"
 )
@@ -113,6 +128,15 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
     """
     text = html.unescape(str(value))
     transformations: list[str] = ["decode-html-entities"] if text != str(value) else []
+    # Some ACM PDFs flatten the abstract and its publication footer into one
+    # paragraph. A visible footer label bounds the summary without rewriting it.
+    if str(section or "").casefold() in {"abstract", "summary", "conclusion", "conclusions", "authors’ conclusion"}:
+        footer = re.search(r"(?i)(?<=\.)\s+(?:CCS Concepts\b|Permission to make digital or hard copies\b|Open Access This article is licensed\b)", text)
+        if footer:
+            text = text[:footer.start()].rstrip()
+            transformations.append("omit-publisher-footer")
+    if SPOKEN_LICENSE_NOTICE_RE.match(text):
+        return "", transformations + ["omit-license-notice"]
     # Only attested typesetting splits: never collapse arbitrary compounds.
     split_words = r"\b(?:organiza-\s*tional|con-\s*cern|vari-\s*able|concep-\s*tual|devel-\s*oping|empir-\s*ical|char-\s*acterize|gover-\s*nance|ten-\s*sions|utiliz-\s*ing|ele-\s*ments|sup-\s*porting|estab-\s*lished|mod-\s*eling)\b"
     text, count = re.subn(split_words, lambda m: re.sub(r"-\s*", "", m[0]), text, flags=re.I)
@@ -401,13 +425,22 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
         abstract = structured_abstract if word_count(structured_abstract) / 150 * 60 <= max_seconds else []
     conclusion: list[dict[str, Any]] = []
     in_conclusion = False
+    conclusion_ended = False
     for block in structure.get("blocks", []):
         role = str(block.get("role", "")).casefold()
         text = str(block.get("text", block.get("source_text", ""))).strip()
         heading = re.sub(r"^(?:\d+(?:\.\d+)*[.)]?|[ivx]+\.)\s*(?:\|\s*)?", "", text.casefold()).rstrip(".: ")
+        boundary_text = str(block.get("markdown_text", text)).strip()
+        if (in_conclusion or role in {"conclusion", "conclusions"}) and (
+                BRIEF_BACK_MATTER_RE.match(boundary_text) or SPOKEN_LICENSE_NOTICE_RE.match(boundary_text)):
+            in_conclusion = False
+            conclusion_ended = True
+            continue
         if block.get("type") == "heading":
             in_conclusion = heading in {"conclusion", "conclusions"}
-        elif block.get("included_in_reading", True) and (in_conclusion or role in {"conclusion", "conclusions"}):
+            if in_conclusion:
+                conclusion_ended = False
+        elif not conclusion_ended and block.get("included_in_reading", True) and (in_conclusion or role in {"conclusion", "conclusions"}):
             conclusion.append(block)
     if not abstract:
         return {"available": False, "reason": "abstract-not-detected", "abstract": [], "conclusion": []}

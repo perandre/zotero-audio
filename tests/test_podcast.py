@@ -586,3 +586,42 @@ def test_overlong_metadata_uses_valid_bounded_abstract():
     structure = _structure()
     structure['document']['abstract'] = ' '.join(['substantive'] * 1501)
     assert [b['text'] for b in extract_brief(structure)['abstract']] == ['The authors found a careful result.']
+
+
+@pytest.mark.parametrize('notice', [
+    'Open Access This article is licensed under a Creative Commons Attribution 4.0 International License. The images are covered too.',
+    'This work is provided under a Creative Commons 4.0 Attribution International License.',
+    'Permission to make digital or hard copies of all or part of this work is granted. Request permissions from the publisher.',
+    'Published under the following license: CC BY',
+    'This material is protected by copyright and other intellectual property rights.',
+])
+def test_publisher_license_notices_are_not_spoken(notice):
+    from zotero_audio.podcast import sanitize_spoken_text
+    spoken, changes = sanitize_spoken_text(notice)
+    assert spoken == ''
+    assert 'omit-license-notice' in changes
+
+
+def test_substantive_licensing_discussion_is_preserved():
+    from zotero_audio.podcast import sanitize_spoken_text
+    text = 'The teams evaluated model licensing and copyright risks. Open access policies affected their choices.'
+    assert sanitize_spoken_text(text)[0] == text
+
+
+def test_brief_conclusion_stops_before_plain_publisher_back_matter():
+    structure = _structure()
+    structure['blocks'] += [
+        {'text': 'Supplementary Information Additional material is available.', 'role': 'conclusion'},
+        {'text': 'Funding Open Access funding was provided.', 'role': 'conclusion'},
+        {'text': 'Open Access This article is licensed under a Creative Commons license.', 'role': 'conclusion'},
+    ]
+    brief = extract_brief(structure)
+    assert all('Supplementary' not in b['text'] and 'licensed' not in b['text'] and 'Funding' not in b['text'] for b in brief['conclusion'])
+    assert brief['conclusion']
+
+
+def test_flattened_abstract_license_footer_preserves_research_prefix():
+    from zotero_audio.podcast import sanitize_spoken_text
+    research = 'The study found differences between teams. Licensing practices were part of the research.'
+    footer = ' CCS Concepts Computing methodologies. Permission to make digital or hard copies of this work is granted. Publication rights licensed to ACM.'
+    assert sanitize_spoken_text(research + footer, section='Abstract')[0] == research

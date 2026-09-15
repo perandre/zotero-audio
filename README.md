@@ -85,7 +85,9 @@ decodes HTML entities and repairs known PDF word splits. PDF extraction also che
 the article page behind a recognized repository cover. Brief recognizes spaced
 abstract labels, plain keyword/ACM metadata and numbered
 introduction boundaries. Its ten-minute text budget applies to every abstract
-source; oversized extracts are rejected for source review, never silently
+source; conclusions stop before publisher declarations and licensing notices.
+Publisher license notices stay in research Markdown and show notes rather than
+speech. Oversized extracts are rejected for source review, never silently
 truncated into a summary. Existing research Markdown stays unchanged. Rerunning
 an audio edition applies the current policy;
 changed speech invalidates its cache while unchanged segments remain reusable.
