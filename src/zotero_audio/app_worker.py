@@ -138,7 +138,10 @@ class LocalWorker:
         if target.is_file():
             return target
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temporary = target.with_name("." + target.name + "." + uuid.uuid4().hex + ".copying")
+        # Keep the temporary component short. The final name is bounded for
+        # readability, but adding a UUID to it can exceed macOS's 255-byte
+        # per-component limit for titles containing multibyte characters.
+        temporary = target.parent / f".{uuid.uuid4().hex}.copying"
         try:
             cloned = False
             if os.uname().sysname == "Darwin":
@@ -364,7 +367,10 @@ class LocalWorker:
             collision += 1
             ending = "" if collision == 1 else f"-{collision}"
             target = original_target.with_name(original_target.stem + " — " + content_hash[:8] + ending + original_target.suffix)
-        temporary = target.with_name("." + target.name + ".copying")
+        # The destination may already be close to the filesystem component
+        # limit (especially after a collision suffix), so don't derive the
+        # temporary name from it.
+        temporary = target.parent / f".{uuid.uuid4().hex}.copying"
         try:
             shutil.copyfile(source, temporary)
             if sha256_file(temporary) != content_hash:

@@ -248,6 +248,29 @@ def test_blank_and_unusually_long_author_names_do_not_break_filename_creation():
     subprocess.run([sys.executable, "-c", code], check=True, timeout=3)
 
 
+def test_snapshot_handles_a_destination_name_near_macos_component_limit(tmp_path):
+    store = Store(tmp_path / "runtime")
+    worker = LocalWorker(store)
+    source = tmp_path / "source.m4a"
+    source.write_bytes(b"completed audio")
+    name = "a" * 230 + ".m4a"
+
+    artifact = worker.snapshot(source, expected_hash=sha256_file(source), name=name)
+
+    assert artifact.name == name
+    assert artifact.read_bytes() == source.read_bytes()
+
+
+def test_copy_artifact_handles_a_destination_name_near_macos_component_limit(tmp_path):
+    source = tmp_path / "source.m4a"
+    source.write_bytes(b"completed audio")
+    target = tmp_path / ("a" * 230 + ".m4a")
+
+    LocalWorker.copy_artifact({"source": str(source), "target": str(target), "sha256": sha256_file(source)})
+
+    assert target.read_bytes() == source.read_bytes()
+
+
 def test_new_edition_keeps_publication_status_completed_during_snapshot(article_store, monkeypatch):
     store, article = article_store
     worker = LocalWorker(store)
