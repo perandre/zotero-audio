@@ -11,6 +11,7 @@ import mimetypes
 import re
 import shutil
 import urllib.parse
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -42,6 +43,22 @@ from .zotero import (
 EDITION_BRIEF = "brief"
 EDITION_FULL = "full"
 EDITIONS = (EDITION_BRIEF, EDITION_FULL)
+
+
+def paper_slug(title: str, paper_id: str) -> str:
+    paper_title = title.split(" — ")[0]
+    normalized = unicodedata.normalize("NFKD", paper_title).encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")[:78].rstrip("-") or "paper"
+    return f"{slug}-{paper_id[:8]}"
+
+
+def public_episode_page_url(base_url: str, title: str, paper_id: str, edition: str) -> str:
+    base = base_url.rstrip("/")
+    if urllib.parse.urlsplit(base).path.rstrip("/") == "/1mp":
+        return f"{base}/papers/{paper_slug(title, paper_id)}/{edition}/"
+    return f"{base}/papers/{paper_id}/{edition}/index.html"
+
+
 EDITION_VOICES = {
     EDITION_BRIEF: "af_heart",
     EDITION_FULL: "am_michael",
@@ -1128,13 +1145,14 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         has_pair = paired_edition in private_records or any(
             value.get("edition") == paired_edition and value.get("source_sha256") == source_sha
             for value in existing.values())
-        pair_url = f"{config.base_url}/papers/{paper_guid}/{paired_edition}/index.html" if has_pair else None
+        pair_url = public_episode_page_url(config.base_url, private["title"], paper_guid, paired_edition) if has_pair else None
         record = {**private, "revision": source_sha, "pub_date": previous.get("pub_date", published_at),
                   "audio_url": _artifact_url(publisher, Path(private["audio"]), prefix),
                   "image_url": (_artifact_url(publisher, Path(private["cover"]), prefix)
                                 if private.get("cover") else images[edition]),
                   "episode_license_url": license_result["episode_license_url"],
-                  "page_url": f"{config.base_url}/papers/{paper_guid}/{edition}/index.html", "bytes": Path(private["audio"]).stat().st_size}
+                  "page_url": public_episode_page_url(config.base_url, private["title"], paper_guid, edition),
+                  "bytes": Path(private["audio"]).stat().st_size}
         for local_key, url_key in (("transcript", "transcript_url"), ("transcript_html", "transcript_html_url"),
                                    ("chapters", "chapters_url"), ("markdown", "markdown_url")):
             if private.get(local_key):
