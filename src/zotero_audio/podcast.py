@@ -250,6 +250,7 @@ class PodcastConfig:
     publishing_enabled: bool = False
     dry_run: bool = True
     r2_bucket: str = ""
+    previous_feed_base_url: str = ""
     briefs_publication_policy: str = "license_required"
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
         PODCAST_NAME, "Brief editions containing the authors' abstract and, when suitable, conclusion.",
@@ -283,6 +284,7 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         copyright=str(common.get("copyright", defaults.copyright)),
         publishing_enabled=bool(common.get("publishing_enabled", False)), dry_run=bool(common.get("dry_run", True)),
         r2_bucket=str(common.get("r2_bucket", "")).strip(),
+        previous_feed_base_url=str(common.get("previous_feed_base_url", "")).rstrip("/"),
         briefs_publication_policy=str(common.get("briefs_publication_policy", defaults.briefs_publication_policy)).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
 
@@ -977,6 +979,8 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         ET.SubElement(channel, tag).text = str(value)
     ET.SubElement(channel, "lastBuildDate").text = _rfc2822(max(_date(item["pub_date"]) for item in episode_list))
     ET.SubElement(channel, f"{{{ATOM_NS}}}link", {"href": str(show["feed_url"]), "rel": "self", "type": "application/rss+xml"})
+    if show.get("new_feed_url"):
+        ET.SubElement(channel, f"{{{ITUNES_NS}}}new-feed-url").text = str(show["new_feed_url"])
     ET.SubElement(channel, f"{{{ITUNES_NS}}}author").text = str(show.get("author", show["title"]))
     ET.SubElement(channel, f"{{{ITUNES_NS}}}summary").text = str(show["description"])
     ET.SubElement(channel, f"{{{ITUNES_NS}}}explicit").text = "false"; ET.SubElement(channel, f"{{{ITUNES_NS}}}type").text = "episodic"
@@ -1027,7 +1031,8 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
     return {"title": show.title, "description": show.description, "link": config.base_url + "/",
             "feed_url": f"{config.base_url}/{show.slug}/feed.xml", "image_url": image_url,
             "language": config.language, "author": config.author, "owner_name": config.owner_name,
-            "owner_email": config.owner_email, "category": config.category, "copyright": config.copyright, "guid": show.guid}
+            "owner_email": config.owner_email, "category": config.category, "copyright": config.copyright, "guid": show.guid,
+            "new_feed_url": f"{config.base_url}/{show.slug}/feed.xml" if config.previous_feed_base_url else None}
 
 
 def _episode_page(record: dict[str, Any]) -> str:

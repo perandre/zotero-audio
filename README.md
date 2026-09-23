@@ -1,5 +1,8 @@
 # 1 More Paper
 
+The public podcast domain move is documented in
+[Podcast domain migration](docs/podcast-domain-migration.md).
+
 Read, listen to and search the research already saved in Zotero. **Markdown is a
 finished product; audio is optional.** A persistent Python worker uses Kokoro on
 Apple silicon, while a small dashboard and short commands keep every article’s
