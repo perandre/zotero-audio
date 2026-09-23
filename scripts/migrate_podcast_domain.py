@@ -49,8 +49,14 @@ def migrate_record(record: dict, old_base: str, new_base: str) -> dict:
     result["page_url"] = public_episode_page_url(new_base, str(result["title"]), paper_id, result["edition"])
     paired_url = str(result.get("paired_url") or "")
     paired_match = re.search(r"/papers/([0-9a-f-]{36})/(brief|full)/index\.html$", paired_url, re.IGNORECASE)
-    if paired_match and paired_match.group(1).lower() == paper_id.lower():
-        pretty_pair = public_episode_page_url(new_base, str(result["title"]), paper_id, paired_match.group(2))
+    pretty_match = re.search(r"/papers/[^/]+/(brief|full)/?$", paired_url, re.IGNORECASE)
+    paired_edition = (
+        paired_match.group(2) if paired_match and paired_match.group(1).lower() == paper_id.lower()
+        else pretty_match.group(1) if paired_url.startswith(new_base + "/") and pretty_match
+        else None
+    )
+    if paired_edition:
+        pretty_pair = public_episode_page_url(new_base, str(result["title"]), paper_id, paired_edition)
         result["paired_url"] = pretty_pair
         if result.get("show_notes"):
             result["show_notes"] = result["show_notes"].replace(paired_url, pretty_pair)
