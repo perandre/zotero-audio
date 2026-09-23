@@ -9,6 +9,9 @@ public_root = "/Users/you/Sites/zotero-audio-runtime/podcast/public"
 
 [podcast]
 base_url = "https://audio.example.org"
+# Set only while moving existing subscribers from an older feed domain.
+# Keep the old feed online with a 301 redirect for at least four weeks.
+# previous_feed_base_url = "https://old-audio.example.org"
 site_title = "1 More Paper"
 site_description = "1 More Paper turns openly licensed research papers into carefully produced audio editions: a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading of the paper's approved prose."
 language = "en"

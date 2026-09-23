@@ -344,6 +344,12 @@ def test_rss_has_required_metadata_and_namespaces():
     assert root.find("./channel/item/pubDate").text.endswith("GMT")
 
 
+def test_rss_marks_new_feed_url_during_domain_migration():
+    show = {**_show(), "new_feed_url": "https://perandre.no/1mp/brief/feed.xml"}
+    root = ET.fromstring(build_rss(show, [_episode()]))
+    assert root.find(f"./channel/{{{ITUNES_NS}}}new-feed-url").text == show["new_feed_url"]
+
+
 def test_local_publisher_is_immutable_and_rejects_traversal(tmp_path: Path):
     source = tmp_path / "source.bin"; source.write_bytes(b"one")
     publisher = LocalPublisher(tmp_path / "public", "https://audio.example")
