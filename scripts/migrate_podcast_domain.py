@@ -12,7 +12,6 @@ import json
 import re
 import shutil
 import sys
-import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,19 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from zotero_audio.podcast import (  # noqa: E402
     EDITIONS, LocalPublisher, _show, build_rss, load_podcast_config,
+    paper_slug, public_episode_page_url,
 )
 from zotero_audio.publish_sync import upload_keys  # noqa: E402
 from zotero_audio.util import atomic_write_json, atomic_write_text  # noqa: E402
 
 
 MEDIA_FIELDS = ("audio_url", "image_url", "transcript_url", "transcript_html_url", "chapters_url", "markdown_url")
-
-
-def paper_slug(title: str, paper_id: str) -> str:
-    title = title.split(" — ")[0]
-    normalized = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")[:78].rstrip("-") or "paper"
-    return f"{slug}-{paper_id[:8]}"
 
 
 def rebase_url(value: str, old_base: str, new_base: str) -> str:
@@ -53,7 +46,14 @@ def migrate_record(record: dict, old_base: str, new_base: str) -> dict:
     identity = str(result.get("doi") or result.get("read_url") or result.get("paper_title") or str(result["title"]).split(" — ")[0]).lower()
     paper_id = str(result.get("paper_guid") or (old_match.group(1) if old_match else uuid.uuid5(uuid.NAMESPACE_URL, f"1-more-paper:{identity}")))
     result["paper_guid"] = paper_id
-    result["page_url"] = f"{new_base}/papers/{paper_slug(str(result['title']), paper_id)}/{result['edition']}/"
+    result["page_url"] = public_episode_page_url(new_base, str(result["title"]), paper_id, result["edition"])
+    paired_url = str(result.get("paired_url") or "")
+    paired_match = re.search(r"/papers/([0-9a-f-]{36})/(brief|full)/index\.html$", paired_url, re.IGNORECASE)
+    if paired_match and paired_match.group(1).lower() == paper_id.lower():
+        pretty_pair = public_episode_page_url(new_base, str(result["title"]), paper_id, paired_match.group(2))
+        result["paired_url"] = pretty_pair
+        if result.get("show_notes"):
+            result["show_notes"] = result["show_notes"].replace(paired_url, pretty_pair)
     return result
 
 

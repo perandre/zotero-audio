@@ -23,7 +23,8 @@ private on the Mac. Sanity is not involved in feeds, show notes, or media.
 4. When the new origin passes the checks, rerun with `--apply --sync`. This backs
    up the local manifest and both feeds, preserves episode GUIDs, publication
    dates, byte lengths, and immutable media keys, then uploads only the two
-   updated RSS files. The new feeds include `itunes:new-feed-url`.
+   updated RSS files. Paired-edition links also use the readable show-note URLs.
+   The new feeds include `itunes:new-feed-url`.
 5. Configure HTTP 301 redirects from the two old feed paths to their new paths.
    Keep the old media hostname working for old app caches and bookmarks. Verify
    the new feeds in podcast directories and keep the redirect and feed tag for

@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+import uuid
 from pathlib import Path
 
 import zotero_audio.feed_only as feed_only
@@ -44,7 +45,7 @@ def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path
         private_root=tmp_path / "private",
         state_root=tmp_path / "state",
         public_root=tmp_path / "public",
-        base_url="https://audio.example",
+        base_url="https://perandre.no/1mp",
         owner_email="podcast@example.org",
         publishing_enabled=True,
         dry_run=False,
@@ -57,6 +58,8 @@ def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path
     item = feed.find("./channel/item")
     assert item is not None
     assert item.find("enclosure") is not None
+    paper_id = uuid.uuid5(uuid.NAMESPACE_URL, "zotero-audio:episode-guid")
+    assert item.findtext("link") == f"https://perandre.no/1mp/papers/existing-paper-{str(paper_id)[:8]}/brief/"
     assert item.find("{http://www.itunes.com/dtds/podcast-1.0.dtd}image") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}transcript") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}chapters") is None

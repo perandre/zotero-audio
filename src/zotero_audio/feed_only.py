@@ -20,6 +20,7 @@ from .podcast import (
     _show_notes,
     build_rss,
     episode_title,
+    public_episode_page_url,
     resolve_license,
 )
 from .util import atomic_write_json, atomic_write_text, load_json, sha256_file
@@ -243,6 +244,10 @@ def publish_existing_audio(config, *, batch_manifest_path: Path) -> dict[str, An
             "pub_date": candidate.get("pub_date") or published_at,
             "audio_url": _artifact_url(publisher, audio, prefix),
         }
+        if config.base_url.rstrip("/").endswith("/1mp"):
+            record["page_url"] = public_episode_page_url(
+                config.base_url, record["title"], paper_guid, record["edition"]
+            )
         existing[(record["guid"], record["revision"])] = record
         added += 1
 
