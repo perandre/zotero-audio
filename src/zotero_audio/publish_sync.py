@@ -12,6 +12,15 @@ from .util import atomic_write_json, load_json, sha256_file
 from .runtime import configure_tool_path
 
 
+def _public_key(url: str, base_url: str) -> str:
+    """Map a public URL back to a key in the local podcast mirror."""
+    parsed, base = urlsplit(url), urlsplit(base_url)
+    prefix = base.path.rstrip("/") + "/"
+    if (parsed.scheme, parsed.netloc) != (base.scheme, base.netloc) or not parsed.path.startswith(prefix):
+        raise ValueError("Podcast asset URL is outside the configured public base URL")
+    return unquote(parsed.path[len(prefix):])
+
+
 def sync_public(config, records: list[dict]) -> None:
     if not config.public_root or not config.r2_bucket:
         raise ValueError("Public root and R2 bucket are required for --sync")
@@ -19,21 +28,23 @@ def sync_public(config, records: list[dict]) -> None:
     for record in records:
         for field in ("audio_url", "image_url", "transcript_url", "transcript_html_url", "chapters_url", "markdown_url"):
             if record.get(field):
-                keys.add(unquote(urlsplit(record[field]).path).lstrip("/"))
+                keys.add(_public_key(record[field], config.base_url))
         if record.get("page_url"):
-            page_path = unquote(urlsplit(record["page_url"]).path).lstrip("/")
-            keys.add(page_path)
-            if page_path.endswith("/"):
-                keys.add(page_path + "index.html")
+            if record.get("paper_guid") and record.get("edition"):
+                keys.add(f"papers/{record['paper_guid']}/{record['edition']}/index.html")
+            else:
+                page_path = _public_key(record["page_url"], config.base_url)
+                keys.add(page_path.rstrip("/") + "/index.html" if page_path.endswith("/") else page_path)
         keys.add(record["edition"] + "/feed.xml")
     # Show artwork is also referenced by each feed.
     import xml.etree.ElementTree as ET
     for key in list(keys):
         if key.endswith("/feed.xml"):
             root = ET.parse(config.public_root / key)
-            url = root.findtext("./channel/image/url")
+            image = root.find("./channel/{http://www.itunes.com/dtds/podcast-1.0.dtd}image")
+            url = image.get("href") if image is not None else root.findtext("./channel/image/url")
             if url:
-                keys.add(unquote(urlsplit(url).path).lstrip("/"))
+                keys.add(_public_key(url, config.base_url))
     keys.add("index.html")
     upload_keys(config.public_root, config.r2_bucket, config.state_root / "r2-sync-manifest.json", keys)
 
