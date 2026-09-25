@@ -383,7 +383,9 @@ def test_config_preserves_safe_defaults(tmp_path: Path):
     config_file.write_text(f'[paths]\nprivate_root="{tmp_path}/private"\nstate_root="{tmp_path}/state"\n[podcast]\n', encoding="utf-8")
     config = load_podcast_config(config_file)
     assert config.dry_run and not config.publishing_enabled and config.public_root is None
-    assert config.site_title == config.author == config.brief_show.title == config.full_show.title == "1 More Paper"
+    assert config.site_title == config.full_show.title == "1 More Paper"
+    assert config.brief_show.title == "1 More Paper (Brief)"
+    assert config.author == "Per André Rønsen"
 
 
 def test_site_accepts_existing_feed_only_episodes_without_individual_artwork(tmp_path: Path):

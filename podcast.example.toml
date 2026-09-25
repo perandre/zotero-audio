@@ -8,14 +8,14 @@ state_root = "/Users/you/Sites/zotero-audio-runtime/podcast"
 public_root = "/Users/you/Sites/zotero-audio-runtime/podcast/public"
 
 [podcast]
-base_url = "https://audio.example.org"
+base_url = "https://perandre.no/1mp"
 # Set only while moving existing subscribers from an older feed domain.
 # Keep the old feed online with a 301 redirect for at least four weeks.
 # previous_feed_base_url = "https://old-audio.example.org"
 site_title = "1 More Paper"
 site_description = "1 More Paper turns openly licensed research papers into carefully produced audio editions: a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading of the paper's approved prose."
 language = "en"
-author = "1 More Paper"
+author = "Per André Rønsen"
 owner_name = "Per André Rønsen"
 # This address is public in RSS and is used for Spotify ownership verification.
 owner_email = "podcast@example.org"
@@ -29,7 +29,7 @@ publishing_enabled = false
 r2_bucket = ""
 
 [shows.brief]
-title = "1 More Paper"
+title = "1 More Paper (Brief)"
 description = "Brief editions containing the authors' abstract and, when suitable, conclusion."
 guid = "f25aa92b-5bea-51f8-b842-0836db8713ed"
 
