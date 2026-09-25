@@ -312,7 +312,7 @@ def test_known_hyphen_artifacts_repaired_without_changing_real_compounds(bundle,
     assert "so-cial and long-term adop-tion" in path.read_text()
 
 
-def test_publication_creates_feed_with_show_art_only_and_no_optional_sidecars(bundle, assemblies):
+def test_publication_creates_feed_with_show_art_and_spoken_transcript(bundle, assemblies):
     import xml.etree.ElementTree as ET
     result = generation.process_article(bundle, mode="full", backend=Backend(), metadata={"podcast_selected": True})
     config = PodcastConfig(bundle / "private", bundle / "state", public_root=bundle / "public",
@@ -323,7 +323,10 @@ def test_publication_creates_feed_with_show_art_only_and_no_optional_sidecars(bu
     item = feed.find("./channel/item")
     assert item.find("enclosure") is not None
     assert item.find("{http://www.itunes.com/dtds/podcast-1.0.dtd}image") is None
-    assert item.find("{https://podcastindex.org/namespace/1.0}transcript") is None
+    transcript = item.find("{https://podcastindex.org/namespace/1.0}transcript")
+    assert transcript is not None and transcript.get("type") == "text/plain"
+    key = transcript.get("url").removeprefix("https://podcast.example.org/")
+    assert (bundle / "public" / key).read_text() == (bundle / "editions/full/narration.md").read_text()
     assert item.find("{https://podcastindex.org/namespace/1.0}chapters") is None
     assert len(assemblies) == 1
 

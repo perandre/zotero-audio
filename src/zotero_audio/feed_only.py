@@ -20,6 +20,7 @@ from .podcast import (
     _show_notes,
     build_rss,
     episode_title,
+    publish_narration_transcript,
     public_episode_page_url,
     resolve_license,
 )
@@ -206,7 +207,7 @@ def _batch_full_candidates(config, batch_manifest: dict[str, Any],
     return candidates
 
 
-def publish_existing_audio(config, *, batch_manifest_path: Path) -> dict[str, Any]:
+def publish_existing_audio(config, *, batch_manifest_path: Path | None = None) -> dict[str, Any]:
     """Publish already-rendered files and metadata without invoking TTS."""
     if config.dry_run or not config.publishing_enabled:
         return {"status": "disabled", "added": 0, "skipped": 0}
@@ -220,14 +221,15 @@ def publish_existing_audio(config, *, batch_manifest_path: Path) -> dict[str, An
         (str(item.get("guid") or ""), str(item.get("revision") or "")): item
         for item in manifest.get("episodes", [])
     }
-    batch_manifest = load_json(batch_manifest_path.expanduser().resolve())
     candidates: list[dict[str, Any]] = []
     candidate_keys = set(existing)
-    for candidate in _existing_artifacts(config, existing) + _batch_full_candidates(config, batch_manifest, existing):
-        key = (candidate["guid"], candidate["revision"])
-        if key not in candidate_keys:
-            candidates.append(candidate)
-            candidate_keys.add(key)
+    if batch_manifest_path:
+        batch_manifest = load_json(batch_manifest_path.expanduser().resolve())
+        for candidate in _existing_artifacts(config, existing) + _batch_full_candidates(config, batch_manifest, existing):
+            key = (candidate["guid"], candidate["revision"])
+            if key not in candidate_keys:
+                candidates.append(candidate)
+                candidate_keys.add(key)
     publisher = LocalPublisher(config.public_root, config.base_url)
     added = 0
     published_at = _now()
@@ -241,6 +243,7 @@ def publish_existing_audio(config, *, batch_manifest_path: Path) -> dict[str, An
         prefix = f"episodes/{paper_guid}/{candidate['source_sha256'][:16]}/{candidate['edition']}"
         record = {
             **candidate,
+            "paper_guid": paper_guid,
             "pub_date": candidate.get("pub_date") or published_at,
             "audio_url": _artifact_url(publisher, audio, prefix),
         }
@@ -251,15 +254,19 @@ def publish_existing_audio(config, *, batch_manifest_path: Path) -> dict[str, An
         existing[(record["guid"], record["revision"])] = record
         added += 1
 
-    # Existing episode artwork is no longer referenced by the feeds. The
-    # show-level image is the only artwork emitted for feed-only records. The
-    # feed also carries only the required episode fields; old sidecar URLs are
-    # deliberately left out rather than making transcript/chapter generation
-    # part of publication.
+    # Existing episode artwork is no longer referenced by the feeds. Publish
+    # source-matched spoken text for approved Full Readings; no transcript is
+    # generated or reconstructed from the research Markdown at this stage.
     for record in existing.values():
         record["show_artwork_only"] = True
         for optional_key in ("image_url", "transcript_url", "transcript_html_url", "chapters_url"):
             record.pop(optional_key, None)
+        paper_guid = str(record.get("paper_guid") or uuid.uuid5(
+            uuid.NAMESPACE_URL, f"zotero-audio:{record.get('zotero_key', record['guid'])}"
+        ))
+        transcript_text_url = publish_narration_transcript(config, publisher, record, paper_guid)
+        if transcript_text_url:
+            record["transcript_text_url"] = transcript_text_url
     manifest["episodes"] = sorted(existing.values(), key=lambda item: (item["guid"], item.get("revision", "")))
 
     images: dict[str, str] = {}

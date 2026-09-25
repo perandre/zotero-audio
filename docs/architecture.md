@@ -70,6 +70,12 @@ sound, normalizes audio and encodes the final AAC once. A sound-only change can
 reuse speech and reassemble it. **Publication consumes the finished bytes; it
 must not synthesize or encode them again.** Shared show artwork is sufficient;
 chapters, per-episode art and timed transcripts are deferred in this path.
+For licensed Full Readings, publication copies source-matched narration into
+a public, content-addressed plain-text transcript and advertises it in RSS.
+The editable research Markdown remains private.
+Use `scripts/backfill_public_transcripts.py --config /path/to/podcast.toml --sync`
+once to update existing published episodes. Subsequent automatic sync runs
+publish narration for newly selected Full Readings with the audio.
 
 See [generation-api.md](generation-api.md) for callable contracts and artifacts.
 

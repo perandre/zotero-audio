@@ -1032,6 +1032,8 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
             ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_url"]), "type": "text/vtt"})
         if episode.get("transcript_html_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_html_url"]), "type": "text/html", "rel": "alternate"})
+        if episode.get("transcript_text_url"):
+            ET.SubElement(item, f"{{{PODCAST_NS}}}transcript", {"url": str(episode["transcript_text_url"]), "type": "text/plain"})
         if episode.get("chapters_url"):
             ET.SubElement(item, f"{{{PODCAST_NS}}}chapters", {"url": str(episode["chapters_url"]), "type": "application/json+chapters"})
         if episode.get("episode_license_url"):
@@ -1041,12 +1043,48 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
 
 def _artifact_url(publisher: LocalPublisher, path: Path, prefix: str) -> str:
     content_type = {".m4a": "audio/mp4", ".png": "image/png", ".vtt": "text/vtt; charset=utf-8",
+                    ".txt": "text/plain; charset=utf-8",
                     ".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8",
                     ".md": "text/markdown; charset=utf-8"}.get(path.suffix.casefold(), "application/octet-stream")
     url = publisher.put(path, content_addressed_key(path, prefix), content_type); check = publisher.head(url)
     if check["bytes"] != path.stat().st_size or check["sha256"] != sha256_file(path) or not check["accept_ranges"]:
         raise RuntimeError(f"published artifact verification failed: {url}")
     return url
+
+
+def publish_narration_transcript(config: PodcastConfig, publisher: LocalPublisher, record: dict[str, Any],
+                                 paper_guid: str) -> str | None:
+    """Publish only source-matched spoken text for an approved Full Reading."""
+    if record.get("edition") != EDITION_FULL or not record.get("source_license", {}).get("allowed"):
+        return None
+    source_sha = str(record.get("source_sha256") or "")
+    if not source_sha:
+        return None
+    candidates = [config.state_root / "documents" / paper_guid / source_sha / EDITION_FULL / "narration.md"]
+    markdown = Path(str(record.get("markdown") or ""))
+    if markdown.is_file():
+        if markdown.name == "transcript.md":
+            episode_json = markdown.parent / "episode.json"
+            if episode_json.is_file() and load_json(episode_json).get("source_sha256") == source_sha:
+                candidates.append(markdown)
+        else:
+            bundle = markdown.parent
+            generation = bundle / "generation.json"
+            if generation.is_file() and load_json(generation).get("source_sha256") == source_sha:
+                candidates.append(bundle / "editions" / EDITION_FULL / "narration.md")
+    zotero_key = record.get("zotero_key")
+    if zotero_key:
+        bundle = config.state_root.parent / "library" / str(zotero_key)
+        generation = bundle / "generation.json"
+        if generation.is_file() and load_json(generation).get("source_sha256") == source_sha:
+            candidates.append(bundle / "editions" / EDITION_FULL / "narration.md")
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
+        return None
+    stage = config.state_root / "public-staging" / "transcripts" / paper_guid / source_sha / "transcript.txt"
+    atomic_write_text(stage, source.read_text(encoding="utf-8"))
+    prefix = f"episodes/{paper_guid}/{source_sha[:16]}/{EDITION_FULL}"
+    return _artifact_url(publisher, stage, prefix)
 
 
 def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, Any]:
@@ -1158,6 +1196,9 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
                   "episode_license_url": license_result["episode_license_url"],
                   "page_url": public_episode_page_url(config.base_url, private["title"], paper_guid, edition),
                   "bytes": Path(private["audio"]).stat().st_size}
+        transcript_text_url = publish_narration_transcript(config, publisher, record, paper_guid)
+        if transcript_text_url:
+            record["transcript_text_url"] = transcript_text_url
         for local_key, url_key in (("transcript", "transcript_url"), ("transcript_html", "transcript_html_url"),
                                    ("chapters", "chapters_url"), ("markdown", "markdown_url")):
             if private.get(local_key):
