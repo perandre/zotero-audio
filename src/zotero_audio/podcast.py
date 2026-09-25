@@ -47,7 +47,9 @@ EDITIONS = (EDITION_BRIEF, EDITION_FULL)
 
 def paper_slug(title: str, paper_id: str) -> str:
     paper_title = title.split(" — ")[0]
-    normalized = unicodedata.normalize("NFKD", paper_title).encode("ascii", "ignore").decode("ascii").lower()
+    # Match the website's NFKD slug rule: punctuation separates words instead
+    # of disappearing when the title contains a curly quote or Unicode dash.
+    normalized = re.sub(r"[\u0300-\u036f]", "", unicodedata.normalize("NFKD", paper_title)).lower()
     slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")[:78].rstrip("-") or "paper"
     return f"{slug}-{paper_id[:8]}"
 
@@ -720,7 +722,10 @@ class LocalPublisher:
 
 
 def content_addressed_key(path: Path, prefix: str = "episodes") -> str:
-    return f"{prefix.strip('/')}/{sha256_file(path)}/{path.name}"
+    # Wrangler treats ? and # as URL delimiters in R2 object paths; percent
+    # escapes can also change the key. Preserve the content hash and extension.
+    safe_name = re.sub(r"[?#%]", "-", path.name)
+    return f"{prefix.strip('/')}/{sha256_file(path)}/{safe_name}"
 
 
 def _authors(document: dict[str, Any], metadata: dict[str, Any]) -> list[str]:

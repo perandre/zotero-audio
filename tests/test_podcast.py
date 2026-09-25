@@ -27,6 +27,8 @@ from zotero_audio.podcast import (
     health_check,
     load_podcast_config,
     loudness_pass,
+    content_addressed_key,
+    paper_slug,
     publication_state,
     resolve_license,
     sanitize_spoken_text,
@@ -35,6 +37,16 @@ from zotero_audio.util import atomic_write_json, json_digest, load_json
 
 
 SOURCE_SHA = "a" * 64
+
+
+def test_public_keys_keep_unicode_word_boundaries_and_avoid_url_delimiters(tmp_path: Path):
+    assert paper_slug("Human–AI and Vietnam’s banks — Author (2026)", "12345678-rest") == (
+        "human-ai-and-vietnam-s-banks-12345678")
+    audio = tmp_path / "Does it work? #1 at 50%.m4a"
+    audio.write_bytes(b"synthetic audio")
+    key = content_addressed_key(audio, "episodes/paper/brief")
+    assert key.endswith("/Does it work- -1 at 50-.m4a")
+    assert not any(char in key for char in "?#%")
 
 
 def _structure():
