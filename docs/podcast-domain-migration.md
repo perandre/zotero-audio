@@ -1,35 +1,30 @@
 # Moving the public podcast domain
 
-The podcast's public files stay in the existing `mere-podcast-feed` R2 bucket. The
-new site serves that bucket under `https://perandre.no/1mp/`; no audio files are
-re-encoded or copied during the domain move. The publication manifest remains
+The podcast lives at `https://1morepaper.com/`. Its public files remain in the
+existing `mere-podcast-feed` R2 bucket. The site's Worker serves that bucket;
+audio files are neither re-encoded nor copied. The publication manifest remains
 private on the Mac. Sanity is not involved in feeds, show notes, or media.
 
-## Cutover order
+The private `podcast.toml` uses:
 
-1. Deploy the `perandre.no` Worker with its `PODCAST_BUCKET` binding. Confirm that
-   `/1mp/`, both feed paths, show artwork, one episode page, `HEAD` audio, and a
-   one-byte audio range request all work on the final hostname.
-2. In the private `podcast.toml`, set `base_url = "https://perandre.no/1mp"` and
-   `previous_feed_base_url = "https://feed.mere.no"`. Keep the existing R2 bucket.
-3. Preview the migration:
+```toml
+base_url = "https://1morepaper.com"
+previous_feed_base_url = "https://perandre.no/1mp"
+```
 
-   ```sh
-   python scripts/migrate_podcast_domain.py \
-     --config /Users/pesh/Sites/zotero-audio-runtime/podcast.toml \
-     --old-base https://feed.mere.no
-   ```
+The September 2026 migration updated the manifest and both RSS feeds with:
 
-4. When the new origin passes the checks, rerun with `--apply --sync`. This backs
-   up the local manifest and both feeds, preserves episode GUIDs, publication
-   dates, byte lengths, and immutable media keys, then uploads only the two
-   updated RSS files. Paired-edition links also use the readable show-note URLs.
-   The new feeds include `itunes:new-feed-url`.
-5. Configure HTTP 301 redirects from the two old feed paths to their new paths.
-   Keep the old media hostname working for old app caches and bookmarks. Verify
-   the new feeds in podcast directories and keep the redirect and feed tag for
-   at least four weeks.
+```sh
+python scripts/migrate_podcast_domain.py \
+  --config /Users/pesh/Sites/zotero-audio-runtime/podcast.toml \
+  --old-base https://perandre.no/1mp --apply --sync
+```
 
-The migration can be previewed repeatedly. It changes only public URL fields in
-the manifest and regenerated feeds. Local private audio and research Markdown are
-untouched. Future publications use the new `base_url` automatically.
+The command backs up the local manifest and feeds, preserves episode GUIDs,
+publication dates, byte lengths, and immutable media keys, and uploads only the
+two revised RSS files. The feeds include `itunes:new-feed-url` pointing to the
+new domain. Future publications use the configured `base_url` automatically.
+
+The personal site redirects former `/1mp/` pages and RSS paths to the new site
+and keeps old audio URLs available. The `feed.mere.no` Worker redirects its two
+RSS paths to the new feeds and continues serving old media URLs for app caches.

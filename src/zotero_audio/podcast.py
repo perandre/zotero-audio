@@ -56,7 +56,8 @@ def paper_slug(title: str, paper_id: str) -> str:
 
 def public_episode_page_url(base_url: str, title: str, paper_id: str, edition: str) -> str:
     base = base_url.rstrip("/")
-    if urllib.parse.urlsplit(base).path.rstrip("/") == "/1mp":
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.path.rstrip("/") == "/1mp" or parsed.hostname == "1morepaper.com":
         return f"{base}/papers/{paper_slug(title, paper_id)}/{edition}"
     return f"{base}/papers/{paper_id}/{edition}/index.html"
 
