@@ -129,6 +129,15 @@ def parser():
     root = argparse.ArgumentParser(prog="za", description="1 More Paper — saved Zotero research, readable Markdown, optional audio.")
     root.add_argument("--json", action="store_true", help="Machine-readable output")
     sub = root.add_subparsers(dest="command")
+    research = sub.add_parser("research-fit", help="Classify Zotero research relevance without changing Zotero or publication")
+    research.add_argument("action", choices=("run", "enrich", "status", "list", "export", "override"))
+    research.add_argument("--limit", type=int)
+    research.add_argument("--workers", type=int, default=4)
+    research.add_argument("--retry-failed", action="store_true")
+    research.add_argument("--label", choices=("poor", "moderate", "good", "excellent"))
+    research.add_argument("--item-key")
+    research.add_argument("--output", type=Path)
+    research.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     for name in ("list", "search", "open", "review"):
         command = sub.add_parser(name)
         command.add_argument("query", nargs="?")
@@ -203,6 +212,57 @@ def main(argv=None):
         if command == "serve":
             from .app_server import serve
             serve(store, args.port)
+            return 0
+        if command == "research-fit":
+            from . import app_research as research
+            if args.action == "enrich":
+                import fcntl
+                from .zotero_local import ZoteroLocalAPI
+                with (store.root / "research-fit.lock").open("a") as lock:
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        raise ValueError("A research-fit job is already running") from None
+                    records = research.discover(ZoteroLocalAPI(timeout=15))
+                    research.prepare(store, records)
+                    research.enrich(store, records, limit=args.limit,
+                                    progress=(lambda _: None) if args.json else lambda text: print(text, flush=True))
+                    emit(research.summary(store), args.json)
+                return 0
+            if args.action == "run":
+                result = research.run(store, limit=args.limit, workers=args.workers,
+                                      retry_failed=args.retry_failed,
+                                      progress=(lambda _: None) if args.json else lambda text: print(text, flush=True))
+                emit(result, args.json)
+                return 1 if result["statuses"]["failed"] else 0
+            if args.action == "status":
+                emit(research.summary(store), args.json)
+            elif args.action == "export":
+                emit(research.export_csv(store, args.output or store.root / "research-fit.csv"), args.json)
+            elif args.action == "override":
+                if not args.item_key or not args.label:
+                    raise ValueError("Supply --item-key and --label for a manual override")
+                items = [i for i in research.rows(store) if i["item_key"] == args.item_key]
+                if len(items) != 1:
+                    raise ValueError("Use an item key returned by research-fit list")
+                item = items[0]
+                from .app_state import now
+                with store.db() as db:
+                    db.execute("INSERT OR REPLACE INTO research_overrides VALUES (?,?,?,?,?)",
+                               (item["library_id"], item["item_key"], item["profile_hash"], args.label, now()))
+                emit({"title": item["title"], "label": args.label, "model_result_preserved": True}, args.json)
+            else:
+                items = research.rows(store)
+                if args.label:
+                    items = [i for i in items if i["label"] == args.label]
+                items.sort(key=lambda i: (-(research.LABELS.index(i["label"]) if i["label"] else -1), -(i["confidence"] or 0), i["title"]))
+                if args.limit:
+                    items = items[:args.limit]
+                if args.json:
+                    emit({"items": items}, True)
+                else:
+                    for item in items:
+                        print(f"{item['title']}\n  {item['label'] or item['status']} · {item['coverage']} · {item['item_key']}" + (" · needs review" if item["needs_review"] else ""))
             return 0
         if command == "mcp":
             from .app_mcp import main as mcp_main
