@@ -45,7 +45,7 @@ def evaluate_attachment(attachment: dict[str, Any], fields: dict[str, Any], *,
         return result | resolve_license(cached, source_sha256=checksum)
     # A prior checksum-bound PDF assessment survives metadata edits. A cached
     # parent-item assertion does not: removing Rights must remove that evidence.
-    if record is None and cached.get("content_version") == "local-pdf-license-v1":
+    if record is None and cached.get("content_version") in {"local-pdf-license-v1", "reviewed-source-license-v1"}:
         record = cached
     if record is None:
         pdf = _pdf_metadata(bundles, attachment["key"], checksum)

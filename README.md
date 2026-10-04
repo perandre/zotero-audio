@@ -112,6 +112,14 @@ Importing existing files or refreshing metadata never selects old output for pub
 Private and unverified material remains available for local listening and
 private research access.
 
+Manually reviewed publisher or repository license evidence can be retained as
+`reviewed-source-license-v1` records in the bundle's `generation.json` and the
+runtime's license-evidence cache. Records identify the exact source PDF hash,
+verified license, evidence and reading URLs. Discovery and generation reuse them
+when Zotero Rights is empty; replacement PDFs, explicit restrictive rights,
+conflicts and embargoes still block publication. Reclassification alone does
+not select additional audio editions.
+
 ## Storage and privacy
 
 | Location | Contents |

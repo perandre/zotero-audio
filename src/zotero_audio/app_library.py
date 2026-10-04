@@ -200,7 +200,7 @@ def _refresh_zotero(store: Store) -> dict:
             # evidence. Never reuse a parent assertion or evidence for old bytes.
             from .podcast import resolve_license
             evidence = read_json(Path(previous["bundle"]) / "generation.json").get("license_record") or {}
-            if evidence.get("content_version") == "local-pdf-license-v1" and resolve_license(evidence, source_sha256=source_sha).get("allowed"):
+            if evidence.get("content_version") in {"local-pdf-license-v1", "reviewed-source-license-v1"} and resolve_license(evidence, source_sha256=source_sha).get("allowed"):
                 license_status = "open"
         changed = bool(previous.get("source_sha256") and source_sha != previous["source_sha256"])
         article = {**previous, "id": key, "title": title, "authors": metadata.get("authors", previous.get("authors", [])),

@@ -349,6 +349,11 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
         if rights:
             license_record = license_record_from_metadata({**original["document"], "rights": rights, "rights_source": rights_source}, source_sha)
             license_record["content_version"] = "local-pdf-license-v1"
+    if license_record is None:
+        reviewed = _read_json(bundle / "generation.json").get("license_record") or {}
+        if (reviewed.get("content_version") == "reviewed-source-license-v1"
+                and resolve_license(reviewed, source_sha256=source_sha).get("allowed")):
+            license_record = reviewed
     if license_record and metadata.get("source_sha256") and metadata["source_sha256"] != source_sha:
         license_record["conflict"] = True
     license_result = resolve_license(license_record, source_sha256=source_sha)
