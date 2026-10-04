@@ -247,7 +247,8 @@ def test_existing_audio_is_not_selected_for_publication_when_filling_another_edi
     assert audio.read_bytes() == b'existing finished audio'
 
 
-def test_refresh_preserves_only_current_pdf_license_evidence(catalog):
+@pytest.mark.parametrize('content_version', ['local-pdf-license-v1', 'reviewed-source-license-v1'])
+def test_refresh_preserves_only_current_pdf_license_evidence(catalog, content_version):
     import json
     store, source, monitor = catalog
     store.update_settings({'auto_generate': 'off'})
@@ -258,7 +259,7 @@ def test_refresh_preserves_only_current_pdf_license_evidence(catalog):
     bundle.mkdir(parents=True)
     record = {'source_sha256': article['source_sha256'], 'license_url': 'CC BY 4.0',
               'read_url': 'https://example.org/paper', 'evidence_sha256': 'e' * 64,
-              'content_version': 'local-pdf-license-v1'}
+              'content_version': content_version}
     (bundle / 'generation.json').write_text(json.dumps({'license_record': record}))
     monitor.cycle()
     assert store.article('NEWPAPER')['license_status'] == 'open'

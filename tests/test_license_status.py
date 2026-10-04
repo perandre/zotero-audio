@@ -54,6 +54,23 @@ def test_deleted_metadata_does_not_reuse_old_parent_assertion(case):
     assert evaluate_library(request, **paths)["items"][0]["status"] == "blocked"
 
 
+def test_reviewed_evidence_survives_empty_rights_but_not_restrictions_or_new_pdf(case):
+    request, paths, pdf = case
+    fields = request['items'][0]['fields']
+    fields['rights'] = ''
+    atomic_write_json(paths['evidence'] / f'{sha256_file(pdf)}.json', {'record': {
+        'source_sha256': sha256_file(pdf), 'license_url': 'CC BY 4.0',
+        'evidence_url': 'https://example.org/paper/license', 'read_url': 'https://example.org/paper',
+        'content_version': 'reviewed-source-license-v1',
+    }})
+    assert evaluate_library(request, **paths)['items'][0]['status'] == 'pass'
+    fields['rights'] = 'All rights reserved'
+    assert evaluate_library(request, **paths)['items'][0]['status'] == 'blocked'
+    fields['rights'] = ''
+    pdf.write_bytes(b'replacement PDF')
+    assert evaluate_library(request, **paths)['items'][0]['status'] == 'blocked'
+
+
 @pytest.mark.parametrize("flag", ["embargoed", "conflict"])
 def test_metadata_cannot_clear_a_recorded_restriction(case, flag):
     request, paths, pdf = case

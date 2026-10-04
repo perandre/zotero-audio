@@ -352,6 +352,35 @@ def test_license_recheck_preserves_markdown_and_finished_audio_cache(bundle, ass
     assert Path(second['markdown']).read_bytes() == before_md
 
 
+@pytest.mark.parametrize('restriction', [None, 'wrong-source', 'conflict', 'embargoed', 'explicit-rights'])
+def test_reviewed_license_reuses_finished_audio_without_relaxing_restrictions(bundle, assemblies, monkeypatch, restriction):
+    structure = json.loads((bundle / 'structure.json').read_text())
+    structure['document'].pop('rights')
+    atomic_write_json(bundle / 'structure.json', structure)
+    monkeypatch.setattr(generation, 'source_pdf_rights', lambda *args: (None, None))
+    first = generation.process_article(bundle, mode='both', backend=Backend())
+    before_audio = {e: r['audio_sha256'] for e, r in first['editions'].items()}
+    before_md = Path(first['markdown']).read_bytes()
+    calls = len(assemblies)
+    record = {'content_version': 'reviewed-source-license-v1',
+              'source_sha256': structure['source']['sha256'], 'license_url': 'CC BY 4.0',
+              'evidence_url': 'https://example.org/license', 'read_url': 'https://example.org/paper'}
+    if restriction == 'wrong-source':
+        record['source_sha256'] = '0' * 64
+    elif restriction in {'conflict', 'embargoed'}:
+        record[restriction] = True
+    saved = json.loads((bundle / 'generation.json').read_text())
+    saved['license_record'] = record
+    atomic_write_json(bundle / 'generation.json', saved)
+    metadata = {'rights': 'All rights reserved'} if restriction == 'explicit-rights' else {}
+    second = generation.process_article(bundle, mode='both', backend=Backend(), metadata=metadata)
+    assert second['public_eligible'] is (restriction is None)
+    if restriction != 'explicit-rights':
+        assert {e: r['audio_sha256'] for e, r in second['editions'].items()} == before_audio
+        assert len(assemblies) == calls
+    assert Path(second['markdown']).read_bytes() == before_md
+
+
 def test_ieee_abstract_overrides_stale_introduction_metadata(bundle):
     original = generation._read_json(bundle / 'structure.json')
     original['document']['abstract'] = 'Wrong introduction from stale extraction.'
