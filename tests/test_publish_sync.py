@@ -40,6 +40,8 @@ def test_feeds_are_last_and_failed_upload_never_updates_feed(tmp_path, monkeypat
     calls = []
     monkeypatch.setattr("shutil.which", lambda name: "/bin/npx")
     def run(command, **kwargs):
+        assert command[:6] == ["/bin/npx", "--yes", "wrangler@4.145.0", "r2", "object", "put"]
+        assert kwargs["check"] is True
         calls.append(command[6])
     monkeypatch.setattr(subprocess, "run", run)
     state = tmp_path / "state.json"
