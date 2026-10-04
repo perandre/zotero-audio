@@ -231,6 +231,11 @@ establish phone-client compatibility or workspace permission.
 
 ## PhD project workspace
 
+For local library-wide relevance classification against the HiØF v4 research
+scope, use `za research-fit run`. Results are resumable, cached and independently
+reviewable with `za research-fit list`, `status` and `export`. See
+[research fit setup, inputs and storage](docs/research-fit.md).
+
 The same MCP can browse, read and search the private VIKING PhD project,
 including `NOW.md`, `PROJECT.md`, methods, drafts and source PDFs. `whats_next`
 reads `NOW.md` and also `NEXT.md` when present. Project files are reference data;
