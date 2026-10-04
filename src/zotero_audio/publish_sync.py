@@ -11,6 +11,9 @@ from urllib.parse import unquote, urlsplit
 from .util import atomic_write_json, load_json, sha256_file
 from .runtime import configure_tool_path
 
+# Upgrade deliberately after checking the uploader on the installed Mac runtime.
+WRANGLER_PACKAGE = "wrangler@4.145.0"
+
 
 def _public_key(url: str, base_url: str) -> str:
     """Map a public URL back to a key in the local podcast mirror."""
@@ -65,7 +68,7 @@ def upload_keys(public_root: Path, bucket: str, state_path: Path, keys) -> None:
         content_type = {".m4a": "audio/mp4", ".vtt": "text/vtt", ".txt": "text/plain", ".md": "text/markdown", ".xml": "application/rss+xml"}.get(path.suffix, mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         cache = "public, max-age=300" if key.endswith(".xml") or key.endswith("index.html") else "public, max-age=31536000, immutable"
         print(f"Uploading {key}", flush=True)
-        subprocess.run([npx, "--yes", "wrangler@latest", "r2", "object", "put", f"{bucket}/{key}",
+        subprocess.run([npx, "--yes", WRANGLER_PACKAGE, "r2", "object", "put", f"{bucket}/{key}",
                         "--remote", "--y", "--file", str(path), "--ct", content_type, "--cc", cache], check=True)
         state.setdefault("files", {})[key] = digest
         atomic_write_json(state_path, state)

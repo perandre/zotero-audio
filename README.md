@@ -133,6 +133,12 @@ private text with that client. Public podcast files remain in a separate bucket.
 Backup, iCloud cloud synchronization and publication retries never roll back
 completed local generation.
 
+The podcast uploader pins Wrangler to `4.145.0` instead of automatically installing
+the latest release. Upgrades require an explicit code change and verification on
+the Mac. If npm's uploader installation is damaged, repair that exact version
+with its optional platform dependencies, then restart with `za restart`; pending
+deliveries reuse finished audio and retry without generation.
+
 ## Install and iterate on this Mac
 
 Requirements: Apple silicon macOS, Python 3.11+, FFmpeg, macOS `afconvert`, Zotero
