@@ -29,9 +29,25 @@ def test_podcast_cover_copies_the_supplied_square_asset(tmp_path: Path):
     for edition, source in PODCAST_COVER_PATHS.items():
         destination = tmp_path / f"{edition}.png"
         copy_podcast_cover(destination, edition=edition)
-        assert sha256_file(destination) == sha256_file(source)
         with Image.open(destination) as image:
-            assert image.width == image.height and image.width >= 1200
+            assert image.width == image.height and 1400 <= image.width <= 3000
+            assert image.mode == "RGB"
+        first_hash = sha256_file(destination)
+        copy_podcast_cover(destination, edition=edition)
+        assert sha256_file(destination) == first_hash
         manifest = load_json(destination.with_suffix(".artwork.json"))
         assert manifest["generation"] == "user-supplied-static"
         assert manifest["edition"] == edition and manifest["sha256"] == sha256_file(destination)
+
+
+def test_show_cover_flattens_transparency_without_changing_source(tmp_path, monkeypatch):
+    source = tmp_path / "source.png"
+    Image.new("RGBA", (1500, 1500), (255, 0, 0, 0)).save(source)
+    source_hash = sha256_file(source)
+    monkeypatch.setitem(PODCAST_COVER_PATHS, "brief", source)
+    destination = tmp_path / "published.png"
+    copy_podcast_cover(destination, edition="brief")
+    assert sha256_file(source) == source_hash
+    with Image.open(destination) as image:
+        assert image.size == (1500, 1500) and image.mode == "RGB"
+        assert image.getpixel((0, 0)) == (242, 239, 230)
