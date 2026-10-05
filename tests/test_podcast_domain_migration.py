@@ -56,3 +56,28 @@ def test_future_publications_use_site_notes_without_changing_legacy_pages():
     assert public_episode_page_url("https://feed.mere.no", "A useful paper — Author (2026)", paper_id, "full") == (
         f"https://feed.mere.no/papers/{paper_id}/full/index.html"
     )
+    assert public_episode_page_url("https://1morepaper.com", "A useful paper — Author (2026)", paper_id, "full") == (
+        "https://1morepaper.com/papers/a-useful-paper-fc90460f/full"
+    )
+
+
+def test_move_from_personal_site_to_podcast_domain_keeps_guid_and_media_key():
+    old = "https://perandre.no/1mp"
+    new = "https://1morepaper.com"
+    original = {
+        "title": "A useful paper — Author (2026)",
+        "guid": "urn:uuid:episode-1", "paper_guid": "fc90460f-d7e7-57c8-a135-81312cb5706b",
+        "edition": "brief", "pub_date": "2026-09-01T12:00:00Z", "bytes": 1234,
+        "audio_url": f"{old}/episodes/immutable/audio.m4a",
+        "page_url": f"{old}/papers/a-useful-paper-fc90460f/brief",
+        "paired_url": f"{old}/papers/a-useful-paper-fc90460f/full",
+        "show_notes": f"Paired edition: {old}/papers/a-useful-paper-fc90460f/full",
+    }
+    migrated = migrate_record(original, old, new)
+    assert migrated["guid"] == original["guid"]
+    assert migrated["pub_date"] == original["pub_date"]
+    assert migrated["bytes"] == original["bytes"]
+    assert migrated["audio_url"] == f"{new}/episodes/immutable/audio.m4a"
+    assert migrated["page_url"] == f"{new}/papers/a-useful-paper-fc90460f/brief"
+    assert migrated["paired_url"] == f"{new}/papers/a-useful-paper-fc90460f/full"
+    assert migrated["paired_url"] in migrated["show_notes"]

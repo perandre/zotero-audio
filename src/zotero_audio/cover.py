@@ -21,7 +21,7 @@ PALETTE = {"paper": "#F2EFE6", "ink": "#16212B", "brief": "#2F5BD3", "full": "#D
 
 
 def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
-    """Copy the user-supplied edition cover to a generated artifact path."""
+    """Preserve the supplied design in Apple-compatible, opaque show artwork."""
     if destination.suffix.casefold() != ".png":
         raise ValueError("podcast cover destination must be .png")
     try:
@@ -36,8 +36,24 @@ def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
     with Image.open(source) as image:
         if image.width != image.height:
             raise ValueError("podcast cover must be square")
+        compatible = 1400 <= image.width <= 3000 and image.mode == "RGB"
+        if not compatible:
+            if destination.resolve() == source.resolve():
+                raise ValueError("normalized cover destination must differ from source")
+            rgba = image.convert("RGBA")
+            normalized = Image.new("RGB", image.size, PALETTE["paper"])
+            normalized.paste(rgba, mask=rgba.getchannel("A"))
+            if not 1400 <= image.width <= 3000:
+                normalized = normalized.resize((3000, 3000), Image.Resampling.LANCZOS)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.resolve() != source.resolve() and (
+    if not compatible:
+        temporary = destination.with_suffix(".tmp.png")
+        normalized.save(temporary, format="PNG")
+        if not destination.is_file() or sha256_file(temporary) != sha256_file(destination):
+            temporary.replace(destination)
+        else:
+            temporary.unlink()
+    elif destination.resolve() != source.resolve() and (
         not destination.is_file() or sha256_file(destination) != sha256_file(source)
     ):
         shutil.copyfile(source, destination)

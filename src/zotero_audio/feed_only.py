@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .audio import inspect_m4a
 from .cover import copy_podcast_cover
@@ -247,7 +248,7 @@ def publish_existing_audio(config, *, batch_manifest_path: Path | None = None) -
             "pub_date": candidate.get("pub_date") or published_at,
             "audio_url": _artifact_url(publisher, audio, prefix),
         }
-        if config.base_url.rstrip("/").endswith("/1mp"):
+        if config.base_url.rstrip("/").endswith("/1mp") or urlsplit(config.base_url).hostname == "1morepaper.com":
             record["page_url"] = public_episode_page_url(
                 config.base_url, record["title"], paper_guid, record["edition"]
             )
