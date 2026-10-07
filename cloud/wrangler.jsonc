@@ -6,6 +6,12 @@
   "compatibility_date": "2026-09-10",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
+  // Retire only the obsolete public website cache queue from the name collision.
+  // The website now owns its queue on one-more-paper-web; PhD uses D1/R2/KV.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DOQueueHandler"] },
+    { "tag": "v2-restore-phd", "deleted_classes": ["DOQueueHandler"] },
+  ],
   "minify": true,
   "assets": {
     "directory": "./public",
