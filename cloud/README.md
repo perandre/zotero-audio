@@ -25,6 +25,19 @@ Integration tests require the local server at `http://127.0.0.1:8797`, read `.de
 
 ## Deployment and free-plan boundaries
 
+The Worker name `one-more-paper` and its `workers.dev` hostname are reserved
+for this private service. The public `www.1morepaper.com` website deploys from
+`perandre.no/podcast` as `one-more-paper-web`. Reusing the private Worker's name
+replaces MCP and OAuth routes with the website and breaks connected clients.
+
+Recovery on 2026-10-07 moved the public website and its route to that separate
+Worker. The `v2-restore-phd` migration retires only the obsolete OpenNext
+`DOQueueHandler` namespace left on this Worker by the website deployment.
+It discards old website cache-revalidation work, not research documents or
+audio jobs. The website must be moved first, with its own queue. Existing
+PhD D1, R2, OAuth KV bindings and Worker secrets must be preserved. Do not
+roll back to a website version of this Worker.
+
 Provision the `one-more-paper-library` D1 database and private R2 Standard bucket, plus an `OAUTH_KV` namespace. Fill the returned IDs in `wrangler.jsonc`. Keep R2 public development URL and public custom domains disabled. The existing public podcast bucket stays separate. Apply D1 migrations before deploying, then add the three Worker secrets using Wrangler’s secure stdin/file input. No paid plan upgrade is required or configured.
 
 ```sh
