@@ -244,5 +244,6 @@ Editable research Markdown has one runtime-wide home in `papers/`; SQLite
 catalog entries point directly to those files, and `papers/index.json` supports
 AI listing and metadata filtering. Article bundles contain extraction structure,
 QA and generation state, while immutable delivery snapshots remain under
-`control/artifacts/`. Startup consolidates catalogued legacy Markdown without
-discarding conflicts or changing document contents.
+`control/artifacts/`. Startup imports existing output and consolidates
+catalogued, full-library and report-pilot Markdown without discarding conflicts
+or changing document contents.

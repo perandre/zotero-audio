@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from zotero_audio.app_library import migrate_catalog_markdown
 from zotero_audio.app_state import Store
@@ -39,3 +40,21 @@ def test_filename_collision_adds_stable_key_suffix(tmp_path):
     collided = canonical_path(root, second)
     assert collided != path
     assert collided.name.endswith("[B2].md")
+
+
+def test_pilot_bundle_is_added_to_flat_searchable_library(tmp_path):
+    store = Store(tmp_path / "runtime")
+    bundle = store.runtime / "industry-reports-pilot" / "bundles" / "A report [PILOT01]"
+    bundle.mkdir(parents=True)
+    (bundle / "metadata.json").write_text(json.dumps({"zotero_key": "PILOT01", "title": "A report",
+        "authors": ["Rae Researcher"], "publication_year": 2025, "doi": "10.1234/pilot"}))
+    (bundle / "structure.json").write_text(json.dumps({"document": {"title": "A report", "authors": ["Rae Researcher"],
+        "publication_year": 2025}, "source": {"zotero_key": "PILOT01"}}))
+    (bundle / "article.md").write_text("# A report\n\nPilot findings.\n")
+
+    assert migrate_catalog_markdown(store) == 1
+    article = store.article("PILOT01")
+    assert Path(article["markdown"]).parent == store.runtime / "papers"
+    assert store.search("Pilot findings")['results'][0]['id'] == "PILOT01"
+    index = json.loads((store.runtime / "papers" / "index.json").read_text())
+    assert index["articles"]["PILOT01"]["doi"] == "10.1234/pilot"
