@@ -504,7 +504,7 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                 "paper_title": title, "authors": authors, "author_label": spoken_authors(authors),
                 "publication_year": structure["document"].get("publication_year"),
                 "audio": str(audio_path), "audio_sha256": sha256_file(audio_path), "duration": duration,
-                "markdown": str(md_path), "markdown_sha256": result["markdown_sha256"],
+                "markdown": str(bundle_markdown_path), "markdown_sha256": result["markdown_sha256"],
                 "source_sha256": source_sha, "source_license": license_result, "public_eligible": result["public_eligible"],
                 "license_record": license_record,
                 "selected": selected, "plan_sha256": plan["plan_sha256"], "assembly_sha256": fingerprint,
