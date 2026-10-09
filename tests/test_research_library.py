@@ -21,6 +21,7 @@ def test_catalog_migration_preserves_markdown_and_records_metadata(tmp_path):
     saved = Path(article["markdown"])
     assert saved.parent == store.runtime / "papers"
     assert saved.read_text() == "# Research title\n\nManual edits stay here.\n"
+    assert source.is_symlink() and source.resolve() == saved.resolve()
     assert store.search("Manual edits")['results'][0]['id'] == "PAPER1"
     assert canonical_path(store.runtime / "papers", article) == saved
     index = (store.runtime / "papers" / "index.json").read_text()
@@ -58,3 +59,28 @@ def test_pilot_bundle_is_added_to_flat_searchable_library(tmp_path):
     assert store.search("Pilot findings")['results'][0]['id'] == "PILOT01"
     index = json.loads((store.runtime / "papers" / "index.json").read_text())
     assert index["articles"]["PILOT01"]["doi"] == "10.1234/pilot"
+    assert all(path.is_symlink() for path in bundle.glob("*.md"))
+
+
+def test_conflicting_legacy_copy_is_linked_to_preserved_revision(tmp_path):
+    store = Store(tmp_path / "runtime")
+    root = store.runtime / "papers"
+    article = {"id": "SAMEKEY", "title": "Same title", "authors": ["Ada Author"], "year": 2024}
+    canonical = canonical_path(root, article)
+    canonical.write_text("Catalogued version")
+    store.put_article({**article, "markdown": str(canonical), "markdown_status": "ready"}, markdown="Catalogued version")
+    bundle = store.runtime / "full-library" / "bundles" / "Same title [SAMEKEY]"
+    bundle.mkdir(parents=True)
+    (bundle / "metadata.json").write_text(json.dumps({"zotero_key": "SAMEKEY", "title": "Same title",
+        "authors": ["Ada Author"], "publication_year": 2024}))
+    (bundle / "structure.json").write_text(json.dumps({"document": {"title": "Same title", "authors": ["Ada Author"],
+        "publication_year": 2024}}))
+    legacy = bundle / "Same title - Author (2024).md"
+    legacy.write_text("Different legacy version")
+
+    migrate_catalog_markdown(store)
+    assert legacy.is_symlink()
+    assert legacy.read_text() == "Different legacy version"
+    idx = json.loads((root / "index.json").read_text())['articles']["SAMEKEY"]
+    assert len(idx["conflicts"]) == 1
+    assert (root / idx["conflicts"][0]).read_text() == "Different legacy version"

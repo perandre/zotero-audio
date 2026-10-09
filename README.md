@@ -149,8 +149,10 @@ content hash and any preserved revisions. Existing edits remain authoritative.
 Startup imports available full-library output and consolidates catalogued,
 full-library and report-pilot Markdown. When two different files claim the same
 Zotero key, the catalogued version stays canonical and the other is kept as a
-clearly named revision. Generation bundles, audio editions and immutable
-delivery snapshots remain separate from this editable library.
+clearly named revision. Old bundle paths remain as links to the canonical file
+or preserved revision, so existing generation records continue to resolve.
+Generation state, audio editions and immutable delivery snapshots remain
+separate from this editable library.
 
 The podcast uploader pins Wrangler to `4.145.0` instead of automatically installing
 the latest release. Upgrades require an explicit code change and verification on

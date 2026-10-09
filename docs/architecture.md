@@ -246,4 +246,5 @@ AI listing and metadata filtering. Article bundles contain extraction structure,
 QA and generation state, while immutable delivery snapshots remain under
 `control/artifacts/`. Startup imports existing output and consolidates
 catalogued, full-library and report-pilot Markdown without discarding conflicts
-or changing document contents.
+or changing document contents. Legacy bundle paths are compatibility links to
+the canonical file or a preserved conflict revision.
