@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from zotero_audio.app_library import migrate_catalog_markdown
 from zotero_audio.app_state import Store
@@ -41,6 +42,50 @@ def test_filename_collision_adds_stable_key_suffix(tmp_path):
     collided = canonical_path(root, second)
     assert collided != path
     assert collided.name.endswith("[B2].md")
+
+
+def test_concurrent_producers_keep_all_index_entries(tmp_path):
+    from zotero_audio.research_library import write_research_markdown
+    root = tmp_path / "papers"
+    articles = [{"id": f"K{i}", "title": f"Research {i}", "authors": ["Author"], "year": 2025}
+                for i in range(12)]
+    def produce(article):
+        path = write_research_markdown(root, article, f"# {article['title']}\n")
+        return path
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        paths = list(pool.map(produce, articles))
+    index = json.loads((root / "index.json").read_text())["articles"]
+    assert len(index) == 12
+    assert all(path.is_file() for path in paths)
+    assert {row["path"] for row in index.values()} == {path.name for path in paths}
+
+
+def test_legacy_extraction_writer_uses_canonical_runtime_store(tmp_path, monkeypatch):
+    from zotero_audio.extract import write_extraction
+    monkeypatch.setenv("ZOTERO_AUDIO_RUNTIME", str(tmp_path / "runtime"))
+    bundle = tmp_path / "outputs" / "one-paper"
+    structure = {"document": {"title": "CLI generated paper", "authors": ["Lee Author"],
+                               "publication_year": 2024},
+                 "source": {"sha256": "b" * 64}}
+    result = write_extraction(bundle, structure, "# CLI generated paper\n")
+    assert result.parent == tmp_path / "runtime" / "papers"
+    assert not list(bundle.glob("*.md"))
+    assert (tmp_path / "runtime" / "papers" / "index.json").exists()
+
+
+def test_changed_source_title_renames_existing_manual_research_text(tmp_path):
+    from zotero_audio.research_library import research_path, write_research_markdown
+    root = tmp_path / "papers"
+    bundle = tmp_path / "bundle"
+    first = {"id": "TITLE01", "title": "Provisional title", "authors": ["A Author"], "year": 2024}
+    path = write_research_markdown(root, first, "# Author's hand edits\n")
+    renamed = research_path(root, bundle, {**first, "title": "Final published title"},
+                            provenance="metadata-refresh")
+    assert renamed.name.startswith("Final published title")
+    assert renamed.read_text() == "# Author's hand edits\n"
+    index = json.loads((root / "index.json").read_text())["articles"]["TITLE01"]
+    assert index["path"] == renamed.name
+    assert path.is_symlink() and path.resolve() == renamed.resolve()
 
 
 def test_pilot_bundle_is_added_to_flat_searchable_library(tmp_path):
