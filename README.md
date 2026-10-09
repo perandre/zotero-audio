@@ -146,10 +146,11 @@ The editable research library is one flat directory at
 author label and year; a Zotero key is added only when filenames collide. The
 generated `index.json` records title, authors, year, DOI, Zotero key, provenance,
 content hash and any preserved revisions. Existing edits remain authoritative.
-When two different files claim the same Zotero key, the catalogued version stays
-canonical and the other is kept as a clearly named revision. Generation bundles,
-audio editions and immutable delivery snapshots remain separate from this
-editable library.
+Startup imports available full-library output and consolidates catalogued,
+full-library and report-pilot Markdown. When two different files claim the same
+Zotero key, the catalogued version stays canonical and the other is kept as a
+clearly named revision. Generation bundles, audio editions and immutable
+delivery snapshots remain separate from this editable library.
 
 The podcast uploader pins Wrangler to `4.145.0` instead of automatically installing
 the latest release. Upgrades require an explicit code change and verification on

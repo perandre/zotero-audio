@@ -97,6 +97,7 @@ class LocalWorker:
     def start(self):
         from .app_zotero import ZoteroMonitor
         self.store.recover()
+        import_existing(self.store)
         migrate_catalog_markdown(self.store)
         monitor = ZoteroMonitor(self.store, self.stop)
         for target, name in ((self.run, "generation"), (self.deliver, "delivery"), (monitor.run, "zotero-discovery")):

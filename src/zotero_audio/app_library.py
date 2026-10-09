@@ -147,6 +147,43 @@ def migrate_catalog_markdown(store: Store) -> int:
                 with store.edit_article(article["id"], markdown=markdown_text) as current:
                     current.update({"markdown": str(target), "markdown_sha256": article["markdown_sha256"]})
                 migrated += 1
+    legacy_roots = ((store.runtime / "full-library" / "bundles", "full-library-migration"),
+                    (store.runtime / "industry-reports-pilot" / "bundles", "industry-reports-pilot"))
+    for legacy_root, provenance in legacy_roots:
+        for bundle in sorted(p for p in legacy_root.iterdir() if p.is_dir()) if legacy_root.is_dir() else []:
+            metadata = read_json(bundle / "metadata.json")
+            structure = read_json(bundle / "structure.json")
+            document = structure.get("document", {})
+            key = metadata.get("zotero_key") or structure.get("zotero_key") or structure.get("source", {}).get("zotero_key")
+            if not key:
+                match = re.search(r"\[([A-Z0-9]+)\]$", bundle.name)
+                key = match.group(1) if match else None
+            if not key:
+                continue
+            descriptor = {**document, **metadata, "id": key, "zotero_key": key,
+                          "title": metadata.get("title") or document.get("title") or bundle.name,
+                          "authors": metadata.get("authors") or document.get("authors") or [],
+                          "year": metadata.get("publication_year") or document.get("publication_year"),
+                          "metadata": metadata}
+            source = research_markdown_path(bundle, descriptor, migrate=True)
+            if not source.is_file():
+                continue
+            target = adopt_research_markdown(store.runtime / "papers", descriptor, source, provenance=provenance)
+            try:
+                existing = store.article(str(key))
+            except KeyError:
+                existing = {}
+            current_path = Path(existing["markdown"]) if existing.get("markdown") else None
+            if current_path and current_path.is_file():
+                register_research_markdown(store.runtime / "papers", existing, current_path, provenance="catalog-migration")
+                continue
+            article = {**existing, **descriptor, "id": str(key), "source_url": metadata.get("url") or metadata.get("doi"),
+                       "bundle": str(bundle), "markdown": str(target), "markdown_sha256": sha256_file(target),
+                       "markdown_status": "ready", "audio_status": existing.get("audio_status", "not_started"),
+                       "license_status": existing.get("license_status", "private"),
+                       "artifacts": {**existing.get("artifacts", {}), "markdown": True}}
+            store.put_article(article, markdown=target.read_text(encoding="utf-8"))
+            migrated += 1
     return migrated
 
 
