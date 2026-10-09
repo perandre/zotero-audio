@@ -47,6 +47,11 @@ Unqualified Python filenames above live under `src/zotero_audio/`.
 - Existing research Markdown is authoritative. Preserve edits unless the caller
   explicitly requests regeneration. Keep references/URLs in research Markdown;
   remove narration distractions from the separate speech text.
+- All research Markdown producers (app generation, direct generation APIs,
+  imports, batch jobs, and legacy CLI commands) write to the runtime's single
+  `papers/` directory. The library index and SQLite catalog point to those same
+  files; historical bundle paths may be compatibility symlinks. Immutable
+  delivery snapshots remain separate in `control/artifacts/`.
 - Zotero integration normally uses the supported local GET API. Do not mutate
   source PDFs or substitute internal database reads as the normal discovery path.
 - A finished Markdown file is useful independently of audio. Publish/sync each

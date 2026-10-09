@@ -8,6 +8,8 @@ from .extract import bundle_name, extract_pdf, render_markdown, write_extraction
 from .segment import create_speech_plan
 from .util import atomic_write_json, load_json
 from .zotero import bundle_metadata_snapshot
+from .app_state import runtime_root
+from .research_library import link_legacy_path, research_path
 
 
 def prepare_bundle(
@@ -33,7 +35,10 @@ def prepare_bundle(
             raise RuntimeError(f"Multiple bundles found for Zotero key {zotero_key}")
     structure_path = bundle / "structure.json"
     plan_path = bundle / "speech-plan.json"
-    article_path = research_markdown_path(bundle, candidate_structure.get("document", {}), migrate=True)
+    descriptor = {**candidate_structure.get("document", {}), "id": zotero_key,
+                  "source_sha256": candidate_structure.get("source", {}).get("sha256"),
+                  "metadata": metadata or {}}
+    article_path = research_path(runtime_root() / "papers", bundle, descriptor, provenance="legacy-cli")
 
     if not force and structure_path.exists() and plan_path.exists() and article_path.exists():
         existing_structure = load_json(structure_path)
@@ -60,7 +65,8 @@ def prepare_bundle(
 
     markdown = render_markdown(candidate_structure)
     plan = create_speech_plan(candidate_structure, max_chars=max_chars)
-    write_extraction(bundle, candidate_structure, markdown)
+    article_path = write_extraction(bundle, candidate_structure, markdown,
+                                    research_root=runtime_root() / "papers", force=force)
     atomic_write_json(plan_path, plan)
     if metadata and zotero_key:
         atomic_write_json(

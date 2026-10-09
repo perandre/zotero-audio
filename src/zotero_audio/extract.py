@@ -674,8 +674,20 @@ def render_research_markdown(structure: dict[str, Any]) -> str:
                                              "schema: zotero-audio-research-markdown/v1", 1)
 
 
-def write_extraction(bundle: Path, structure: dict[str, Any], markdown: str) -> Path:
-    markdown_path = research_markdown_path(bundle, structure.get("document", {}), migrate=True)
-    atomic_write_text(markdown_path, markdown)
+def write_extraction(bundle: Path, structure: dict[str, Any], markdown: str, *,
+                     research_root: Path | None = None, force: bool = False) -> Path:
+    from .app_state import runtime_root
+    from .research_library import link_legacy_path, research_path, write_research_markdown
+
+    research_root = research_root or (runtime_root() / "papers")
+    article = {**structure.get("document", {}), "id": structure.get("source", {}).get("zotero_key"),
+               "source_sha256": structure.get("source", {}).get("sha256"),
+               "metadata": structure.get("metadata") or {}}
+    markdown_path = research_path(research_root, bundle, article, provenance="legacy-cli")
+    markdown_path = write_research_markdown(research_root, article, markdown,
+                                            provenance="legacy-cli", force=force)
+    legacy_path = research_markdown_path(bundle, structure.get("document", {}), current=markdown_path,
+                                         migrate=False)
+    link_legacy_path(legacy_path, markdown_path)
     atomic_write_json(bundle / "structure.json", structure)
     return markdown_path

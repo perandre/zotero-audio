@@ -14,7 +14,8 @@ from zotero_audio.util import atomic_write_json, episode_title, json_digest, rea
 
 
 @pytest.fixture
-def bundle(tmp_path):
+def bundle(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZOTERO_AUDIO_RUNTIME", str(tmp_path / "runtime"))
     structure = {
         "document": {"title": "How companies use AI", "authors": ["Anna Author"],
                      "publication_year": "2025", "rights": "CC BY 4.0", "url": "https://example.org/paper"},
@@ -90,7 +91,8 @@ def test_markdown_is_first_class_and_preserves_manual_edits_and_references(bundl
     assert "https://example.org/reference" in path.read_text()
     assert not result["editions"]
     assert events[-1]["stage"] == "markdown_ready"
-    assert events[-1]["markdown"] == str(path)
+    assert Path(events[-1]["markdown"]).parent == bundle / "runtime" / "papers"
+    assert Path(events[-1]["markdown"]).read_text() == before
     review = bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"), review=True)
     assert before in review.read_text()
 
@@ -100,11 +102,28 @@ def test_legacy_article_name_is_migrated_to_episode_title(bundle):
     legacy = bundle / "article.md"
     readable.replace(legacy)
     result = generation.process_article(bundle)
-    assert Path(result["markdown"]) == readable
-    assert readable.is_file()
-    assert not legacy.exists()
+    assert Path(result["markdown"]).parent == bundle / "runtime" / "papers"
+    assert readable.is_symlink() and readable.read_text() == Path(result["markdown"]).read_text()
 
 
+def test_extracted_full_title_replaces_provisional_library_name_once(bundle):
+    from zotero_audio.util import load_json
+    structure_path = bundle / "structure.json"
+    structure = load_json(structure_path)
+    structure["document"]["title"] = "Unknown title"
+    atomic_write_json(structure_path, structure)
+    provisional = bundle / readable_markdown_filename("Unknown title - Author (2025)")
+    (bundle / readable_markdown_filename(episode_title("How companies use AI", ["Anna Author"], "2025"))).replace(provisional)
+    result = generation.process_article(bundle)
+    root = bundle / "runtime" / "papers"
+    index = json.loads((root / "index.json").read_text())["articles"]
+    primary = root / index["ABCDEFGH"]["path"]
+    assert primary.name.startswith("How companies use AI")
+    assert Path(result["markdown"]) == primary
+    extras = {path for path in root.glob("*.md")} - {primary}
+    assert all((path.is_symlink() and path.resolve() == primary.resolve()) or "revision-" in path.name
+               for path in extras)
+    assert index["ABCDEFGH"]["path"] == primary.name
 def test_each_edition_is_ready_independently_and_narration_excludes_references(bundle, assemblies):
     events, ready = [], []
     backend = Backend()

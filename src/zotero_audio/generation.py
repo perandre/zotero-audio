@@ -16,7 +16,8 @@ from typing import Any, Callable
 from .audio import (SpeechBackend, assemble_m4a, canonical_synthesis_config, episode_stinger_metadata,
                     loudness_is_competitive, measure_loudness, synthesize_plan)
 from .article_files import episode_title_for, research_markdown_path, review_markdown_path
-from .research_library import adopt as adopt_research_markdown, canonical_path as canonical_research_path, register as register_research_markdown
+from .research_library import (adopt as adopt_research_markdown, link_legacy_path, register as register_research_markdown,
+                               research_path, write_research_markdown)
 from .branding import PODCAST_NAME
 from .extract import extract_pdf, normalize_speech_text, render_research_markdown, source_pdf_rights
 from .podcast import (EDITION_VOICES, PodcastConfig, _authors, _episode_guid,
@@ -308,13 +309,14 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
     md_descriptor = {"title": title, "authors": _authors(original.get("document", {}), metadata),
                      "year": original.get("document", {}).get("publication_year", metadata.get("publication_year"))}
     if research_root is None:
-        md_path = research_markdown_path(bundle, md_descriptor, migrate=True)
-    else:
-        md_descriptor.update({"id": zotero_key or metadata.get("zotero_key"), "metadata": metadata})
-        md_path = canonical_research_path(research_root, md_descriptor)
-        legacy_path = research_markdown_path(bundle, md_descriptor, migrate=True)
-        if not md_path.is_file() and legacy_path.is_file():
-            md_path = adopt_research_markdown(research_root, md_descriptor, legacy_path, provenance="bundle-migration")
+        from .app_state import runtime_root
+        research_root = runtime_root() / "papers"
+    initial_source_hash = original.get("source", {}).get("sha256")
+    if not initial_source_hash and pdf and pdf.is_file():
+        initial_source_hash = sha256_file(pdf)
+    md_descriptor.update({"id": zotero_key or metadata.get("zotero_key") or original.get("source", {}).get("zotero_key"), "metadata": metadata,
+                          "source_sha256": initial_source_hash})
+    md_path = research_path(research_root, bundle, md_descriptor, provenance="bundle-migration")
     if force or not original or not md_path.is_file():
         source_pdf = pdf or (Path(original["source"]["path"]) if original.get("source", {}).get("path") else None)
         if source_pdf is None or not source_pdf.is_file():
@@ -326,21 +328,22 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
             original = extracted
             atomic_write_json(bundle / "structure.json", original)
         if force or not md_path.exists():
-            atomic_write_text(md_path, render_research_markdown(extracted))
+            md_descriptor["source_sha256"] = extracted.get("source", {}).get("sha256")
+            md_path = write_research_markdown(research_root, md_descriptor,
+                                              render_research_markdown(extracted), force=force)
     original["document"] = merge_document_metadata(original["document"], metadata)
     markdown = md_path.read_text(encoding="utf-8")
     structure = _markdown_structure(markdown, original)
     title = str(structure["document"]["title"])
     md_descriptor = {"title": title, "authors": _authors(structure["document"], metadata),
                      "year": structure["document"].get("publication_year")}
-    if research_root is None:
-        renamed_md_path = research_markdown_path(bundle, md_descriptor, current=md_path, migrate=True)
-    else:
-        md_descriptor.update({"id": zotero_key or metadata.get("zotero_key"), "metadata": metadata})
-        renamed_md_path = canonical_research_path(research_root, md_descriptor)
-        if renamed_md_path != md_path and not renamed_md_path.exists():
-            renamed_md_path = adopt_research_markdown(research_root, md_descriptor, md_path, provenance="local-generation")
-        register_research_markdown(research_root, md_descriptor, renamed_md_path)
+    md_descriptor.update({"id": zotero_key or metadata.get("zotero_key") or original.get("source", {}).get("zotero_key"), "metadata": metadata,
+                          "source_sha256": original.get("source", {}).get("sha256")})
+    renamed_md_path = research_path(research_root, bundle, md_descriptor, provenance="local-generation")
+    if not renamed_md_path.is_file() and md_path.is_file():
+        renamed_md_path = adopt_research_markdown(research_root, md_descriptor, md_path,
+                                                  provenance="local-generation")
+    register_research_markdown(research_root, md_descriptor, renamed_md_path)
     if renamed_md_path != md_path:
         md_path = renamed_md_path
         markdown = md_path.read_text(encoding="utf-8")
@@ -348,6 +351,8 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
         title = str(structure["document"]["title"])
     current_episode_title = episode_title_for({"title": title, "authors": _authors(structure["document"], metadata),
                                                "year": structure["document"].get("publication_year")})
+    bundle_markdown_path = research_markdown_path(bundle, md_descriptor, current=md_path, migrate=False)
+    link_legacy_path(bundle_markdown_path, md_path)
     source_plan = create_speech_plan(structure, max_chars=max_chars)
     # Do not rewrite the historical base speech plan or original extraction.
     # New narration artifacts are isolated under editions/.
