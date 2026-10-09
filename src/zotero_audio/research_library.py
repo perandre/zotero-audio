@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,7 @@ def adopt(root: Path, article: dict[str, Any], source: Path, *, provenance: str)
     """Copy to the canonical name, preserving differing source revisions."""
     target = canonical_path(root, article)
     conflicts: list[str] = []
+    compatible = target
     if source.is_file():
         source_hash = sha256_file(source)
         if target.is_file() and sha256_file(target) != source_hash:
@@ -70,7 +73,12 @@ def adopt(root: Path, article: dict[str, Any], source: Path, *, provenance: str)
             if not revision.exists():
                 revision.write_bytes(source.read_bytes())
             conflicts.append(revision.name)
+            compatible = revision
         elif not target.exists():
             target.write_bytes(source.read_bytes())
     register(root, article, target, provenance=provenance, conflicts=conflicts)
+    if source.is_file() and source.resolve() != target.resolve() and source.parent.resolve() != root.resolve():
+        temporary = source.parent / f".{uuid.uuid4().hex}.link"
+        temporary.symlink_to(os.path.relpath(compatible, source.parent))
+        temporary.replace(source)
     return target
