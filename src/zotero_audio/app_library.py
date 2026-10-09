@@ -147,7 +147,7 @@ def migrate_catalog_markdown(store: Store) -> int:
                 with store.edit_article(article["id"], markdown=markdown_text) as current:
                     current.update({"markdown": str(target), "markdown_sha256": article["markdown_sha256"]})
                 migrated += 1
-    legacy_roots = ((store.runtime / "library" / "bundles", "generation-bundle-migration"),
+    legacy_roots = ((store.runtime / "library", "generation-bundle-migration"),
                     (store.runtime / "full-library" / "bundles", "full-library-migration"),
                     (store.runtime / "industry-reports-pilot" / "bundles", "industry-reports-pilot"))
     for legacy_root, provenance in legacy_roots:

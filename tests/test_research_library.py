@@ -88,7 +88,7 @@ def test_conflicting_legacy_copy_is_linked_to_preserved_revision(tmp_path):
 
 def test_untracked_generation_bundle_is_linked_to_flat_library(tmp_path):
     store = Store(tmp_path / "runtime")
-    bundle = store.runtime / "library" / "bundles" / "A paper [LIB001]"
+    bundle = store.runtime / "library" / "LIB001"
     bundle.mkdir(parents=True)
     (bundle / "metadata.json").write_text(json.dumps({"zotero_key": "LIB001", "title": "A paper",
         "authors": ["Lee Author"], "publication_year": 2022}))
