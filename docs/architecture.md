@@ -239,3 +239,10 @@ notices, including line-wrapped “International”. The evidence remains separa
 from research Markdown and speech-plan metadata, so a corrected publication gate
 reuses the finished audio bytes without synthesis or another encode. Explicit
 restrictive licenses are not replaced by this fallback.
+
+Editable research Markdown has one runtime-wide home in `papers/`; SQLite
+catalog entries point directly to those files, and `papers/index.json` supports
+AI listing and metadata filtering. Article bundles contain extraction structure,
+QA and generation state, while immutable delivery snapshots remain under
+`control/artifacts/`. Startup consolidates catalogued legacy Markdown without
+discarding conflicts or changing document contents.

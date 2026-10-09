@@ -124,7 +124,7 @@ not select additional audio editions.
 
 | Location | Contents |
 | --- | --- |
-| Mac runtime | Working Markdown, audio, source metadata, QA evidence, SQLite state, logs and reusable model/segment caches. |
+| Mac runtime | Authoritative editable research Markdown in `papers/`, with searchable bibliographic metadata in its generated `index.json`; separate article bundles hold extraction, QA and audio-generation state. SQLite search indexes the same Markdown files. |
 | Private Cloudflare R2 | Current full Markdown and QA reports, including private/non-open articles. |
 | Cloudflare D1 | Search index, article metadata, durable jobs and settings. |
 | Your chosen iCloud folder | Readably named private M4A audio, without podcast metadata or logs. |
@@ -140,6 +140,16 @@ jobs wait for the Mac. Access through an authorized MCP client shares requested
 private text with that client. Public podcast files remain in a separate bucket.
 Backup, iCloud cloud synchronization and publication retries never roll back
 completed local generation.
+
+The editable research library is one flat directory at
+`/Users/pesh/Sites/zotero-audio-runtime/papers`. Files use the full article title,
+author label and year; a Zotero key is added only when filenames collide. The
+generated `index.json` records title, authors, year, DOI, Zotero key, provenance,
+content hash and any preserved revisions. Existing edits remain authoritative.
+When two different files claim the same Zotero key, the catalogued version stays
+canonical and the other is kept as a clearly named revision. Generation bundles,
+audio editions and immutable delivery snapshots remain separate from this
+editable library.
 
 The podcast uploader pins Wrangler to `4.145.0` instead of automatically installing
 the latest release. Upgrades require an explicit code change and verification on
