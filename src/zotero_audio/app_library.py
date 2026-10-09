@@ -19,6 +19,12 @@ def read_json(path: Path, default=None):
         return {} if default is None else default
 
 
+def _research_markdown_file(path: Path) -> bool:
+    name = path.name.lower()
+    return not (name in {"review.md", "ai-review.md", "narration.md", "brief-preview.md"}
+                or name.endswith(" - ai review.md"))
+
+
 def visible_article(article: dict, *, local: bool = True) -> dict:
     """Only explicitly public fields cross the cloud boundary; no arbitrary paths."""
     fields = ("id", "title", "authors", "year", "source_url", "license_status", "markdown_status", "audio_status",
@@ -170,6 +176,9 @@ def migrate_catalog_markdown(store: Store) -> int:
             if not source.is_file():
                 continue
             target = adopt_research_markdown(store.runtime / "papers", descriptor, source, provenance=provenance)
+            for alternate in bundle.glob("*.md"):
+                if alternate != source and _research_markdown_file(alternate):
+                    adopt_research_markdown(store.runtime / "papers", descriptor, alternate, provenance=provenance)
             try:
                 existing = store.article(str(key))
             except KeyError:

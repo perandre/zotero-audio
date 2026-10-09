@@ -77,13 +77,18 @@ def test_conflicting_legacy_copy_is_linked_to_preserved_revision(tmp_path):
         "publication_year": 2024}}))
     legacy = bundle / "Same title - Author (2024).md"
     legacy.write_text("Different legacy version")
+    alternate = bundle / "Alternate research title.md"
+    alternate.write_text("A second preserved legacy revision")
 
     migrate_catalog_markdown(store)
     assert legacy.is_symlink()
     assert legacy.read_text() == "Different legacy version"
+    assert alternate.is_symlink()
+    assert alternate.read_text() == "A second preserved legacy revision"
     idx = json.loads((root / "index.json").read_text())['articles']["SAMEKEY"]
-    assert len(idx["conflicts"]) == 1
-    assert (root / idx["conflicts"][0]).read_text() == "Different legacy version"
+    assert len(idx["conflicts"]) == 2
+    assert { (root / path).read_text() for path in idx["conflicts"] } == {
+        "Different legacy version", "A second preserved legacy revision"}
 
 
 def test_untracked_generation_bundle_is_linked_to_flat_library(tmp_path):
