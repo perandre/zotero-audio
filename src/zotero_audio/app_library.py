@@ -9,6 +9,7 @@ from .article_files import episode_title_for, research_markdown_path, review_mar
 from .article_recency import reading_scope
 from .app_state import Store
 from .util import sha256_file
+from .research_library import adopt as adopt_research_markdown, register as register_research_markdown
 
 
 def read_json(path: Path, default=None):
@@ -109,6 +110,10 @@ def import_existing(store: Store) -> int:
                    "markdown_status": "ready", "audio_status": "ready" if editions else "not_started", "qa_status": qa_status,
                    "warnings": warnings, "metadata": metadata, "editions": editions,
                    "artifacts": {"markdown": True, "audio": bool(editions), "review": review_path.is_file()}}
+        canonical = adopt_research_markdown(store.runtime / "papers", article, markdown_path, provenance="full-library-import")
+        article["markdown"] = str(canonical)
+        article["markdown_sha256"] = sha256_file(canonical)
+        markdown = canonical.read_text(encoding="utf-8")
         if review_path.is_file():
             article["review"] = str(review_path)
         source = Path(article["source_path"]) if article.get("source_path") else None
@@ -129,28 +134,19 @@ def import_existing(store: Store) -> int:
 
 
 def migrate_catalog_markdown(store: Store) -> int:
-    """Rename known research and review Markdown files to their episode names."""
+    """Move catalogued research into the single editable papers directory."""
     migrated = 0
     for article in store.all_articles():
-        changed = False
         markdown = Path(article["markdown"]) if article.get("markdown") else None
         if markdown and markdown.is_file():
-            desired = research_markdown_path(markdown.parent, article, current=markdown, migrate=True)
-            if desired != markdown:
-                changed = True
-                article["markdown"] = str(desired)
-                article["markdown_sha256"] = sha256_file(desired)
-        review = Path(article["review"]) if article.get("review") else None
-        if review and review.is_file():
-            desired = review_markdown_path(review.parent, article, current=review, migrate=True)
-            if desired != review:
-                changed = True
-                article["review"] = str(desired)
-        if changed:
-            markdown_text = Path(article["markdown"]).read_text(encoding="utf-8") if article.get("markdown") else None
-            with store.edit_article(article["id"], markdown=markdown_text) as current:
-                current.update({key: value for key, value in article.items() if key in {"markdown", "markdown_sha256", "review"}})
-            migrated += 1
+            target = adopt_research_markdown(store.runtime / "papers", article, markdown, provenance="catalog-migration")
+            article["markdown"] = str(target)
+            article["markdown_sha256"] = sha256_file(target)
+            markdown_text = target.read_text(encoding="utf-8")
+            if str(markdown) != str(target):
+                with store.edit_article(article["id"], markdown=markdown_text) as current:
+                    current.update({"markdown": str(target), "markdown_sha256": article["markdown_sha256"]})
+                migrated += 1
     return migrated
 
 

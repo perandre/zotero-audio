@@ -6,11 +6,13 @@ supports `markdown`, `brief`, `full`, and `both` modes. Markdown-only needs no
 speech model. Audio receives a `SpeechBackend` or a lazy `backend_factory`;
 the worker owns the model's lifetime so it remains warm between articles.
 
-The research Markdown is stored as a readable filename matching the episode
-title, such as `How companies use AI - Author (2025).md`, inside the article
-bundle. Legacy `article.md` files are migrated when the bundle is next opened.
-The named Markdown is authoritative and is never overwritten unless the caller
-explicitly sets `force=True`. New extraction preserves references,
+The research Markdown is stored in the runtime's flat `papers/` directory as
+a readable filename matching the episode title. The generated `index.json`
+maps stable Zotero keys to files and records bibliographic metadata, provenance,
+hashes and preserved conflicting revisions. The SQLite full-text catalog reads
+the same files. Existing bundle Markdown is adopted on first access; differing
+same-key revisions are retained. The named Markdown is authoritative and is
+never overwritten unless the caller explicitly sets `force=True`. New extraction preserves references,
 links, figure/table captions and extracted footnotes. The source PDF hash and
 page markers remain available. Each edition derives its own narration from
 the current Markdown, omitting references, raw links, citation markers and

@@ -254,7 +254,7 @@ class LocalWorker:
                     zotero_key=article_id, metadata={**original_article.get("metadata", {}), "podcast_selected": settings["auto_publish"]}, backend_factory=lambda: self.backends.get(settings["tts_model"]),
                     qa=job["qa"], force=job["force"], opening_sound=settings["opening_sound"] == "typing", closing_sound=settings["closing_sound"] == "typing",
                     spoken_intro=settings["spoken_intro"], full_voice=settings["full_voice"], brief_voice=settings["brief_voice"], speed=settings["speed"],
-                    progress=progress, on_edition_ready=ready)
+                    progress=progress, on_edition_ready=ready, research_root=self.store.runtime / "papers")
                 with self.store.edit_article(article_id) as current:
                     # Discovery can notice a replacement PDF during synthesis.
                     # Preserve its hash and warning when finishing older work.
