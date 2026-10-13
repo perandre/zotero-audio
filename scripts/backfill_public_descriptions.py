@@ -12,7 +12,7 @@ import json
 import shutil
 import sys
 import uuid
-from copy import copy
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -456,8 +456,7 @@ def main(argv: list[str] | None = None) -> int:
             atomic_write_text(stage, _episode_page(record))
             rendered_pages[key] = stage
         cover_url = _cover_from_feed(config.public_root / "full" / "feed.xml") or _cover_from_feed(config.public_root / "brief" / "feed.xml")
-        site_config = copy(config)
-        site_config.public_root = stage_root / "site"
+        site_config = replace(config, public_root=stage_root / "site")
         _write_site(site_config, manifest, cover_url=cover_url)
         rendered_pages["index.html"] = site_config.public_root / "index.html"
         publisher = LocalPublisher(config.public_root, config.base_url)

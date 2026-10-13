@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import uuid
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from scripts.backfill_public_descriptions import (
     _looks_like_legacy_generated,
     enrich_records,
     is_published_episode,
+    main,
 )
 from zotero_audio.podcast import LocalPublisher, _show_notes_html
 
@@ -250,6 +252,64 @@ def test_partial_feed_commit_failure_restores_manifest_pages_and_headers(tmp_pat
         target = public / key
         sidecar = target.with_suffix(target.suffix + ".headers.json")
         assert (target.read_bytes(), sidecar.read_bytes()) == before[key]
+
+
+def test_main_apply_with_frozen_loaded_config_stages_writes_and_is_idempotent(tmp_path, capsys):
+    private = tmp_path / "private"
+    state = tmp_path / "state"
+    public = tmp_path / "public"
+    for path in (private, state, public):
+        path.mkdir(parents=True)
+    config_path = tmp_path / "podcast.toml"
+    config_path.write_text(
+        f'[paths]\nprivate_root = "{private}"\nstate_root = "{state}"\npublic_root = "{public}"\n'
+        '\n[podcast]\nbase_url = "https://podcast.example"\n', encoding="utf-8")
+    paper_guid = str(uuid.UUID(int=42))
+    records = []
+    for edition in ("brief", "full"):
+        notes = "A synthetic cached abstract.\n\nThis is the existing generated note."
+        records.append(published_record(
+            paper_guid=paper_guid, edition=edition, guid=f"urn:uuid:{edition}",
+            title=f"Synthetic Paper — {edition} (2026)",
+            page_url=f"https://podcast.example/papers/{paper_guid}/{edition}/",
+            duration=42,
+            paired_url=f"https://podcast.example/papers/{paper_guid}/{'full' if edition == 'brief' else 'brief'}/",
+            description_abstract="A synthetic cached abstract.",
+            description_abstract_source="zotero",
+            generated_description_abstract="A synthetic cached abstract.",
+            show_notes=notes, generated_show_notes=notes,
+        ))
+    manifest_path = state / "publication-manifest.json"
+    manifest_path.write_text(json.dumps({"episodes": records}), encoding="utf-8")
+    for edition in ("brief", "full"):
+        feed = public / edition / "feed.xml"
+        feed.parent.mkdir(parents=True, exist_ok=True)
+        feed.write_text(
+            '<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">'
+            '<channel><title>Synthetic</title><itunes:image href="https://podcast.example/cover.png"/>'
+            '</channel></rss>', encoding="utf-8")
+
+    args = ["--config", str(config_path), "--apply", "--no-network"]
+    assert main(args) == 0
+    capsys.readouterr()
+    first_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity = [(row["guid"], row["audio_url"], row["bytes"], row["pub_date"])
+                for row in first_manifest["episodes"]]
+    assert all(row["description_abstract"] == "A synthetic cached abstract."
+               for row in first_manifest["episodes"])
+    assert (public / "index.html").is_file()
+    for row in records:
+        key = f"papers/{paper_guid}/{row['edition']}/index.html"
+        assert (public / key).is_file()
+        assert (public / f"{row['edition']}/feed.xml").is_file()
+
+    assert main(args) == 0
+    capsys.readouterr()
+    second_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert [(row["guid"], row["audio_url"], row["bytes"], row["pub_date"])
+            for row in second_manifest["episodes"]] == identity
+    assert [row["show_notes"] for row in second_manifest["episodes"]] == [
+        row["show_notes"] for row in first_manifest["episodes"]]
 
 
 def record_guid():
