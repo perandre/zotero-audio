@@ -271,6 +271,7 @@ class PodcastConfig:
     dry_run: bool = True
     r2_bucket: str = ""
     previous_feed_base_url: str = ""
+    feed_base_url: str = ""
     briefs_publication_policy: str = "license_required"
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
         PODCAST_NAME + " (Brief)", "Brief editions containing the authors' abstract and, when suitable, conclusion.",
@@ -305,6 +306,7 @@ def load_podcast_config(path: Path) -> PodcastConfig:
         publishing_enabled=bool(common.get("publishing_enabled", False)), dry_run=bool(common.get("dry_run", True)),
         r2_bucket=str(common.get("r2_bucket", "")).strip(),
         previous_feed_base_url=str(common.get("previous_feed_base_url", "")).rstrip("/"),
+        feed_base_url=str(common.get("feed_base_url", "")).strip().rstrip("/"),
         briefs_publication_policy=str(common.get("briefs_publication_policy", defaults.briefs_publication_policy)).strip(),
         brief_show=show("brief", defaults.brief_show), full_show=show("full", defaults.full_show))
 
@@ -1043,7 +1045,7 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
 
 
 def _artifact_url(publisher: LocalPublisher, path: Path, prefix: str) -> str:
-    content_type = {".m4a": "audio/x-m4a", ".png": "image/png", ".vtt": "text/vtt; charset=utf-8",
+    content_type = {".m4a": "audio/x-m4a", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".vtt": "text/vtt; charset=utf-8",
                     ".txt": "text/plain; charset=utf-8",
                     ".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8",
                     ".md": "text/markdown; charset=utf-8"}.get(path.suffix.casefold(), "application/octet-stream")
@@ -1089,11 +1091,12 @@ def publish_narration_transcript(config: PodcastConfig, publisher: LocalPublishe
 
 
 def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, Any]:
+    feed_base = config.feed_base_url or config.base_url
     return {"title": show.title, "description": show.description, "link": config.base_url + "/",
-            "feed_url": f"{config.base_url}/{show.slug}/feed.xml", "image_url": image_url,
+            "feed_url": f"{feed_base}/{show.slug}/feed.xml", "image_url": image_url,
             "language": config.language, "author": config.author, "owner_name": config.owner_name,
             "owner_email": config.owner_email, "category": config.category, "copyright": config.copyright, "guid": show.guid,
-            "new_feed_url": f"{config.base_url}/{show.slug}/feed.xml" if config.previous_feed_base_url else None}
+            "new_feed_url": f"{feed_base}/{show.slug}/feed.xml" if config.previous_feed_base_url else None}
 
 
 def _episode_page(record: dict[str, Any]) -> str:
@@ -1180,7 +1183,7 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
     published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     images = {}
     for edition in EDITIONS:
-        stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
+        stage = config.state_root / "public-staging" / f"{edition}-show-cover.jpg"
         copy_podcast_cover(stage, edition=edition)
         images[edition] = _artifact_url(publisher, stage, "shows")
     for edition, private in private_records.items():

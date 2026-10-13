@@ -51,3 +51,19 @@ def test_show_cover_flattens_transparency_without_changing_source(tmp_path, monk
     with Image.open(destination) as image:
         assert image.size == (1500, 1500) and image.mode == "RGB"
         assert image.getpixel((0, 0)) == (242, 239, 230)
+
+
+def test_public_jpeg_covers_are_small_rgb_and_preserve_originals(tmp_path):
+    for edition, source in PODCAST_COVER_PATHS.items():
+        original = sha256_file(source)
+        destination = tmp_path / f"{edition}.jpg"
+        copy_podcast_cover(destination, edition=edition)
+        with Image.open(destination) as image:
+            assert image.format == "JPEG" and image.size == (3000, 3000)
+            assert image.mode == "RGB" and image.info["dpi"] == (72, 72)
+        assert destination.stat().st_size < 500_000
+        first_hash = sha256_file(destination)
+        copy_podcast_cover(destination, edition=edition)
+        assert sha256_file(destination) == first_hash
+        assert sha256_file(source) == original
+        assert load_json(destination.with_suffix(".artwork.json"))["bytes"] == destination.stat().st_size

@@ -274,7 +274,7 @@ def publish_existing_audio(config, *, batch_manifest_path: Path | None = None) -
     for edition in EDITIONS:
         if not any(item.get("edition") == edition for item in manifest["episodes"]):
             continue
-        stage = config.state_root / "public-staging" / f"{edition}-show-cover.png"
+        stage = config.state_root / "public-staging" / f"{edition}-show-cover.jpg"
         copy_podcast_cover(stage, edition=edition)
         images[edition] = _artifact_url(publisher, stage, "shows")
 
