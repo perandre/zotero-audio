@@ -42,6 +42,8 @@ def test_feeds_are_last_and_failed_upload_never_updates_feed(tmp_path, monkeypat
     def run(command, **kwargs):
         assert command[:6] == ["/bin/npx", "--yes", "wrangler@4.145.0", "r2", "object", "put"]
         assert kwargs["check"] is True
+        if command[6].endswith(".m4a"):
+            assert command[command.index("--ct") + 1] == "audio/x-m4a"
         calls.append(command[6])
     monkeypatch.setattr(subprocess, "run", run)
     state = tmp_path / "state.json"

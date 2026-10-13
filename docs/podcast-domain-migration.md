@@ -28,3 +28,16 @@ new domain. Future publications use the configured `base_url` automatically.
 The personal site redirects former `/1mp/` pages and RSS paths to the new site
 and keeps old audio URLs available. The `feed.mere.no` Worker redirects its two
 RSS paths to the new feeds and continues serving old media URLs for app caches.
+
+## Apple Podcasts compatibility
+
+Public M4A enclosures and upload metadata use Apple's documented
+`audio/x-m4a` media type. The website must serve public artwork and media with
+`Last-Modified`, `ETag`, working HEAD requests, and byte-range responses.
+Cloudflare Browser Integrity Check must not challenge public podcast GET/HEAD
+requests; use a rule scoped to the public feed, show-artwork, and episode paths.
+Keep private library routes and their authentication separate.
+
+After a hosting or metadata repair, refresh the feed in Apple Podcasts Connect
+and inspect its imported details before publishing. A Draft or successful HTTP
+check alone does not confirm Apple has accepted the show.

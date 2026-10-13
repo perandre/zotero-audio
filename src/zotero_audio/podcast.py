@@ -1024,7 +1024,7 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         ET.SubElement(item, f"{{{CONTENT_NS}}}encoded").text = notes_html
         ET.SubElement(item, "guid", {"isPermaLink": "false"}).text = str(episode["guid"])
         ET.SubElement(item, "pubDate").text = _rfc2822(episode["pub_date"])
-        ET.SubElement(item, "enclosure", {"url": str(episode["audio_url"]), "length": str(episode["bytes"]), "type": "audio/mp4"})
+        ET.SubElement(item, "enclosure", {"url": str(episode["audio_url"]), "length": str(episode["bytes"]), "type": "audio/x-m4a"})
         ET.SubElement(item, f"{{{ITUNES_NS}}}duration").text = _duration(float(episode["duration"]))
         ET.SubElement(item, f"{{{ITUNES_NS}}}explicit").text = "false"
         if episode.get("image_url") and not episode.get("show_artwork_only"):
@@ -1043,7 +1043,7 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
 
 
 def _artifact_url(publisher: LocalPublisher, path: Path, prefix: str) -> str:
-    content_type = {".m4a": "audio/mp4", ".png": "image/png", ".vtt": "text/vtt; charset=utf-8",
+    content_type = {".m4a": "audio/x-m4a", ".png": "image/png", ".vtt": "text/vtt; charset=utf-8",
                     ".txt": "text/plain; charset=utf-8",
                     ".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8",
                     ".md": "text/markdown; charset=utf-8"}.get(path.suffix.casefold(), "application/octet-stream")
