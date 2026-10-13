@@ -349,7 +349,7 @@ def _episode():
 
 def test_rss_has_required_metadata_and_namespaces():
     root = ET.fromstring(build_rss(_show(), [_episode()]))
-    assert root.find("./channel/item/enclosure").attrib == {"url": "https://audio.example/audio.m4a", "length": "1234", "type": "audio/mp4"}
+    assert root.find("./channel/item/enclosure").attrib == {"url": "https://audio.example/audio.m4a", "length": "1234", "type": "audio/x-m4a"}
     assert root.find(f"./channel/{{{ITUNES_NS}}}owner/{{{ITUNES_NS}}}email").text == "podcast@example.org"
     assert root.find(f"./channel/item/{{{PODCAST_NS}}}transcript").attrib["type"] == "text/vtt"
     assert root.find(f"./channel/item/{{{PODCAST_NS}}}chapters") is not None

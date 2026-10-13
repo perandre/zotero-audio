@@ -65,7 +65,7 @@ def upload_keys(public_root: Path, bucket: str, state_path: Path, keys) -> None:
         state = load_json(state_path) if state_path.is_file() else {"files": {}}
         if state.get("files", {}).get(key) == digest:
             continue
-        content_type = {".m4a": "audio/mp4", ".vtt": "text/vtt", ".txt": "text/plain", ".md": "text/markdown", ".xml": "application/rss+xml"}.get(path.suffix, mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        content_type = {".m4a": "audio/x-m4a", ".vtt": "text/vtt", ".txt": "text/plain", ".md": "text/markdown", ".xml": "application/rss+xml"}.get(path.suffix, mimetypes.guess_type(path.name)[0] or "application/octet-stream")
         cache = "public, max-age=300" if key.endswith(".xml") or key.endswith("index.html") else "public, max-age=31536000, immutable"
         print(f"Uploading {key}", flush=True)
         subprocess.run([npx, "--yes", WRANGLER_PACKAGE, "r2", "object", "put", f"{bucket}/{key}",
