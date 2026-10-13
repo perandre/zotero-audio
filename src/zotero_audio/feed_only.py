@@ -26,7 +26,9 @@ from .podcast import (
     page_base_url,
     public_episode_page_url,
     resolve_license,
+    edition_description,
 )
+from .episode_descriptions import select_description_abstract
 from .util import atomic_write_json, atomic_write_text, load_json, sha256_file
 from .zotero import license_record_from_metadata
 
@@ -92,8 +94,18 @@ def _minimal_record(record: dict[str, Any], *, published_at: str,
     source_sha = str(record.get("source_sha256") or "")
     if not source_sha:
         return None
+    description = select_description_abstract(record, metadata=record, cached=record, source_sha256=source_sha)
+    edition = str(record.get("edition") or "")
+    generated_notes = _show_notes(record, _authors(record), edition, license_value,
+                        description_abstract=description["description_abstract"],
+                        description_source=description["description_abstract_source"],
+                        brief_contents=record.get("brief_contents"))
+    saved_notes = generated_notes
+    if (record.get("show_notes") and (not record.get("generated_show_notes")
+            or record.get("show_notes") != record.get("generated_show_notes"))):
+        saved_notes = str(record.get("show_notes") or generated_notes)
     return {
-        "edition": str(record.get("edition") or ""),
+        "edition": edition,
         "guid": str(record.get("guid") or ""),
         "revision": source_sha,
         "title": str(record.get("title") or audio.stem),
@@ -102,11 +114,16 @@ def _minimal_record(record: dict[str, Any], *, published_at: str,
         "author_label": record.get("author_label"),
         "publication_year": record.get("publication_year"),
         "brief_contents": record.get("brief_contents"),
+        "edition_description": edition_description(edition, record.get("brief_contents")),
         "duration": float(duration),
         "audio": str(audio),
         "audio_sha256": sha256_file(audio),
         "bytes": audio.stat().st_size,
-        "show_notes": str(record.get("show_notes") or ""),
+        **description,
+        "generated_description_abstract": description["description_abstract"],
+        "show_notes": saved_notes,
+        "generated_show_notes": generated_notes,
+        "description_is_manual": saved_notes != generated_notes,
         "source_sha256": source_sha,
         "source_license": license_value,
         "read_url": read_url,
@@ -168,6 +185,7 @@ def _batch_full_candidates(config, batch_manifest: dict[str, Any],
             continue
         authors = _authors(item)
         document = dict(item)
+        description = select_description_abstract(document, metadata=item, source_sha256=source_sha)
         title = episode_title(
             str(item.get("title") or audio.stem),
             authors,
@@ -193,11 +211,22 @@ def _batch_full_candidates(config, batch_manifest: dict[str, Any],
             "authors": authors,
             "author_label": ", ".join(authors),
             "publication_year": item.get("publication_year"),
+            "journal": item.get("journal") or item.get("publication_title"),
+            "publisher": item.get("publisher"),
+            "publication_date": item.get("publication_date"),
+            **description,
+            "generated_description_abstract": description["description_abstract"],
+            "edition_description": edition_description(EDITION_FULL),
             "duration": float(item.get("duration_seconds") or inspect_m4a(audio)["duration_seconds"]),
             "audio": str(audio),
             "audio_sha256": str(item["output_sha256"]),
             "bytes": audio.stat().st_size,
-            "show_notes": _show_notes(document, authors, EDITION_FULL, license_result),
+            "show_notes": _show_notes(document, authors, EDITION_FULL, license_result,
+                description_abstract=description["description_abstract"],
+                description_source=description["description_abstract_source"]),
+            "generated_show_notes": _show_notes(document, authors, EDITION_FULL, license_result,
+                description_abstract=description["description_abstract"],
+                description_source=description["description_abstract_source"]),
             "source_sha256": source_sha,
             "source_license": license_result,
             "read_url": read_url,

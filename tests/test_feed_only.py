@@ -123,6 +123,22 @@ def test_user_authorized_policy_publishes_existing_brief_without_license_claim(t
     assert item.find("{https://podcastindex.org/namespace/1.0}license") is None
 
 
+def test_minimal_record_preserves_unknown_custom_show_notes(tmp_path: Path):
+    audio = tmp_path / "custom.m4a"
+    audio.write_bytes(b"audio")
+    record = {
+        "edition": "brief", "guid": "custom-guid", "source_sha256": "c" * 64,
+        "title": "Paper", "authors": ["Ada Smith"], "audio": str(audio),
+        "duration": 5, "read_url": "https://example.org/paper",
+        "source_license": {"allowed": True, "episode_license_url": "https://example.org/license"},
+        "show_notes": "A hand-edited introduction and attribution.",
+    }
+    candidate = feed_only._minimal_record(record, published_at="2026-10-14T00:00:00Z")
+    assert candidate is not None
+    assert candidate["show_notes"] == record["show_notes"]
+    assert candidate["description_is_manual"] is True
+
+
 def test_existing_full_reading_publishes_source_matched_narration(tmp_path: Path, monkeypatch):
     source_sha = "c" * 64
     paper_guid = str(uuid.uuid5(uuid.NAMESPACE_URL, "zotero-audio:PAPER"))

@@ -39,6 +39,7 @@ from .zotero import (
     merge_document_metadata,
     normalize_publication_date,
 )
+from .episode_descriptions import edition_description, select_description_abstract
 
 EDITION_BRIEF = "brief"
 EDITION_FULL = "full"
@@ -910,10 +911,21 @@ def _episode_guid(source_sha: str, key: str, edition: str) -> str:
     return f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, f'zotero-audio:{key}:{source_sha}:{edition}')}"
 
 
-def _show_notes(document: dict[str, Any], authors: list[str], edition: str, license_result: dict[str, Any]) -> str:
+def _show_notes(document: dict[str, Any], authors: list[str], edition: str, license_result: dict[str, Any], *,
+                description_abstract: str | None = None, description_source: str | None = None,
+                brief_contents: str | None = None) -> str:
     noun = "report" if is_report(document) else "paper"
-    lines = [str(document.get("abstract") or document.get("metadata", {}).get("abstract") or f"A {edition} audio edition of this {noun}."),
-             "", f"Authors: {', '.join(authors) if authors else 'Not supplied'}"]
+    abstract = description_abstract if description_abstract is not None else (
+        document.get("abstract") or document.get("metadata", {}).get("abstract") or "")
+    lines = ([str(abstract)] if abstract else [])
+    if lines:
+        lines.append("")
+    lines.extend((edition_description(edition, brief_contents), "", f"Authors: {', '.join(authors) if authors else 'Not supplied'}"))
+    if abstract:
+        source_label = {"zotero": "Zotero metadata", "doi-metadata": "DOI metadata",
+                        "pdf-extraction": "PDF extraction", "unavailable": "Unavailable"}.get(
+                            str(description_source or ""), str(description_source or "Unspecified"))
+        lines.append(f"Abstract source: {source_label}")
     if is_report(document):
         lines.append("Literature type: Report")
         if report_organisation(document):
@@ -933,11 +945,17 @@ def _show_notes(document: dict[str, Any], authors: list[str], edition: str, lice
     if document.get("publication_date") or document.get("publication_year"):
         lines.append(f"Publication date: {document.get('publication_date') or document.get('publication_year')}")
     if license_result.get("allowed"):
-        lines.extend((f"Read the {noun}: {license_result['read_url']}",
-                      f"Source license: {license_result['name']} — {license_result['license_url']}"))
+        read_url = license_result.get("read_url") or document.get("url") or (
+            "https://doi.org/" + str(document["doi"]) if document.get("doi") else "")
+        if read_url:
+            lines.append(f"Read the {noun}: {read_url}")
+        license_name = license_result.get("name") or "Source license verified"
+        license_url = license_result.get("license_url") or license_result.get("episode_license_url")
+        lines.append(f"Source license: {license_name}" + (f" — {license_url}" if license_url else ""))
     elif document.get("url") or document.get("doi"):
         lines.append(f"Read the {noun}: {document.get('url') or 'https://doi.org/' + str(document['doi'])}")
-    lines.extend(("", "The authors and publisher do not sponsor or endorse this recording."))
+    lines.extend(("", "Narration: Read verbatim by an AI-generated voice.",
+                  "The authors and publisher do not sponsor or endorse this recording."))
     return "\n".join(lines)
 
 
@@ -948,10 +966,19 @@ def _safe_url(value: str) -> str | None:
     return candidate if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
-def _show_notes_html(show_notes: str, *, edition: str | None = None) -> str:
+def _show_notes_html(show_notes: str, *, edition: str | None = None,
+                     description_abstract: str | None = None,
+                     description_source: str | None = None,
+                     generated_show_notes: str | None = None) -> str:
     """Render plain-text show notes as escaped paragraphs with safe links."""
     paragraphs: list[str] = []
-    for line in show_notes.splitlines():
+    lines = show_notes.splitlines()
+    custom_notes = not generated_show_notes or show_notes != generated_show_notes
+    if not custom_notes and description_abstract and lines and lines[0].strip() == description_abstract.strip():
+        source = html.escape(str(description_source or "unavailable"), quote=True)
+        paragraphs.append(f'<p class="episode-abstract" data-source="{source}">{html.escape(description_abstract)}</p>')
+        lines = lines[1:]
+    for line in lines:
         if not line.strip():
             continue
         paired = re.match(r"^\s*Paired edition:\s*(https?://\S+)\s*$", line, re.IGNORECASE)
@@ -960,6 +987,19 @@ def _show_notes_html(show_notes: str, *, edition: str | None = None) -> str:
             if pair_url:
                 pair_title = "Full episode" if edition != EDITION_FULL else "Brief episode"
                 paragraphs.append(f'<p><a href="{html.escape(pair_url, quote=True)}">{pair_title}</a></p>')
+                continue
+
+        labeled = re.match(r"^\s*Read the (paper|report):\s*(https?://\S+)\s*$", line, re.IGNORECASE)
+        if labeled:
+            safe_url = _safe_url(labeled.group(2))
+            if safe_url:
+                paragraphs.append(f'<p><a href="{html.escape(safe_url, quote=True)}">Read the {labeled.group(1).casefold()}</a></p>')
+                continue
+        licensed = re.match(r"^\s*Source license:\s*(.*?)\s*[—–-]\s*(https?://\S+)\s*$", line, re.IGNORECASE)
+        if licensed:
+            safe_url = _safe_url(licensed.group(2))
+            if safe_url:
+                paragraphs.append(f'<p>Source license: <a href="{html.escape(safe_url, quote=True)}">{html.escape(licensed.group(1))}</a></p>')
                 continue
 
         rendered: list[str] = []
@@ -980,7 +1020,8 @@ def _show_notes_html(show_notes: str, *, edition: str | None = None) -> str:
             cursor = match.end()
         rendered.append(html.escape(line[cursor:]))
         paragraphs.append(f"<p>{''.join(rendered)}</p>")
-    return "".join(paragraphs)
+    manual = "true" if custom_notes else "false"
+    return f'<div data-description-manual="{manual}">' + "".join(paragraphs) + "</div>"
 
 
 def _copy_if_changed(source: Path, destination: Path) -> None:
@@ -1035,7 +1076,10 @@ def build_rss(show: dict[str, Any], episodes: Iterable[dict[str, Any]]) -> str:
         absent = [key for key in needed if not episode.get(key)]
         if absent: raise ValueError(f"episode {episode.get('guid', '?')} lacks {', '.join(absent)}")
         item = ET.SubElement(channel, "item")
-        notes_html = _show_notes_html(str(episode.get("show_notes", "")), edition=episode.get("edition"))
+        notes_html = _show_notes_html(str(episode.get("show_notes", "")), edition=episode.get("edition"),
+            description_abstract=str(episode.get("description_abstract") or ""),
+            description_source=str(episode.get("description_abstract_source") or "unavailable"),
+            generated_show_notes=str(episode.get("generated_show_notes") or ""))
         for tag, value in (("title", episode["title"]), ("link", episode["page_url"]),
                            ("description", notes_html)): ET.SubElement(item, tag).text = str(value)
         ET.SubElement(item, f"{{{CONTENT_NS}}}encoded").text = notes_html
@@ -1120,14 +1164,67 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
 
 
 def _episode_page(record: dict[str, Any]) -> str:
-    notes = _show_notes_html(str(record["show_notes"]), edition=record.get("edition"))
+    def link(label: str, value: Any) -> str:
+        safe = _safe_url(str(value or ""))
+        return f'<a href="{html.escape(safe, quote=True)}">{label}</a>' if safe else ""
+
+    def detail(label: str, value: Any) -> str:
+        return f"<dt>{html.escape(label)}</dt><dd>{html.escape(str(value))}</dd>" if value else ""
+
     title = html.escape(str(record["title"]))
-    image_url = html.escape(str(record["image_url"]), quote=True)
-    audio_url = html.escape(str(record["audio_url"]), quote=True)
-    resource_url = record.get("transcript_url") or record.get("markdown_url")
-    resource_label = "Timed transcript" if record.get("transcript_url") else "Research Markdown"
-    resource_link = (f'<a href="{html.escape(str(resource_url), quote=True)}">{resource_label}</a>'
-                     if resource_url else "")
+    image_url = _safe_url(str(record.get("image_url") or ""))
+    audio_url = _safe_url(str(record.get("audio_url") or ""))
+    image = (f'<img class="cover" src="{html.escape(image_url, quote=True)}" alt="Cover for {title}">'
+             if image_url else "")
+    audio = (f'<audio controls preload="metadata" src="{html.escape(audio_url, quote=True)}">'
+             f'<a href="{html.escape(audio_url, quote=True)}">Download this episode</a></audio>' if audio_url else "")
+    edition = str(record.get("edition") or "")
+    duration = _duration(float(record["duration"])) if record.get("duration") else ""
+    authors = ", ".join(str(author) for author in record.get("authors", []) if author)
+    abstract = str(record.get("description_abstract") or "").strip()
+    notes = str(record.get("show_notes") or "")
+    manual_notes = bool(record.get("description_is_manual")) or bool(
+        notes and notes != record.get("generated_show_notes"))
+    custom_section = (
+        '<section aria-labelledby="notes-title"><h2 id="notes-title">Episode notes</h2>'
+        + _show_notes_html(notes, edition=edition) + '</section>' if manual_notes else '')
+    abstract_html = f'<p>{html.escape(abstract)}</p>' if abstract else '<p>No source abstract was supplied.</p>'
+    abstract_section = (f'<section class="abstract" aria-labelledby="abstract-title"><h2 id="abstract-title">Authors’ abstract</h2>{abstract_html}</section>'
+                        if not manual_notes else "")
+    abstract_source = {
+        "zotero": "Zotero metadata",
+        "doi-metadata": "DOI metadata",
+        "pdf-extraction": "PDF extraction",
+        "unavailable": "Unavailable",
+    }.get(str(record.get("description_abstract_source") or ""), record.get("description_abstract_source"))
+    source_license = record.get("source_license") or {}
+    if not isinstance(source_license, dict):
+        source_license = {}
+    read_link = link("Read the source article", record.get("read_url"))
+    if not read_link and record.get("doi"):
+        read_link = link("Read the source article", "https://doi.org/" + str(record["doi"]))
+    source_license_link = link("Source license details", source_license.get("license_url"))
+    recording_license_link = link("Recording license details", record.get("episode_license_url"))
+    source_items = "".join((detail("Authors", authors), detail("Journal", record.get("journal")),
+                            detail("Publication date", record.get("publication_date") or record.get("publication_year")),
+                            detail("Abstract source", abstract_source)))
+    recording_items = "".join((detail("Edition", edition.title()), detail("Runtime", duration),
+                                detail("Voice", record.get("voice")),
+                                detail("Edition notes", record.get("edition_description"))))
+    license_items = "".join((detail("Source license", source_license.get("name")),
+                             detail("Recording license", record.get("episode_license_url"))))
+    resource_links = " ".join(filter(None, (
+        link("Timed transcript", record.get("transcript_url")),
+        link("Transcript (HTML)", record.get("transcript_html_url")),
+        link("Research Markdown", record.get("markdown_url")),
+        link("Chapters", record.get("chapters_url")),
+    )))
+    paired_link = ""
+    for note_line in str(record.get("show_notes", "")).splitlines():
+        paired = re.match(r"^\s*Paired edition:\s*(https?://\S+)\s*$", note_line, re.IGNORECASE)
+        if paired:
+            paired_link = link("Listen to the paired edition", paired.group(1))
+            break
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{title}</title><style>"
             ":root{color-scheme:light;--page:#f2efe6;--surface:#faf8f2;--ink:#16212b;--muted:#5c665f;--line:#c9c1b2;--link:#2f5bd3}"
@@ -1139,16 +1236,19 @@ def _episode_page(record: dict[str, Any]) -> str:
             "h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.08;margin:.75rem 0 1.5rem;max-width:18ch}"
             ".cover{display:block;width:min(100%,28rem);height:auto;border:5px solid var(--ink);border-radius:.2rem}"
             "audio{display:block;width:100%;margin:2rem 0 0}a{color:var(--link);text-decoration-thickness:.09em;text-underline-offset:.15em}"
-            ".show-notes{max-width:68ch}.show-notes h2{font-size:1.35rem;margin:0 0 1rem}.show-notes p{margin:0 0 1rem}.show-notes p:last-child{margin-bottom:0}"
+            ".episode-meta{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem;margin:.5rem 0 0;color:var(--muted);font:700 .8rem/1.4 Helvetica,sans-serif}.episode section{max-width:68ch;padding-top:1.5rem;border-top:1px solid var(--line);margin-top:1.5rem}.episode section h2{font-size:1.3rem;margin:0 0 .75rem}.episode section p{margin:.35rem 0 0}.episode dl{display:grid;grid-template-columns:minmax(8rem,auto) 1fr;gap:.35rem 1rem;margin:0}.episode dt{color:var(--muted);font-weight:700}.episode dd{margin:0;overflow-wrap:anywhere}.link-list{display:flex;flex-wrap:wrap;gap:.6rem 1rem;margin-top:1rem}.abstract{max-width:68ch}.abstract p{line-height:1.7}audio{min-height:3rem}"
             ".episode-footer{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-top:2rem;padding:1rem 1.25rem;border:1px solid var(--line);border-radius:1rem;background:var(--surface);box-shadow:0 .5rem 1.5rem rgba(22,33,43,.04)}"
             ".episode-footer p{margin:0}.episode-footer a{font-weight:700}.footer-label{font-size:.65rem;letter-spacing:.1em}"
             "@media(max-width:36rem){.episode-footer{align-items:flex-start;flex-direction:column}}"
             "@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}"
             "</style></head><body><main class=\"page-shell\"><article class=\"episode\">"
-            f"<header class=\"episode-header\"><div class=\"eyebrow\">{html.escape(PODCAST_NAME)} · {html.escape(str(record['edition']).upper())}</div><h1>{title}</h1>"
-            f"<img class=\"cover\" src=\"{image_url}\" alt=\"Cover for {title}\"><audio controls preload=\"metadata\" src=\"{audio_url}\"></audio></header>"
-            f"<section class=\"show-notes\" aria-labelledby=\"show-notes-title\"><h2 id=\"show-notes-title\">Show notes</h2>{notes}</section></article>"
-            f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p>{resource_link}</footer>"
+            f"<header class=\"episode-header\"><div class=\"eyebrow\">{html.escape(PODCAST_NAME)}</div><h1>{title}</h1>"
+            f"{image}<p class=\"episode-meta\"><span>{html.escape(edition.title())} edition</span>{'<span>' + html.escape(duration) + '</span>' if duration else ''}</p>{audio}</header>"
+            f"{abstract_section}"
+            f"<section aria-labelledby=\"recording-title\"><h2 id=\"recording-title\">Recording</h2><dl>{recording_items}</dl><p>Narration: Read verbatim by an AI-generated voice.</p></section>"
+            f"<section aria-labelledby=\"source-title\"><h2 id=\"source-title\">Source</h2><dl>{source_items}</dl><div class=\"link-list\">{read_link}</div></section>"
+            f"<section aria-labelledby=\"licensing-title\"><h2 id=\"licensing-title\">Licensing</h2><dl>{license_items}</dl><div class=\"link-list\">{source_license_link}{recording_license_link}</div><p>The authors and publisher do not sponsor or endorse this recording.</p></section>{custom_section}</article>"
+            f"<footer class=\"episode-footer\" aria-label=\"Episode resources\"><p class=\"footer-label\">Episode resources</p><div class=\"link-list\">{resource_links}{paired_link}</div></footer>"
             "</main></body></html>\n")
 
 
@@ -1159,8 +1259,15 @@ def _write_site(config: PodcastConfig, manifest: dict[str, Any], *, cover_url: s
         # Feed-only imports can deliberately omit per-episode artwork.
         image_url = item.get("image_url") or cover_url
         image = f'<img src="{html.escape(str(image_url), quote=True)}" alt="">' if image_url else ""
-        author = item.get("author_label") or ", ".join(item.get("authors") or [])
-        cards.append(f'<article class="episode">{image}<div><small>{html.escape(item["edition"].upper())}</small><h3><a href="{html.escape(item["page_url"], quote=True)}">{html.escape(item["title"])}</a></h3><p>{html.escape(author)}</p></div></article>')
+        author = ", ".join(item.get("authors") or []) or item.get("author_label") or ""
+        abstract = str(item.get("description_abstract") or "").strip()
+        excerpt = abstract
+        if len(excerpt) > 420:
+            excerpt = excerpt[:417].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
+        duration = _duration(float(item["duration"])) if item.get("duration") else ""
+        metadata = " · ".join(value for value in (str(item.get("edition") or "").title(), duration) if value)
+        abstract_html = f'<p class="episode-abstract">{html.escape(excerpt)}</p>' if excerpt else ""
+        cards.append(f'<article class="episode">{image}<div><small>{html.escape(metadata)}</small><h3><a href="{html.escape(item["page_url"], quote=True)}">{html.escape(item["title"])}</a></h3><p class="episode-authors">{html.escape(author)}</p>{abstract_html}</div></article>')
     cards = "".join(cards)
     escaped_title = html.escape(config.site_title)
     escaped_description = html.escape(config.site_description)
@@ -1178,7 +1285,7 @@ def _write_site(config: PodcastConfig, manifest: dict[str, Any], *, cover_url: s
             ".edition-links{display:grid;gap:.75rem;margin:2rem 0 0;max-width:34rem}.edition-link{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:4.5rem;padding:1rem 1.25rem;border:1px solid var(--ink);background:var(--surface);color:var(--ink);text-decoration:none;transition:background 150ms ease,color 150ms ease,transform 150ms ease}.edition-link:hover{background:var(--ink);color:var(--surface);transform:translateY(-2px)}.edition-link:focus-visible,.episode a:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.edition-name{font-size:1.25rem;font-weight:700}.edition-detail{color:var(--muted);font-size:.92rem}.edition-link:hover .edition-detail{color:var(--surface)}"
             ".cover-wrap{max-width:24rem;justify-self:end}.site-cover{display:block;width:100%;height:auto;border:5px solid var(--ink)}"
             ".episodes{padding-top:clamp(2.5rem,6vw,5rem)}.section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;border-bottom:2px solid var(--ink);padding-bottom:.75rem}.section-heading h2{margin:0;font-size:clamp(1.5rem,3vw,2.25rem);line-height:1.1}.rss-links{display:flex;flex-wrap:wrap;gap:.75rem 1.25rem;margin:0;font:700 .82rem/1.4 Helvetica,Arial,sans-serif}.rss-links a{color:var(--accent);text-underline-offset:.15em}"
-            ".episode{display:grid;grid-template-columns:7rem 1fr;gap:1.5rem;padding:1.5rem 0;border-bottom:1px solid var(--line)}.episode img{width:100%;height:auto}.episode small{color:var(--muted);font:700 .72rem/1.3 Helvetica,Arial,sans-serif;letter-spacing:.14em}.episode h3{margin:.45rem 0 .25rem;font-size:clamp(1.2rem,2vw,1.65rem);line-height:1.1}.episode h3 a{color:inherit;text-decoration-thickness:.08em;text-decoration-color:var(--accent);text-underline-offset:.12em}.episode p{margin:0;color:var(--muted)}"
+            ".episode{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:1.5rem;padding:1.5rem 0;border-bottom:1px solid var(--line)}.episode img{width:100%;height:auto}.episode small{color:var(--muted);font:700 .72rem/1.3 Helvetica,Arial,sans-serif;letter-spacing:.14em}.episode h3{margin:.45rem 0 .25rem;font-size:clamp(1.2rem,2vw,1.65rem);line-height:1.1}.episode h3 a{color:inherit;text-decoration-thickness:.08em;text-decoration-color:var(--accent);text-underline-offset:.12em}.episode p{margin:.55rem 0 0;color:var(--muted)}.episode .episode-authors{font-size:.9rem}.episode .episode-abstract{max-width:72ch;color:var(--ink);line-height:1.55}"
             "footer{padding-top:3rem;color:var(--muted);font-size:.9rem}"
             "@media(max-width:48rem){.site-header{grid-template-columns:1fr}.cover-wrap{order:-1;max-width:18rem;justify-self:start}.section-heading{align-items:flex-start;flex-direction:column}.rss-links{font-size:.78rem}}"
             "@media(max-width:30rem){h1{font-size:clamp(3rem,18vw,4.25rem)}.episode{grid-template-columns:5.5rem 1fr;gap:1rem}.edition-link{align-items:flex-start;flex-direction:column;gap:.35rem}}"
@@ -1220,6 +1327,22 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
                   "episode_license_url": license_result["episode_license_url"],
                   "page_url": public_episode_page_url(page_base_url(config), private["title"], paper_guid, edition),
                   "bytes": Path(private["audio"]).stat().st_size}
+        def unpaired_notes(value: Any) -> str:
+            return re.sub(r"\nPaired edition:\s*https?://\S+\s*$", "", str(value or "")).rstrip()
+
+        previous_notes = unpaired_notes(previous.get("show_notes"))
+        previous_generated = unpaired_notes(previous.get("generated_show_notes"))
+        private_notes = unpaired_notes(record.get("show_notes"))
+        private_generated = unpaired_notes(record.get("generated_show_notes"))
+        # Public edits survive republishing the same source. A new explicit
+        # private edit takes priority over an older public edit.
+        if previous_notes and (not previous_generated or previous_notes != previous_generated):
+            if private_notes == private_generated:
+                record["show_notes"] = previous_notes
+                record["description_is_manual"] = True
+        record["show_notes"] = unpaired_notes(record.get("show_notes"))
+        if record.get("generated_show_notes"):
+            record["generated_show_notes"] = unpaired_notes(record["generated_show_notes"])
         transcript_text_url = publish_narration_transcript(config, publisher, record, paper_guid)
         if transcript_text_url:
             record["transcript_text_url"] = transcript_text_url
@@ -1230,6 +1353,8 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         if pair_url:
             record["paired_url"] = pair_url
             record["show_notes"] = record["show_notes"] + f"\nPaired edition: {pair_url}"
+            if record.get("generated_show_notes"):
+                record["generated_show_notes"] += f"\nPaired edition: {pair_url}"
         page_stage = config.state_root / "public-staging" / paper_guid / edition / "index.html"; atomic_write_text(page_stage, _episode_page(record))
         _copy_if_changed(page_stage, config.public_root / "papers" / paper_guid / edition / "index.html")
         public_records.append(record); existing[(record["guid"], source_sha)] = record
@@ -1365,6 +1490,18 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         config = PodcastConfig(private_root.expanduser().resolve(), (state_root or bundle.parent.parent / "podcast").expanduser().resolve(),
                                public_root.expanduser().resolve() if public_root else None, base_url.rstrip("/"),
                                publishing_enabled=publishing_enabled, dry_run=dry_run)
+    cached_episode = None
+    cached_episodes: dict[str, dict[str, Any]] = {}
+    if not config.dry_run:
+        for cached_path in config.private_root.rglob("episode.json"):
+            try:
+                candidate = load_json(cached_path)
+            except (OSError, ValueError):
+                continue
+            if candidate.get("source_sha256") == source_sha and candidate.get("description_abstract"):
+                cached_episode = cached_episode or candidate
+                if candidate.get("edition"):
+                    cached_episodes[str(candidate["edition"])] = candidate
     if license_record is None:
         license_record = license_record_from_metadata(document, source_sha)
     license_result = resolve_license(license_record, source_sha256=source_sha); brief = extract_brief(structure)
@@ -1396,6 +1533,8 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
             response["editions"][edition] = {"status": "planned", "title": episode_title(str(document.get("title", bundle.name)), authors, document.get("publication_year"),
                 institution=report_organisation(document) if is_report(document) else None)}
         return response
+    description = select_description_abstract(document, metadata=metadata, structure=structure,
+        cached=cached_episode, source_sha256=source_sha)
     if backend is None: raise RuntimeError("a local speech backend is required to render edition introductions")
     private_records = {}
     for edition in edition_names:
@@ -1441,6 +1580,15 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         copy_podcast_cover(cover, edition=edition)
         build_transcript(cues, transcript); build_transcript_html(cues, title, transcript_html, attribution=", ".join(authors)); chapter_json(chapters, chapters_path)
         atomic_write_text(markdown, build_markdown_transcript(plan, title))
+        generated_notes = _show_notes(document, authors, edition, license_result,
+            description_abstract=description["description_abstract"],
+            description_source=description["description_abstract_source"], brief_contents=plan.get("brief_contents"))
+        saved_notes = generated_notes
+        cached_for_edition = cached_episodes.get(edition, {})
+        if (cached_for_edition.get("source_sha256") == source_sha and cached_for_edition.get("show_notes")
+                and (not cached_for_edition.get("generated_show_notes")
+                     or cached_for_edition.get("show_notes") != cached_for_edition.get("generated_show_notes"))):
+            saved_notes = str(cached_for_edition.get("show_notes") or generated_notes)
         record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition), "title": title,
                   "brief_contents": plan.get("brief_contents"),
                   **{key: document.get(key) for key in ("literature_type", "item_type", "institution", "report_type", "report_number", "series_title", "evidence")},
@@ -1449,7 +1597,13 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
                   "voice": voice,
                   "audio": str(target_audio), "cover": str(cover), "transcript": str(transcript),
                   "transcript_html": str(transcript_html), "chapters": str(chapters_path), "markdown": str(markdown),
-                  "show_notes": _show_notes(document, authors, edition, license_result),
+                  **description,
+                  "generated_description_abstract": description["description_abstract"],
+                  "edition_description": edition_description(edition, plan.get("brief_contents")),
+                  "journal": document.get("journal") or document.get("publication_title"),
+                  "publisher": document.get("publisher"), "publication_date": document.get("publication_date"),
+                  "show_notes": saved_notes, "generated_show_notes": generated_notes,
+                  "description_is_manual": saved_notes != generated_notes,
                   "source_sha256": source_sha, "source_license": license_result, "read_url": license_result.get("read_url") or document.get("url"),
                   "doi": document.get("doi"),
                   "plan_sha256": plan["plan_sha256"], "audio_sha256": sha256_file(target_audio), "loudness": final_loudness}
