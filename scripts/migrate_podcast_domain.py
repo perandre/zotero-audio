@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from zotero_audio.podcast import (  # noqa: E402
     EDITIONS, LocalPublisher, _show, build_rss, load_podcast_config,
-    paper_slug, public_episode_page_url,
+    page_base_url, paper_slug, public_episode_page_url,
 )
 from zotero_audio.publish_sync import upload_keys  # noqa: E402
 from zotero_audio.util import atomic_write_json, atomic_write_text  # noqa: E402
@@ -63,6 +63,66 @@ def migrate_record(record: dict, old_base: str, new_base: str) -> dict:
     return result
 
 
+def relink_record(record: dict, page_base: str) -> dict:
+    """Point page and paired links at ``page_base``; media URLs and GUIDs stay as published.
+
+    Idempotent: links are recomputed from the paper id, title and edition.
+    """
+    result = dict(record)
+    paper_id = str(result["paper_guid"])
+    result["page_url"] = public_episode_page_url(page_base, str(result["title"]), paper_id, result["edition"])
+    old_pair = str(result.get("paired_url") or "")
+    if old_pair:
+        match = re.search(r"/(brief|full)(?:/|/index\.html)?$", old_pair, re.IGNORECASE)
+        if not match:
+            raise ValueError(f"unrecognized paired_url for {result['title']}")
+        new_pair = public_episode_page_url(page_base, str(result["title"]), paper_id, match.group(1).lower())
+        result["paired_url"] = new_pair
+        if result.get("show_notes") and old_pair != new_pair:
+            result["show_notes"] = re.sub(re.escape(old_pair) + r"(?![\w/-])", new_pair, str(result["show_notes"]))
+    return result
+
+
+def relink_pages(args: argparse.Namespace, config) -> None:
+    page_base = page_base_url(config)
+    if not config.public_root or not config.r2_bucket:
+        raise SystemExit("configure a public root and R2 bucket")
+    manifest_path = config.state_root / "publication-manifest.json"
+    original = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = [relink_record(record, page_base) for record in original.get("episodes", [])]
+    changed = sum(1 for old, new in zip(original.get("episodes", []), records) if old != new)
+    for old, new in zip(original.get("episodes", []), records):
+        for field in ("guid", "pub_date", "bytes", *MEDIA_FIELDS):
+            if old.get(field) != new.get(field):
+                raise AssertionError(f"{field} changed for {old['title']}")
+    print(f"{changed} of {len(records)} episodes relinked to {page_base}")
+    print("GUIDs, enclosure URLs, byte lengths, publication dates, and media object keys are preserved")
+    root = config.public_root
+    stages: dict[str, Path] = {}
+    for edition in EDITIONS:
+        show = _show(config, getattr(config, f"{edition}_show"), show_image(root / edition / "feed.xml"))
+        stage = config.state_root / "public-staging" / f"relinked-{edition}.xml"
+        if args.apply:
+            atomic_write_text(stage, build_rss(show, [item for item in records if item["edition"] == edition]))
+        stages[edition] = stage
+    if not args.apply:
+        print("Preview only; pass --apply to write the manifest and feeds")
+        return
+    backup_dir = config.state_root / "domain-migration-backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(manifest_path, backup_dir / "publication-manifest.json")
+    for edition in EDITIONS:
+        shutil.copy2(root / edition / "feed.xml", backup_dir / f"{edition}-feed.xml")
+    publisher = LocalPublisher(root, config.base_url)
+    for edition, stage in stages.items():
+        publisher.commit_feed(stage, f"{edition}/feed.xml", config.state_root / "feed-snapshots" / edition)
+    atomic_write_json(manifest_path, {**original, "episodes": records})
+    if args.sync:
+        upload_keys(root, config.r2_bucket, config.state_root / "r2-sync-manifest.json",
+                    {f"{edition}/feed.xml" for edition in EDITIONS})
+    print(f"Applied. Backup: {backup_dir}")
+
+
 def show_image(feed_path: Path) -> str:
     import xml.etree.ElementTree as ET
     root = ET.parse(feed_path).getroot()
@@ -78,13 +138,20 @@ def show_image(feed_path: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--old-base", required=True)
+    parser.add_argument("--old-base", help="Previous public base URL (domain move)")
+    parser.add_argument("--relink-pages", action="store_true",
+                        help="Only rewrite page/paired links to the canonical site host; media URLs stay unchanged")
     parser.add_argument("--apply", action="store_true", help="Write the migrated local manifest and feeds")
     parser.add_argument("--sync", action="store_true", help="Upload the two feeds to R2 after applying")
     args = parser.parse_args()
     if args.sync and not args.apply:
         parser.error("--sync requires --apply")
+    if bool(args.old_base) == args.relink_pages:
+        parser.error("pass exactly one of --old-base or --relink-pages")
     config = load_podcast_config(args.config)
+    if args.relink_pages:
+        relink_pages(args, config)
+        return
     old_base = args.old_base.rstrip("/")
     new_base = config.base_url.rstrip("/")
     if not config.public_root or not config.r2_bucket or old_base == new_base:

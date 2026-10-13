@@ -36,7 +36,11 @@ def sync_public(config, records: list[dict]) -> None:
             if record.get("paper_guid") and record.get("edition"):
                 keys.add(f"papers/{record['paper_guid']}/{record['edition']}/index.html")
             else:
-                page_path = _public_key(record["page_url"], config.base_url)
+                try:
+                    page_path = _public_key(record["page_url"], config.base_url)
+                except ValueError:
+                    # Episode pages link the canonical site host directly.
+                    page_path = _public_key(record["page_url"], getattr(config, "feed_base_url", "") or config.base_url)
                 keys.add(page_path.rstrip("/") + "/index.html" if page_path.endswith("/") else page_path)
         keys.add(record["edition"] + "/feed.xml")
     # Show artwork is also referenced by each feed.

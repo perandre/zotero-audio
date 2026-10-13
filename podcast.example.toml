@@ -8,7 +8,9 @@ state_root = "/Users/you/Sites/zotero-audio-runtime/podcast"
 public_root = "/Users/you/Sites/zotero-audio-runtime/podcast/public"
 
 [podcast]
-# Optional canonical feed origin; leave empty to use base_url for feeds as well.
+# Optional canonical site origin (e.g. "https://www.1morepaper.com") for feed
+# URLs, show artwork and episode page links. Leave empty to use base_url.
+# Audio and other media URLs always use base_url.
 feed_base_url = ""
 base_url = "https://1morepaper.com"
 # Set only while moving existing subscribers from an older feed domain.

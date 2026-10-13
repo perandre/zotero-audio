@@ -2,12 +2,21 @@ import xml.etree.ElementTree as ET
 import uuid
 from pathlib import Path
 
+import pytest
+
 import zotero_audio.feed_only as feed_only
 from zotero_audio.podcast import PodcastConfig
 from zotero_audio.util import atomic_write_json
 
 
-def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize(("base_url", "feed_base_url", "link_base", "suffix"), [
+    ("https://perandre.no/1mp", "", "https://perandre.no/1mp", ""),
+    # Production: media stays on base_url; pages link the canonical www host with
+    # the site's trailing slash so neither redirect runs.
+    ("https://1morepaper.com", "https://www.1morepaper.com", "https://www.1morepaper.com", "/"),
+])
+def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path, monkeypatch, base_url, feed_base_url,
+                                                                  link_base, suffix):
     audio = tmp_path / "already-rendered.m4a"
     audio.write_bytes(b"existing audio")
     source_sha = "a" * 64
@@ -45,7 +54,8 @@ def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path
         private_root=tmp_path / "private",
         state_root=tmp_path / "state",
         public_root=tmp_path / "public",
-        base_url="https://perandre.no/1mp",
+        base_url=base_url,
+        feed_base_url=feed_base_url,
         owner_email="podcast@example.org",
         publishing_enabled=True,
         dry_run=False,
@@ -59,7 +69,10 @@ def test_publish_existing_audio_emits_required_feed_metadata_only(tmp_path: Path
     assert item is not None
     assert item.find("enclosure") is not None
     paper_id = uuid.uuid5(uuid.NAMESPACE_URL, "zotero-audio:episode-guid")
-    assert item.findtext("link") == f"https://perandre.no/1mp/papers/existing-paper-{str(paper_id)[:8]}/brief"
+    assert item.findtext("link") == f"{link_base}/papers/existing-paper-{str(paper_id)[:8]}/brief{suffix}"
+    assert item.find("enclosure").get("url").startswith(base_url + "/episodes/")
+    assert item.findtext("guid") == "episode-guid"
+    assert feed.findtext("./channel/link") == (feed_base_url or base_url) + "/"
     assert item.find("{http://www.itunes.com/dtds/podcast-1.0.dtd}image") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}transcript") is None
     assert item.find("{https://podcastindex.org/namespace/1.0}chapters") is None
