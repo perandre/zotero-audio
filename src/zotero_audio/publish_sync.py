@@ -47,7 +47,13 @@ def sync_public(config, records: list[dict]) -> None:
             image = root.find("./channel/{http://www.itunes.com/dtds/podcast-1.0.dtd}image")
             url = image.get("href") if image is not None else root.findtext("./channel/image/url")
             if url:
-                keys.add(_public_key(url, config.base_url))
+                try:
+                    artwork_key = _public_key(url, config.base_url)
+                except ValueError:
+                    # Only show artwork can use the configured canonical feed
+                    # origin. Episode assets retain their original public URLs.
+                    artwork_key = _public_key(url, getattr(config, "feed_base_url", "") or config.base_url)
+                keys.add(artwork_key)
     keys.add("index.html")
     upload_keys(config.public_root, config.r2_bucket, config.state_root / "r2-sync-manifest.json", keys)
 

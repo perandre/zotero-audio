@@ -1092,6 +1092,11 @@ def publish_narration_transcript(config: PodcastConfig, publisher: LocalPublishe
 
 def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, Any]:
     feed_base = config.feed_base_url or config.base_url
+    # Serve show artwork directly from the canonical host; some validators do
+    # not preserve HEAD across redirects. Existing episode URLs stay stable.
+    asset_prefix = config.base_url.rstrip("/") + "/"
+    if image_url.startswith(asset_prefix):
+        image_url = feed_base.rstrip("/") + "/" + image_url[len(asset_prefix):]
     return {"title": show.title, "description": show.description, "link": config.base_url + "/",
             "feed_url": f"{feed_base}/{show.slug}/feed.xml", "image_url": image_url,
             "language": config.language, "author": config.author, "owner_name": config.owner_name,

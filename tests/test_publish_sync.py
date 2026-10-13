@@ -60,3 +60,30 @@ def test_feeds_are_last_and_failed_upload_never_updates_feed(tmp_path, monkeypat
     with pytest.raises(subprocess.CalledProcessError):
         upload_keys(root,"bucket",state,["full/feed.xml","audio.m4a"])
     assert load_json(state) == previous
+
+
+@pytest.mark.parametrize('artwork_origin', ['https://assets.example/media', 'https://www.assets.example/media'])
+def test_sync_show_artwork_accepts_original_or_configured_canonical_origin(tmp_path, monkeypatch, artwork_origin):
+    root = tmp_path / 'public'
+    (root / 'full').mkdir(parents=True)
+    (root / 'full/feed.xml').write_text(
+        '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>'
+        f'<itunes:image href="{artwork_origin}/shows/full-cover.jpg" />'
+        '</channel></rss>'
+    )
+    calls = []
+    monkeypatch.setattr('zotero_audio.publish_sync.upload_keys', lambda *args: calls.append(args[3]))
+    config = SimpleNamespace(public_root=root, state_root=tmp_path, r2_bucket='bucket',
+                             base_url='https://assets.example/media', feed_base_url='https://www.assets.example/media')
+    sync_public(config, [{'edition': 'full', 'audio_url': 'https://assets.example/media/episodes/paper/audio.m4a'}])
+    assert calls == [{'full/feed.xml', 'shows/full-cover.jpg', 'episodes/paper/audio.m4a', 'index.html'}]
+    (root / 'full/feed.xml').write_text(
+        '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>'
+        '<itunes:image href="https://unconfigured.example/shows/full-cover.jpg" />'
+        '</channel></rss>'
+    )
+    with pytest.raises(ValueError, match='outside the configured'):
+        sync_public(config, [{'edition': 'full'}])
+    with pytest.raises(ValueError, match='outside the configured'):
+        sync_public(config, [{'edition': 'full', 'audio_url': 'https://www.assets.example/media/episodes/paper/audio.m4a'}])
+    assert len(calls) == 1
