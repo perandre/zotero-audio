@@ -647,7 +647,7 @@ def test_flattened_abstract_license_footer_preserves_research_prefix():
     assert sanitize_spoken_text(research + footer, section='Abstract')[0] == research
 
 
-def test_canonical_feed_origin_does_not_change_media_origin(tmp_path):
+def test_canonical_feed_and_show_artwork_origin_preserve_episode_media_origin(tmp_path):
     config_path = tmp_path / "podcast.toml"
     config_path.write_text('[paths]\nprivate_root = "."\nstate_root = "."\n'
                            '[podcast]\nbase_url = "https://audio.example"\n'
@@ -656,9 +656,11 @@ def test_canonical_feed_origin_does_not_change_media_origin(tmp_path):
     config = podcast_module.load_podcast_config(config_path)
     show = podcast_module._show(config, config.brief_show, "https://audio.example/show.jpg")
     assert config.base_url == "https://audio.example"
-    assert show["image_url"] == "https://audio.example/show.jpg"
+    assert show["image_url"] == "https://www.audio.example/show.jpg"
     assert show["feed_url"] == show["new_feed_url"] == "https://www.audio.example/brief/feed.xml"
     root = ET.fromstring(build_rss(show, [_episode()]))
     assert root.find("./channel/{http://www.w3.org/2005/Atom}link").get("href") == show["feed_url"]
     assert root.find(f"./channel/{{{ITUNES_NS}}}new-feed-url").text == show["feed_url"]
     assert root.find("./channel/item/enclosure").get("url") == "https://audio.example/audio.m4a"
+    assert root.find(f"./channel/{{{ITUNES_NS}}}image").get("href") == show["image_url"]
+    assert podcast_module._show(config, config.brief_show, "https://external.example/show.jpg")["image_url"] == "https://external.example/show.jpg"

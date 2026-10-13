@@ -50,8 +50,9 @@ new versions. Apple accepts both JPEG and PNG and does not specify a 500 KB
 limit in its current Show Cover specifications.
 
 Set `feed_base_url = "https://www.1morepaper.com"` in `[podcast]` to make the
-Atom self link and migration tag match the canonical, directly served feed.
-This leaves `base_url` and existing media URLs intact. Without that optional
+Atom self link, migration tag and show artwork use the canonical host directly.
+This avoids redirects when validators issue artwork HEAD requests and leaves
+`base_url` and existing episode media URLs intact. Without that optional
 setting, feed URLs continue to use `base_url`. Keep the migration tag and old
 feed redirects for at least four weeks after migration, as Apple requires;
 validators may report an informational migration warning during that period.
