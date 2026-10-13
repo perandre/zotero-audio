@@ -32,10 +32,10 @@ r2_bucket = ""
 
 [shows.brief]
 title = "1 More Paper (Brief)"
-description = "Discover how organizations adopt AI, reshape work, and govern its use. Research abstracts and key conclusions, in the authors' own words."
+description = "Discover how organizations adopt AI, reshape work, and govern its use. Research abstracts and key conclusions, in the authors' own words, read verbatim (by AI)."
 guid = "f25aa92b-5bea-51f8-b842-0836db8713ed"
 
 [shows.full]
 title = "1 More Paper"
-description = "Listen to the latest research on how organizations adopt AI, reshape work, and govern its use. Full papers, read verbatim."
+description = "Listen to the latest research on how organizations adopt AI, reshape work, and govern its use. Full papers, read verbatim (by AI)."
 guid = "119266cf-33b9-5795-bcc2-0e81e72291ef"
