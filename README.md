@@ -104,6 +104,10 @@ Brief, Full edition or article can publish while other work continues. Only
 show-level artwork is needed; chapters and timed transcripts are not required
 by this new generation path.
 
+Existing published episodes can receive source-grounded abstracts and refreshed
+episode pages without regenerating their audio. The preview, backup, apply and
+upload procedure is documented in [published description backfill](docs/podcast-description-backfill.md).
+
 **`auto_publish` applies to requested audio jobs, including the audio editions
 selected in Zotero automation.** With it enabled,
 new `full`, `brief` and `both` jobs express publication intent, while the existing

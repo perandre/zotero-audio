@@ -59,6 +59,21 @@ M4A. Brief can finish and enter delivery while Full continues. A failure in one
 edition/article does not stop other eligible work. Shared extraction and
 verified speech cache entries are reused when their identities match.
 
+Public episode descriptions are prepared only for publication records; they do
+not enter research Markdown, narration plans or audio cache identities. The
+saved `description_abstract` is selected from Zotero's abstract first, then a
+DOI metadata record from Crossref or DataCite (and arXiv's API for arXiv DOIs),
+then a bounded Abstract section extracted from the source PDF. Metadata lookups
+use fixed HTTPS endpoints with short timeouts and response-size limits; missing
+or malformed records leave the abstract unavailable. The source is retained in
+`description_abstract_source`, keyed to the source PDF hash, and reused on
+retries. Generated show notes put that verbatim abstract first, then state what
+the actual edition contains, followed by source, publication, link and license
+details and the AI narration disclosure. They do not generate an AI summary.
+User-edited description text and show notes remain saved. RSS exposes the same
+abstract and provenance in a marked paragraph for site renderers; the public
+episode page consumes those saved fields rather than looking up metadata again.
+
 The model stays warm in one generation worker. The default is Kokoro through
 MLX on Apple silicon. `SpeechBackend` and registered providers/entry points are
 the extension boundaries; there is no silent network or system-voice fallback.

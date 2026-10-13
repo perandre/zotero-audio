@@ -110,7 +110,7 @@ def test_episode_title_and_introductions_are_edition_aware():
     assert "2026-02-00" not in partial
 
 
-def test_show_notes_render_safe_links_and_omit_unrequested_disclosures():
+def test_show_notes_render_safe_labeled_links_and_recording_disclosure():
     document = {
         "abstract": "An abstract.",
         "journal": "International Journal of Information Management",
@@ -126,25 +126,41 @@ def test_show_notes_render_safe_links_and_omit_unrequested_disclosures():
     }
     notes = podcast_module._show_notes(document, ["Laurie Hughes", "Fern Davies"], "brief", license_result)
     assert "Episode recording license" not in notes
-    assert "synthetic voice" not in notes
+    assert "Narration: Read verbatim by an AI-generated voice." in notes
 
     pair_url = "https://feed.mere.no/papers/example/full/"
     rendered = podcast_module._show_notes_html(notes + f"\nPaired edition: {pair_url}", edition="brief")
-    assert '<a href="https://doi.org/10.1016/j.ijinfomgt.2025.102982">https://doi.org/10.1016/j.ijinfomgt.2025.102982</a>' in rendered
-    assert '<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>' in rendered
+    assert '<a href="https://doi.org/10.1016/j.ijinfomgt.2025.102982">Read the paper</a>' in rendered
+    assert '<a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International</a>' in rendered
     assert f'<a href="{pair_url}">Full episode</a>' in rendered
     assert f">{pair_url}</a>" not in rendered
 
     page = podcast_module._episode_page({
-        "title": "Paper",
+        "title": "Paper — Hughes & Davies (2026)",
         "edition": "brief",
         "image_url": "https://audio.example/cover.png",
         "audio_url": "https://audio.example/audio.m4a",
+        "duration": 125.0,
+        "voice": "af_heart",
+        "authors": ["Laurie Hughes", "Fern Davies"],
+        "description_abstract": "The authors examine a source-derived finding.",
+        "description_abstract_source": "doi-metadata",
+        "read_url": "https://doi.org/10.1016/j.ijinfomgt.2025.102982",
+        "source_license": {"name": "CC BY 4.0", "license_url": "https://creativecommons.org/licenses/by/4.0/"},
+        "episode_license_url": "https://creativecommons.org/licenses/by/4.0/",
         "transcript_url": "https://audio.example/transcript.vtt",
         "show_notes": notes + f"\nPaired edition: {pair_url}",
+        "generated_show_notes": notes + f"\nPaired edition: {pair_url}",
     })
     assert '<footer class="episode-footer"' in page
     assert '<a href="https://audio.example/transcript.vtt">Timed transcript</a>' in page
+    assert "Authors’ abstract" in page and "The authors examine a source-derived finding." in page
+    assert "Recording</h2>" in page and "Source</h2>" in page and "Licensing</h2>" in page
+    assert "02:05" in page and "Hughes, Fern Davies" in page
+    assert "Paired edition" not in page
+    manual_page = podcast_module._episode_page({"title": "Custom note", "edition": "full", "show_notes": "Editor supplied notes.",
+                                                "description_abstract": "This is not an abstract.", "description_is_manual": True})
+    assert "Authors’ abstract" not in manual_page
 
 
 def test_sanitize_spoken_text_omits_keyword_and_publisher_furniture():
@@ -403,11 +419,31 @@ def test_config_preserves_safe_defaults(tmp_path: Path):
 def test_site_accepts_existing_feed_only_episodes_without_individual_artwork(tmp_path: Path):
     config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state", public_root=tmp_path / "public")
     item = {"title": "An existing paper with show artwork", "edition": "full", "pub_date": "2026-01-01T00:00:00Z",
-            "page_url": "https://doi.org/10.example/paper", "authors": ["Anna Author"], "show_artwork_only": True}
+            "page_url": "https://doi.org/10.example/paper", "authors": ["Anna Author"], "author_label": "Anna Author",
+            "duration": 3661, "description_abstract": "The authors report a careful finding.", "show_artwork_only": True}
     podcast_module._write_site(config, {"episodes": [item]}, cover_url="https://audio.example/show-cover.png")
     page = (config.public_root / "index.html").read_text()
     assert item["title"] in page and "Anna Author" in page
     assert 'src="https://audio.example/show-cover.png"' in page
+    assert "Full · 01:01:01" in page
+    assert "The authors report a careful finding." in page
+
+
+def test_site_uses_source_abstract_excerpt_without_inventing_missing_text(tmp_path: Path):
+    config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state", public_root=tmp_path / "public")
+    items = [
+        {"title": "Long source abstract", "edition": "brief", "pub_date": "2026-02-01T00:00:00Z",
+         "page_url": "https://audio.example/papers/long", "authors": ["A Author"], "author_label": "A Author",
+         "description_abstract": "A source abstract with useful findings. " * 30},
+        {"title": "No source abstract", "edition": "full", "pub_date": "2026-01-01T00:00:00Z",
+         "page_url": "https://audio.example/papers/empty", "authors": ["B Author"]},
+    ]
+    podcast_module._write_site(config, {"episodes": items})
+    page = (config.public_root / "index.html").read_text(encoding="utf-8")
+    assert "A source abstract with useful findings." in page
+    assert "No source abstract" in page
+    assert "No source abstract was supplied" not in page
+    assert "source…</p>" in page
 
 
 def _bundle(tmp_path: Path) -> Path:

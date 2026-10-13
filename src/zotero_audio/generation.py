@@ -27,6 +27,7 @@ from .podcast import (EDITION_VOICES, PodcastConfig, _authors, _episode_guid,
 from .segment import create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import license_record_from_metadata, load_bundle_metadata, merge_document_metadata
+from .episode_descriptions import edition_description, select_description_abstract
 
 NARRATION_POLICY = "research-markdown-narration-v4"
 ASSEMBLY_POLICY = "final-edition-aac-once-v1"
@@ -498,6 +499,18 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
             report["audio"][edition] = {"status": "skipped" if not qa else "warning" if findings else "pass",
                                         "findings": findings, "measurements": audio_qa, "audio": str(audio_path)}
             authors = _authors(structure["document"], {})
+            description = select_description_abstract(
+                structure["document"], metadata=metadata, structure=structure,
+                cached=cached, source_sha256=source_sha,
+            )
+            generated_notes = _show_notes(structure["document"], authors, edition, license_result,
+                description_abstract=description["description_abstract"],
+                description_source=description["description_abstract_source"], brief_contents=plan.get("brief_contents"))
+            saved_notes = generated_notes
+            if (cached.get("source_sha256") == source_sha and cached.get("show_notes")
+                    and (not cached.get("generated_show_notes")
+                         or cached.get("show_notes") != cached.get("generated_show_notes"))):
+                saved_notes = str(cached.get("show_notes") or generated_notes)
             record = {"edition": edition, "guid": _episode_guid(source_sha, zotero_key, edition),
                 "paper_guid": result["paper_guid"], "zotero_key": zotero_key,
                 "title": episode_title(title, authors, structure["document"].get("publication_year")),
@@ -510,7 +523,14 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                 "selected": selected, "plan_sha256": plan["plan_sha256"], "assembly_sha256": fingerprint,
                 "assembly_config": assembly_config, "voice": voice, "synthesis_config": synthesis_config,
                 "brief_contents": plan.get("brief_contents"), "show_artwork_only": True,
-                "show_notes": _show_notes(structure["document"], authors, edition, license_result),
+                **description,
+                "generated_description_abstract": description["description_abstract"],
+                "edition_description": edition_description(edition, plan.get("brief_contents")),
+                "journal": structure["document"].get("journal") or structure["document"].get("publication_title"),
+                "publisher": structure["document"].get("publisher"),
+                "publication_date": structure["document"].get("publication_date"),
+                "show_notes": saved_notes, "generated_show_notes": generated_notes,
+                "description_is_manual": saved_notes != generated_notes,
                 "read_url": license_result.get("read_url") or structure["document"].get("url"),
                 "doi": structure["document"].get("doi"), "reused_segments": reused, "cached": reusable,
                 "loudness": audio_qa.get("checks", {}).get("loudness", {}),
