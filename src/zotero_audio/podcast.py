@@ -277,7 +277,7 @@ class PodcastConfig:
         PODCAST_NAME + " (Brief)", "Brief editions containing the authors' abstract and, when suitable, conclusion.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
     full_show: ShowConfig = field(default_factory=lambda: ShowConfig(
-        PODCAST_NAME, "Full readings of openly licensed research papers.",
+        PODCAST_NAME, "Full readings of openly licensed research papers, narrated with attribution to the authors and links to the original sources.",
         "full", "119266cf-33b9-5795-bcc2-0e81e72291ef"))
 
 
