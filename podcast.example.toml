@@ -32,10 +32,10 @@ r2_bucket = ""
 
 [shows.brief]
 title = "1 More Paper (Brief)"
-description = "Brief editions containing the authors' abstract and, when suitable, conclusion."
+description = "Discover how organizations adopt AI, reshape work, and govern its use. Research abstracts and key conclusions, in the authors' own words."
 guid = "f25aa92b-5bea-51f8-b842-0836db8713ed"
 
 [shows.full]
 title = "1 More Paper"
-description = "Full readings of openly licensed research papers, narrated with attribution to the authors and links to the original sources."
+description = "Listen to the latest research on how organizations adopt AI, reshape work, and govern its use. Full papers, read verbatim."
 guid = "119266cf-33b9-5795-bcc2-0e81e72291ef"
