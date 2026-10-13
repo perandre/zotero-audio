@@ -274,10 +274,10 @@ class PodcastConfig:
     feed_base_url: str = ""
     briefs_publication_policy: str = "license_required"
     brief_show: ShowConfig = field(default_factory=lambda: ShowConfig(
-        PODCAST_NAME + " (Brief)", "Brief editions containing the authors' abstract and, when suitable, conclusion.",
+        PODCAST_NAME + " (Brief)", "Discover how organizations adopt AI, reshape work, and govern its use. Research abstracts and key conclusions, in the authors' own words.",
         "brief", "f25aa92b-5bea-51f8-b842-0836db8713ed"))
     full_show: ShowConfig = field(default_factory=lambda: ShowConfig(
-        PODCAST_NAME, "Full readings of openly licensed research papers, narrated with attribution to the authors and links to the original sources.",
+        PODCAST_NAME, "Listen to the latest research on how organizations adopt AI, reshape work, and govern its use. Full papers, read verbatim.",
         "full", "119266cf-33b9-5795-bcc2-0e81e72291ef"))
 
 
