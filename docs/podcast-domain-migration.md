@@ -56,3 +56,26 @@ This avoids redirects when validators issue artwork HEAD requests and leaves
 setting, feed URLs continue to use `base_url`. Keep the migration tag and old
 feed redirects for at least four weeks after migration, as Apple requires;
 validators may report an informational migration warning during that period.
+
+## Canonical episode links
+
+The site redirects the apex host to `www` and serves trailing-slash routes, so
+`https://1morepaper.com/papers/<slug>/<edition>` costs two Worker redirects per
+click or crawl. With `feed_base_url = "https://www.1morepaper.com"`, item
+`<link>`s, paired-edition links and the channel link use the canonical form
+`https://www.1morepaper.com/papers/<slug>/<edition>/` directly. Episode GUIDs
+and enclosure/media URLs keep using `base_url` and do not change.
+
+Already-published items keep their stored links until relinked. Preview, then
+apply and upload only the two feeds:
+
+```sh
+python scripts/migrate_podcast_domain.py \
+  --config /Users/pesh/Sites/zotero-audio-runtime/podcast.toml --relink-pages
+python scripts/migrate_podcast_domain.py \
+  --config /Users/pesh/Sites/zotero-audio-runtime/podcast.toml --relink-pages --apply --sync
+```
+
+Relinking recomputes `page_url`/`paired_url` from each episode's paper id,
+title and edition, refuses to run if any GUID, publication date, byte length or
+media URL would change, backs up the manifest and feeds, and is idempotent.

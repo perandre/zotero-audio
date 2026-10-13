@@ -1,5 +1,7 @@
-from scripts.migrate_podcast_domain import migrate_record, paper_slug
-from zotero_audio.podcast import public_episode_page_url
+from types import SimpleNamespace
+
+from scripts.migrate_podcast_domain import migrate_record, paper_slug, relink_record
+from zotero_audio.podcast import page_base_url, public_episode_page_url
 
 
 def test_migration_keeps_episode_identity_and_media_key():
@@ -57,8 +59,40 @@ def test_future_publications_use_site_notes_without_changing_legacy_pages():
         f"https://feed.mere.no/papers/{paper_id}/full/index.html"
     )
     assert public_episode_page_url("https://1morepaper.com", "A useful paper — Author (2026)", paper_id, "full") == (
-        "https://1morepaper.com/papers/a-useful-paper-fc90460f/full"
+        "https://1morepaper.com/papers/a-useful-paper-fc90460f/full/"
     )
+    assert public_episode_page_url("https://www.1morepaper.com/", "A useful paper — Author (2026)", paper_id, "full") == (
+        "https://www.1morepaper.com/papers/a-useful-paper-fc90460f/full/"
+    )
+
+
+def test_page_links_use_canonical_site_host_but_media_keeps_base_url():
+    config = SimpleNamespace(base_url="https://1morepaper.com", feed_base_url="https://www.1morepaper.com")
+    assert page_base_url(config) == "https://www.1morepaper.com"
+    assert page_base_url(SimpleNamespace(base_url="https://1morepaper.com", feed_base_url="")) == "https://1morepaper.com"
+
+
+def test_relink_moves_page_links_only_and_is_idempotent():
+    old, new = "https://1morepaper.com", "https://www.1morepaper.com"
+    original = {
+        "title": "A useful paper — Author (2026)",
+        "guid": "urn:uuid:episode-1", "paper_guid": "fc90460f-d7e7-57c8-a135-81312cb5706b",
+        "edition": "brief", "pub_date": "2026-09-01T12:00:00Z", "bytes": 1234,
+        "audio_url": f"{old}/episodes/immutable/audio.m4a",
+        "page_url": f"{old}/papers/a-useful-paper-fc90460f/brief",
+        "paired_url": f"{old}/papers/a-useful-paper-fc90460f/full",
+        "show_notes": f"Read: {old}/papers/a-useful-paper-fc90460f/fuller\nPaired edition: {old}/papers/a-useful-paper-fc90460f/full",
+    }
+    relinked = relink_record(original, new)
+    assert relinked["page_url"] == f"{new}/papers/a-useful-paper-fc90460f/brief/"
+    assert relinked["paired_url"] == f"{new}/papers/a-useful-paper-fc90460f/full/"
+    assert relinked["show_notes"].endswith(f"Paired edition: {new}/papers/a-useful-paper-fc90460f/full/")
+    assert f"{old}/papers/a-useful-paper-fc90460f/fuller" in relinked["show_notes"]
+    for field in ("guid", "pub_date", "bytes", "audio_url"):
+        assert relinked[field] == original[field]
+    assert relink_record(relinked, new) == relinked
+    unpaired = {key: value for key, value in original.items() if key != "paired_url"}
+    assert "paired_url" not in relink_record(unpaired, new)
 
 
 def test_move_from_personal_site_to_podcast_domain_keeps_guid_and_media_key():
@@ -78,6 +112,6 @@ def test_move_from_personal_site_to_podcast_domain_keeps_guid_and_media_key():
     assert migrated["pub_date"] == original["pub_date"]
     assert migrated["bytes"] == original["bytes"]
     assert migrated["audio_url"] == f"{new}/episodes/immutable/audio.m4a"
-    assert migrated["page_url"] == f"{new}/papers/a-useful-paper-fc90460f/brief"
-    assert migrated["paired_url"] == f"{new}/papers/a-useful-paper-fc90460f/full"
+    assert migrated["page_url"] == f"{new}/papers/a-useful-paper-fc90460f/brief/"
+    assert migrated["paired_url"] == f"{new}/papers/a-useful-paper-fc90460f/full/"
     assert migrated["paired_url"] in migrated["show_notes"]

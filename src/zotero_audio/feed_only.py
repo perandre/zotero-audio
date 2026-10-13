@@ -22,6 +22,8 @@ from .podcast import (
     build_rss,
     episode_title,
     publish_narration_transcript,
+    PODCAST_SITE_HOSTS,
+    page_base_url,
     public_episode_page_url,
     resolve_license,
 )
@@ -248,9 +250,10 @@ def publish_existing_audio(config, *, batch_manifest_path: Path | None = None) -
             "pub_date": candidate.get("pub_date") or published_at,
             "audio_url": _artifact_url(publisher, audio, prefix),
         }
-        if config.base_url.rstrip("/").endswith("/1mp") or urlsplit(config.base_url).hostname == "1morepaper.com":
+        page_base = page_base_url(config)
+        if page_base.endswith("/1mp") or urlsplit(page_base).hostname in PODCAST_SITE_HOSTS:
             record["page_url"] = public_episode_page_url(
-                config.base_url, record["title"], paper_guid, record["edition"]
+                page_base, record["title"], paper_guid, record["edition"]
             )
         existing[(record["guid"], record["revision"])] = record
         added += 1

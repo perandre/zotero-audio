@@ -54,12 +54,27 @@ def paper_slug(title: str, paper_id: str) -> str:
     return f"{slug}-{paper_id[:8]}"
 
 
+PODCAST_SITE_HOSTS = frozenset({"1morepaper.com", "www.1morepaper.com"})
+
+
 def public_episode_page_url(base_url: str, title: str, paper_id: str, edition: str) -> str:
     base = base_url.rstrip("/")
     parsed = urllib.parse.urlsplit(base)
-    if parsed.path.rstrip("/") == "/1mp" or parsed.hostname == "1morepaper.com":
+    if parsed.hostname in PODCAST_SITE_HOSTS:
+        # The site uses trailing-slash routes; link the canonical form directly
+        # so each click or crawl avoids a redirect.
+        return f"{base}/papers/{paper_slug(title, paper_id)}/{edition}/"
+    if parsed.path.rstrip("/") == "/1mp":
         return f"{base}/papers/{paper_slug(title, paper_id)}/{edition}"
     return f"{base}/papers/{paper_id}/{edition}/index.html"
+
+
+def page_base_url(config: "PodcastConfig") -> str:
+    """Origin for public episode pages: the canonical site host when configured.
+
+    Media URLs keep using ``base_url`` so published enclosures stay unchanged.
+    """
+    return (config.feed_base_url or config.base_url).rstrip("/")
 
 
 EDITION_VOICES = {
@@ -1097,7 +1112,7 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
     asset_prefix = config.base_url.rstrip("/") + "/"
     if image_url.startswith(asset_prefix):
         image_url = feed_base.rstrip("/") + "/" + image_url[len(asset_prefix):]
-    return {"title": show.title, "description": show.description, "link": config.base_url + "/",
+    return {"title": show.title, "description": show.description, "link": feed_base + "/",
             "feed_url": f"{feed_base}/{show.slug}/feed.xml", "image_url": image_url,
             "language": config.language, "author": config.author, "owner_name": config.owner_name,
             "owner_email": config.owner_email, "category": config.category, "copyright": config.copyright, "guid": show.guid,
@@ -1197,13 +1212,13 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         has_pair = paired_edition in private_records or any(
             value.get("edition") == paired_edition and value.get("source_sha256") == source_sha
             for value in existing.values())
-        pair_url = public_episode_page_url(config.base_url, private["title"], paper_guid, paired_edition) if has_pair else None
+        pair_url = public_episode_page_url(page_base_url(config), private["title"], paper_guid, paired_edition) if has_pair else None
         record = {**private, "revision": source_sha, "pub_date": previous.get("pub_date", published_at),
                   "audio_url": _artifact_url(publisher, Path(private["audio"]), prefix),
                   "image_url": (_artifact_url(publisher, Path(private["cover"]), prefix)
                                 if private.get("cover") else images[edition]),
                   "episode_license_url": license_result["episode_license_url"],
-                  "page_url": public_episode_page_url(config.base_url, private["title"], paper_guid, edition),
+                  "page_url": public_episode_page_url(page_base_url(config), private["title"], paper_guid, edition),
                   "bytes": Path(private["audio"]).stat().st_size}
         transcript_text_url = publish_narration_transcript(config, publisher, record, paper_guid)
         if transcript_text_url:
