@@ -41,3 +41,17 @@ Keep private library routes and their authentication separate.
 After a hosting or metadata repair, refresh the feed in Apple Podcasts Connect
 and inspect its imported details before publishing. A Draft or successful HTTP
 check alone does not confirm Apple has accepted the show.
+
+Public show covers are exported from the original PNG designs as 3000 × 3000
+RGB JPEGs at 72 dpi. The current exports are below Cast Feed Validator's 500 KB
+recommendation; the source PNGs and private cover exports remain unchanged.
+Artwork objects use content hashes and fresh `.jpg` names so clients see the
+new versions. Apple accepts both JPEG and PNG and does not specify a 500 KB
+limit in its current Show Cover specifications.
+
+Set `feed_base_url = "https://www.1morepaper.com"` in `[podcast]` to make the
+Atom self link and migration tag match the canonical, directly served feed.
+This leaves `base_url` and existing media URLs intact. Without that optional
+setting, feed URLs continue to use `base_url`. Keep the migration tag and old
+feed redirects for at least four weeks after migration, as Apple requires;
+validators may report an informational migration warning during that period.

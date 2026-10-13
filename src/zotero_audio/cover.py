@@ -22,8 +22,9 @@ PALETTE = {"paper": "#F2EFE6", "ink": "#16212B", "brief": "#2F5BD3", "full": "#D
 
 def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
     """Preserve the supplied design in Apple-compatible, opaque show artwork."""
-    if destination.suffix.casefold() != ".png":
-        raise ValueError("podcast cover destination must be .png")
+    suffix = destination.suffix.casefold()
+    if suffix not in {".png", ".jpg", ".jpeg"}:
+        raise ValueError("podcast cover destination must be .png, .jpg or .jpeg")
     try:
         source = PODCAST_COVER_PATHS[edition]
     except KeyError as exc:
@@ -37,6 +38,7 @@ def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
         if image.width != image.height:
             raise ValueError("podcast cover must be square")
         compatible = 1400 <= image.width <= 3000 and image.mode == "RGB"
+        normalized = image.copy() if compatible else None
         if not compatible:
             if destination.resolve() == source.resolve():
                 raise ValueError("normalized cover destination must differ from source")
@@ -46,9 +48,12 @@ def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
             if not 1400 <= image.width <= 3000:
                 normalized = normalized.resize((3000, 3000), Image.Resampling.LANCZOS)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if not compatible:
-        temporary = destination.with_suffix(".tmp.png")
-        normalized.save(temporary, format="PNG")
+    if not compatible or suffix != ".png":
+        temporary = destination.with_name(destination.stem + ".tmp" + suffix)
+        if suffix == ".png":
+            normalized.save(temporary, format="PNG")
+        else:
+            normalized.save(temporary, format="JPEG", quality=85, optimize=True, subsampling=0, dpi=(72, 72))
         if not destination.is_file() or sha256_file(temporary) != sha256_file(destination):
             temporary.replace(destination)
         else:
@@ -62,7 +67,8 @@ def copy_podcast_cover(destination: Path, *, edition: str = "full") -> Path:
     atomic_write_json(destination.with_suffix(".artwork.json"), {
         "schema": "zotero-audio-artwork/v1", "design_version": DESIGN_VERSION,
         "generation": "user-supplied-static", "edition": edition, "source": source.name,
-        "width": width, "height": height, "mode": mode, "sha256": sha256_file(destination),
+        "width": width, "height": height, "mode": mode, "bytes": destination.stat().st_size,
+        "sha256": sha256_file(destination),
     })
     return destination
 
