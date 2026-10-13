@@ -664,3 +664,89 @@ def test_canonical_feed_and_show_artwork_origin_preserve_episode_media_origin(tm
     assert root.find("./channel/item/enclosure").get("url") == "https://audio.example/audio.m4a"
     assert root.find(f"./channel/{{{ITUNES_NS}}}image").get("href") == show["image_url"]
     assert podcast_module._show(config, config.brief_show, "https://external.example/show.jpg")["image_url"] == "https://external.example/show.jpg"
+
+
+def test_typesetting_repair_requires_evidence_from_the_same_paper():
+    from zotero_audio.podcast import repair_spoken_typesetting, spoken_vocabulary
+    paper = [
+        "Escalation is costly. The consultation values were evaluated with sub-agents and sub-agents.",
+        "A CNN baseline and PASAC were compared with subagents.",
+    ]
+    vocabulary = spoken_vocabulary(paper)
+    text = ("Executors make es-calation decisions; con- sultation val-ues were eval- uated. "
+            "Two sub-agents ran token- and cost-aware checks with unrelated-words.")
+    repaired, changes = repair_spoken_typesetting(text, vocabulary)
+    assert repaired == ("Executors make escalation decisions; consultation values were evaluated. "
+                        "Two sub-agents ran token- and cost-aware checks with unrelated-words.")
+    assert "repair-line-break-hyphenation" in changes
+    heading, changes = repair_spoken_typesetting("1 I NTRODUCTION. We select S ILENT. A CNN and A PASAC.", vocabulary)
+    assert heading == "1 INTRODUCTION. We select SILENT. A CNN and A PASAC."
+    assert "repair-small-caps-split" in changes
+
+
+def test_superscript_citations_are_removed_only_when_the_paper_uses_them():
+    from zotero_audio.podcast import repair_spoken_typesetting, spoken_vocabulary
+    cited = spoken_vocabulary(["Reactors store energy in chemical form1,2 under conditions3,4 that are solved numerically5–7."])
+    assert repair_spoken_typesetting("Models resolve the electrode7, losses8 and CO2 in Julia23.", cited)[0] == \
+        "Models resolve the electrode, losses and CO2 in Julia."
+    plain = spoken_vocabulary(["The agents ran test3 and test11 with base58 identifiers."])
+    assert repair_spoken_typesetting("The agents ran test3 and test11.", plain)[0] == "The agents ran test3 and test11."
+
+
+def test_sanitizer_punctuates_structured_abstracts_and_drops_grouped_contacts():
+    abstract = "Purpose Parkinson’s disease is common. Methods We use wearables. Results show gains. Conclusion This works."
+    assert sanitize_spoken_text(abstract, section="Abstract")[0] == (
+        "Purpose. Parkinson’s disease is common. Methods. We use wearables. Results show gains. Conclusion. This works.")
+    assert sanitize_spoken_text("Methods We use wearables.", section="Methods")[0] == "Methods We use wearables."
+    assert sanitize_spoken_text("{psowietzki, kaspere}@ethz.ch")[0] == ""
+    assert sanitize_spoken_text("A R T I C L E I N F O Generative AI is common.")[0] == "Generative AI is common."
+    assert sanitize_spoken_text("Agents reached real systems [OpenAI, 2026b,a, Hugging Face, 2026b]. We used [Title/Abstract] filters.")[0] == \
+        "Agents reached real systems. We used [Title/Abstract] filters."
+    assert sanitize_spoken_text("Tasks of Terminal-Bench andτ 2-bench.")[0] == "Tasks of Terminal-Bench and τ 2-bench."
+
+
+def test_full_edition_skips_unrecognized_reference_lists_but_keeps_appendices():
+    from zotero_audio.podcast import _omit_spoken_reference_lists
+    segments = [{"kind": "intro", "text": "You’re listening."}, {"kind": "body", "text": "Body text."},
+                {"kind": "body", "text": "REFERENCES"},
+                {"kind": "body", "text": "David Abel and Michael L. Littman. Near optimal behavior. In ICML, 2016."},
+                {"kind": "body", "text": "E. Siow, T. Tiropanis, and W. Hall, “Analytics,” 2020."},
+                {"kind": "body", "text": "A METHODOLOGICAL DETAILS"}, {"kind": "body", "text": "Appendix prose."}]
+    assert [s["text"] for s in _omit_spoken_reference_lists(segments)] == [
+        "You’re listening.", "Body text.", "A METHODOLOGICAL DETAILS", "Appendix prose."]
+    numbered = [{"kind": "body", "text": "Conflicts of interest None."},
+                {"kind": "body", "text": "1. Parkinson J."}, {"kind": "body", "text": "An essay on the shaking palsy."},
+                {"kind": "body", "text": "2. Lombardo JM, Lopez MA."}, {"kind": "body", "text": "4. Xu S, Pan Z."},
+                {"kind": "body", "text": "5. Delva A, Van Weehaeghe D."}]
+    assert [s["text"] for s in _omit_spoken_reference_lists(numbered)] == ["Conflicts of interest None."]
+    steps = [{"kind": "body", "text": "1. Collect the data."}, {"kind": "body", "text": "2. Train the model."},
+             {"kind": "body", "text": "3. Evaluate it."}]
+    assert _omit_spoken_reference_lists(steps) == steps
+
+
+def test_brief_abstract_ends_at_unheaded_introduction_on_a_new_page():
+    abstract = " ".join(["The authors report a careful result."] * 32)
+    structure = {"document": {}, "blocks": [
+        {"type": "heading", "text": "Abstract", "pdf_page": 2},
+        {"text": abstract, "pdf_page": 2},
+        {"text": "Electrochemical reactors sit at the center of the energy transition.", "pdf_page": 3},
+        {"type": "heading", "text": "Results", "pdf_page": 5},
+    ]}
+    assert [b["text"] for b in extract_brief(structure)["abstract"]] == [abstract]
+    continued = {"document": {}, "blocks": [
+        {"type": "heading", "text": "Abstract", "pdf_page": 1},
+        {"text": "We study a short question and", "pdf_page": 1},
+        {"text": "continue the abstract on the next page.", "pdf_page": 2},
+    ]}
+    assert len(extract_brief(continued)["abstract"]) == 2
+
+
+def test_brief_conclusion_stops_before_credit_and_declarations():
+    structure = _structure()
+    structure["blocks"] += [
+        {"text": "CRediT authorship contribution statement Jian Liu: Writing.", "role": "conclusion"},
+        {"text": "Declaration of competing interest None.", "role": "conclusion"},
+    ]
+    brief = extract_brief(structure)
+    assert brief["conclusion"]
+    assert all("CRediT" not in b["text"] and "Declaration" not in b["text"] for b in brief["conclusion"])
