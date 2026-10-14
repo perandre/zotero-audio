@@ -37,13 +37,14 @@ class BackendPool:
         self.loaded = {}
 
     def get(self, name="kokoro"):
+        from .remote_speech import REMOTE_PROVIDER, RemoteSpeechBackend, configured_provider
+        # The synchronized `tts_model` setting stays "kokoro"; a local-only
+        # control/speech.json (or env) may route it to the remote engine.
+        # Resolve before the cache lookup so one remote session is reused.
+        if name in {"kokoro", "auto"} and configured_provider() == REMOTE_PROVIDER:
+            name = REMOTE_PROVIDER
         if name not in self.loaded:
             from .audio import resolve_kokoro_engine
-            from .remote_speech import REMOTE_PROVIDER, RemoteSpeechBackend, configured_provider
-            # The synchronized `tts_model` setting stays "kokoro"; a local-only
-            # control/speech.json (or env) may route it to the remote engine.
-            if name in {"kokoro", "auto"} and configured_provider() == REMOTE_PROVIDER:
-                name = REMOTE_PROVIDER
             engine = resolve_kokoro_engine(name)
             if engine == REMOTE_PROVIDER:
                 self.loaded[name] = RemoteSpeechBackend.from_settings(expected_engine="kokoro-torch")

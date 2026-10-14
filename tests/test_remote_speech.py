@@ -135,7 +135,8 @@ def test_pool_routes_kokoro_alias_only_when_configured(tmp_path, monkeypatch):
     monkeypatch.setattr(RemoteSpeechBackend, "from_settings",
                         classmethod(lambda cls, **kw: seen.append(kw) or "remote"))
     monkeypatch.setenv("ZOTERO_AUDIO_SPEECH_PROVIDER", "kokoro-remote")
-    assert BackendPool().get("kokoro") == "remote"
-    assert seen == [{"expected_engine": "kokoro-torch"}]
+    pool = BackendPool()
+    assert pool.get("kokoro") == "remote" and pool.get("kokoro") == "remote"
+    assert seen == [{"expected_engine": "kokoro-torch"}]  # one remote session, reused across jobs
     monkeypatch.delenv("ZOTERO_AUDIO_SPEECH_PROVIDER")
     assert BackendPool().get("kokoro-remote") == "remote"
