@@ -206,16 +206,19 @@ def refresh_zotero(store: Store) -> dict:
 
 
 def _refresh_zotero(store: Store) -> dict:
-    from .zotero_local import ZoteroLocalAPI, ZoteroLocalAPIError
+    from .zotero_local import ZoteroLocalAPIError
+    from .zotero_web import make_zotero_api
     from .app_state import now
-    api = ZoteroLocalAPI(timeout=5)
     try:
+        # Local API by default; the Zotero Web API when control/zotero.json selects it.
+        api = make_zotero_api(store.root, timeout=5)
         discovered = api.pdf_attachments()
-    except ZoteroLocalAPIError as exc:
+    except (ZoteroLocalAPIError, ValueError) as exc:
         store.set_state("zotero", {**store.state("zotero", {}), "online": False, "message": str(exc), "checked_at": now()})
         return {"online": False, "count": 0, "message": str(exc)}
     count = 0
-    discovered_keys = {key for key, _ in discovered}
+    # Web mode downloads in bounded batches; not-yet-downloaded PDFs still exist in Zotero.
+    discovered_keys = {key for key, _ in discovered} | set(getattr(api, "retained_keys", lambda: ())())
     for key, source in discovered:
         try:
             previous = store.article(key)
@@ -273,7 +276,11 @@ def _refresh_zotero(store: Store) -> dict:
             with store.edit_article(article["id"]) as current:
                 current["in_zotero"] = False
     checked_at = now()
-    store.set_state("zotero", {"online": True, "count": count, "checked_at": checked_at, "last_success_at": checked_at})
+    state = {"online": True, "count": count, "checked_at": checked_at, "last_success_at": checked_at}
+    if hasattr(api, "unavailable"):
+        # Web mode: PDFs Zotero cannot serve (linked files, never-uploaded files) are listed, never silent.
+        state.update(mode="web", unavailable=list(api.unavailable), pending_downloads=len(api.pending))
+    store.set_state("zotero", state)
     return {"online": True, "count": count}
 
 

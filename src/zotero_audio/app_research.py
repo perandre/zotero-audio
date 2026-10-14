@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 from .app_state import Store, digest, now
 from .zotero_local import ZoteroLocalAPI, ZoteroLocalAPIError
+from .zotero_web import make_zotero_api
 
 MODEL = "jev-1.13.0"
 LABELS = ("poor", "moderate", "good", "excellent")
@@ -368,7 +369,7 @@ def run(store: Store, *, limit: int | None = None, workers: int = 4, retry_faile
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError("A research-fit job is already running") from None
-        records = discover(api or ZoteroLocalAPI(timeout=15))
+        records = discover(api or make_zotero_api(store.root, timeout=15))
         prepare(store, records)
         # A pilot enriches only a bounded set; a full run covers all title-only DOI records.
         enrich(store, records, limit=limit, progress=progress)
