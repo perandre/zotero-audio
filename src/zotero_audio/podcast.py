@@ -13,6 +13,7 @@ import shutil
 import urllib.parse
 import unicodedata
 import uuid
+from collections import Counter
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -130,8 +131,33 @@ SPOKEN_LICENSE_NOTICE_RE = re.compile(
 )
 BRIEF_BACK_MATTER_RE = re.compile(
     r"(?i)^\s*(?:Supplementary Information|Funding|Data availability|Declarations|"
-    r"Competing interests|Conflict(?:s)? of interest|Acknowledg(?:e)?ments|Open Access)"
+    r"Competing interests|Conflict(?:s)? of interest|Acknowledg(?:e)?ments|Open Access|"
+    r"CRediT authorship|Declaration of|Authors?[’']? contributions|Ethics approval)"
     r"(?:\s|[:.]|$)"
+)
+# Structured-abstract labels are typeset as run-in headings; extraction leaves
+# "Methods We propose", which a listener hears as one run-on sentence.
+SPOKEN_ABSTRACT_LABELS = {
+    "Purpose": "Purpose", "Background": "Background", "Objective": "Objective", "Objectives": "Objectives",
+    "Aim": "Aim", "Aims": "Aims", "Methods": "Methods", "Methodology": "Methodology",
+    "Design/methodology/approach": "Design, methodology and approach", "Findings": "Findings",
+    "Results": "Results", "Conclusion": "Conclusion", "Conclusions": "Conclusions",
+    "Practical implications": "Practical implications", "Social implications": "Social implications",
+    "Research limitations/implications": "Research limitations and implications",
+    "Originality/value": "Originality and value",
+}
+SPOKEN_ABSTRACT_LABEL_RE = re.compile(
+    r"(?:^|(?<=[.!?] ))(" + "|".join(re.escape(label) for label in sorted(SPOKEN_ABSTRACT_LABELS, key=len, reverse=True))
+    + r") (?=[A-ZÀ-ÖØ-Þ])"
+)
+SPOKEN_SPACED_FURNITURE_RE = re.compile(r"\bA R T I C L E I N F O\b|\bA B S T R A C T\b")
+SPOKEN_BRACED_EMAIL_RE = re.compile(r"\{[^{}\n]{1,200}\}\s*@[\w.-]+\.[A-Za-z]{2,}\b[.,;:]?")
+SPOKEN_BRACKET_AUTHOR_YEAR_RE = re.compile(
+    r"\s?\[[A-ZÀ-ÖØ-Þ][^\[\]\n]{0,250}?,\s*(?:19|20)\d{2}[a-z]?(?:,\s*[a-z])?\]"
+)
+# Numbered bibliography entries without a "References" heading ("4. Xu S, Pan Z.").
+SPOKEN_REFERENCE_ENTRY_RE = re.compile(
+    r"^(\d{1,3})\.\s+[A-ZÀ-ÖØ-Þ][\w’'-]+(?:\s[a-zà-ÿ]{1,3})?(?:\s[\w’'-]+)?\s[A-ZÀ-ÖØ-Þ]{1,3}[.,]"
 )
 
 
@@ -245,6 +271,23 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
             raw = raw[:-1]
         return "the linked source" + trailing
 
+    text, count = SPOKEN_SPACED_FURNITURE_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-publisher-front-matter")
+    if str(section or "").casefold().rstrip(".: ") in {"abstract", "summary"}:
+        text, count = SPOKEN_ABSTRACT_LABEL_RE.subn(lambda m: SPOKEN_ABSTRACT_LABELS[m.group(1)] + ". ", text)
+        if count:
+            transformations.append("punctuate-structured-abstract-label")
+    # A Greek symbol glued to the preceding word ("andτ-bench") is read as one word.
+    text, count = re.subn(r"(?<=[a-z]{2})(?=[α-ωΑ-Ω])", " ", text)
+    if count:
+        transformations.append("separate-greek-symbol")
+    text, count = SPOKEN_BRACED_EMAIL_RE.subn(" ", text)
+    if count:
+        transformations.append("omit-grouped-email-addresses")
+    text, count = SPOKEN_BRACKET_AUTHOR_YEAR_RE.subn("", text)
+    if count:
+        transformations.append("omit-author-year-citation")
     text = SPOKEN_CITATION_RE.sub(replace_citations, text)
     text = SPOKEN_EMAIL_RE.sub(replace_email, text)
     # PDF text extraction occasionally inserts a space after the URL scheme or
@@ -257,6 +300,119 @@ def sanitize_spoken_text(value: str, *, section: str | None = None) -> tuple[str
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text, transformations
+
+
+SPOKEN_PLAIN_WORD_RE = re.compile(r"(?<![\w-])[^\W\d_]+(?![\w-])")
+SPOKEN_COMPOUND_RE = re.compile(r"(?<![\w-])[^\W\d_]+(?:-[^\W\d_]+)+(?![\w-])")
+SPOKEN_SMALL_CAPS_RE = re.compile(r"\b([A-Z]) ([A-Z]{2,})\b(?![’'])")
+SPOKEN_SUPERSCRIPT_LIST_RE = re.compile(r"(?<=[a-z]{3})\d{1,3}(?:,\d{1,3})+(?=[\s.,;:)]|$)|(?<=[a-z]{3})\d{1,3}[–-]\d{1,3}(?=[\s.,;:)]|$)")
+
+
+@dataclass(frozen=True)
+class SpokenVocabulary:
+    """Word evidence from one whole paper, used to repair only proven typesetting splits."""
+    words: Counter[str]
+    compounds: Counter[str]
+    superscript_citations: bool
+
+
+def spoken_vocabulary(texts: Iterable[str]) -> SpokenVocabulary:
+    words: Counter[str] = Counter()
+    compounds: Counter[str] = Counter()
+    citation_lists = 0
+    for text in texts:
+        # Small-caps fragments ("A BSTRACT") are not evidence of real words.
+        text = SPOKEN_SMALL_CAPS_RE.sub(" ", str(text))
+        words.update(word.casefold() for word in SPOKEN_PLAIN_WORD_RE.findall(text))
+        compounds.update(word.casefold() for word in SPOKEN_COMPOUND_RE.findall(text))
+        citation_lists += len(SPOKEN_SUPERSCRIPT_LIST_RE.findall(text))
+    # Several "form1,2"/"model3–5" markers prove the paper uses superscript citations.
+    return SpokenVocabulary(words, compounds, citation_lists >= 3)
+
+
+def repair_spoken_typesetting(value: str, vocabulary: SpokenVocabulary) -> tuple[str, list[str]]:
+    """Rejoin line-break hyphenation, split small caps and superscript citation digits.
+
+    Each repair requires evidence elsewhere in the same paper: a word is only
+    rejoined when the joined form is used there as an ordinary word.
+    """
+    words, compounds = vocabulary.words, vocabulary.compounds
+    transformations: list[str] = []
+
+    def spaced_hyphen(match: re.Match[str]) -> str:
+        left, right = match.group(1), match.group(2)
+        if right in {"and", "or", "nor", "to", "versus", "vs"}:
+            return match.group(0)  # suspended compound: "token- and cost-aware"
+        joined, compound = words[(left + right).casefold()], compounds[f"{left}-{right}".casefold()]
+        if not joined and not compound:
+            return match.group(0)
+        transformations.append("repair-line-break-hyphenation")
+        return f"{left}-{right}" if compound >= joined else left + right
+
+    text = re.sub(r"(?<![\w-])([^\W\d_]{2,})- ([a-zà-ÿ]{2,})(?![\w-])", spaced_hyphen, str(value))
+
+    def fused_hyphen(match: re.Match[str]) -> str:
+        left, right = match.group(1), match.group(2)
+        # A real compound ("sub-agents") stays unless the paper mostly writes it closed.
+        if words[(left + right).casefold()] <= compounds[f"{left}-{right}".casefold()]:
+            return match.group(0)
+        transformations.append("repair-line-break-hyphenation")
+        return left + right
+
+    text = re.sub(r"(?<![\w-])([^\W\d_]{2,})-([a-zà-ÿ]{2,})(?![\w-])", fused_hyphen, text)
+
+    def small_caps(match: re.Match[str]) -> str:
+        initial, rest = match.group(1), match.group(2)
+        if words[rest.casefold()] or (len(rest) < 4 and not words[(initial + rest).casefold()]):
+            return match.group(0)  # "A CNN", "A PASAC": an article before an acronym
+        transformations.append("repair-small-caps-split")
+        return initial + rest
+
+    text = SPOKEN_SMALL_CAPS_RE.sub(small_caps, text)
+
+    if vocabulary.superscript_citations:
+        text, count = re.subn(r"\b([^\W\d_]*[a-z]{3})\d{1,3}(?:[,–-]\d{1,3})*(?=[\s.,;:)]|$)", r"\1", text)
+        if count:
+            transformations.append("omit-superscript-citation")
+    return text, transformations
+
+
+SPOKEN_REFERENCE_HEADING_RE = re.compile(
+    r"(?i)^(?:\d+\.?\s+)?(?:references|bibliography|works cited|literature cited|reference list)[.:]?$")
+SPOKEN_APPENDIX_HEADING_RE = re.compile(
+    r"^(?:(?i:appendix|appendices|supplementary)\b|[A-Z]\d{0,2}(?:\.\d+)*\.?\s+[A-Z][^\s,“”\"]*(?:\s[^\s,“”\"]+){0,9}$)")
+
+
+def _omit_spoken_reference_lists(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop bibliographies that extraction did not recognize, keeping later appendices.
+
+    A standalone "References" segment starts a skipped range that ends at the
+    next appendix heading. A run of numbered entries ("4. Xu S, Pan Z.") with
+    no heading at all is treated as the end of the readable article.
+    """
+    kept: list[dict[str, Any]] = []
+    skipping = False
+    for index, segment in enumerate(segments):
+        text = str(segment.get("text", "")).strip()
+        narrator = segment.get("kind") in {"ident", "intro", "closing"}
+        if not narrator and SPOKEN_REFERENCE_HEADING_RE.match(text):
+            skipping = True
+            continue
+        if skipping and not narrator and len(text.split()) <= 10 and SPOKEN_APPENDIX_HEADING_RE.match(text):
+            skipping = False
+        if skipping and not narrator:
+            continue
+        match = SPOKEN_REFERENCE_ENTRY_RE.match(text)
+        if match and not narrator:
+            previous, entries = int(match.group(1)), 1
+            for following in segments[index + 1:index + 12]:
+                later = SPOKEN_REFERENCE_ENTRY_RE.match(str(following.get("text", "")))
+                if later and previous < int(later.group(1)) <= previous + 5:
+                    previous, entries = int(later.group(1)), entries + 1
+            if entries >= 3:
+                return kept + [item for item in segments[index:] if item.get("kind") in {"ident", "intro", "closing"}]
+        kept.append(segment)
+    return kept
 
 
 @dataclass(frozen=True)
@@ -430,6 +586,16 @@ def extract_brief(structure: dict[str, Any], max_seconds: float = 600.0) -> dict
                     or SPOKEN_KEYWORD_LIST_RE.match(boundary_text)
                     or re.match(r"(?i)^(?:CCS Concepts|ACM Reference Format|Index Terms)\b", boundary_text)
                     or re.match(r"(?i)^(?:\d+[.)]?|[IVX]+\.)\s*(?:\|\s*)?Introduction\b", boundary_text)):
+                break
+            # Some layouts (e.g. Nature-style preprints) give the abstract its
+            # own page and start the introduction without a heading. A complete
+            # abstract followed by a new paragraph on a later page ends it.
+            if (text and structured_abstract and str(block.get("pdf_page", "")).isdigit()
+                    and str(structured_abstract[-1].get("pdf_page", "")).isdigit()
+                    and int(block["pdf_page"]) > int(structured_abstract[-1]["pdf_page"])
+                    and sum(len(str(item.get("text", "")).split()) for item in structured_abstract) >= 150
+                    and str(structured_abstract[-1].get("text", "")).rstrip().endswith((".", "!", "?"))
+                    and text[:1].isupper()):
                 break
             if text and block.get("included_in_reading", True):
                 structured_abstract.append(block)
@@ -787,6 +953,8 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                         literature_type="report" if is_report(document) else "academic",
                         institution=document.get("institution"), publisher=document.get("publisher"),
                         series_title=document.get("series_title"), report_number=document.get("report_number"))
+    vocabulary = spoken_vocabulary([str(document.get("abstract") or "")] + [
+        str(block.get("text", "")) for block in structure.get("blocks", [])])
     segments: list[dict[str, Any]] = []
     def append(text: str, kind: str, section: str, ids: list[str] | None = None, pages: list[int] | None = None,
                pause: int = 240, transformations: list[str] | None = None) -> None:
@@ -813,6 +981,8 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                 spoken_text, transformations = sanitize_spoken_text(
                     str(block.get("text", "")), section=heading
                 )
+                spoken_text, repairs = repair_spoken_typesetting(spoken_text, vocabulary)
+                transformations += repairs
                 if spoken_text:
                     append(spoken_text, "heading" if block.get("type") == "heading" else "body", heading,
                            block.get("source_block_ids") or ([str(block["id"])] if block.get("id") else []),
@@ -824,6 +994,8 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
             spoken_text, transformations = sanitize_spoken_text(
                 str(segment["text"]), section=segment.get("section")
             )
+            spoken_text, repairs = repair_spoken_typesetting(spoken_text, vocabulary)
+            transformations += repairs
             if not spoken_text:
                 continue
             sanitized_segments.append({
@@ -832,6 +1004,7 @@ def create_edition_plan(source_plan: dict[str, Any], structure: dict[str, Any], 
                 "text_sha256": sha256_text(spoken_text),
                 "transformations": list(segment.get("transformations", [])) + transformations,
             })
+        sanitized_segments = _omit_spoken_reference_lists(sanitized_segments)
         segments = [{**segment, "ordinal": index} for index, segment in enumerate(sanitized_segments, 1)]
     result = {"schema": "zotero-audio-narration-plan/v1", "pipeline_version": __version__, "edition": edition,
               "document": document, "source_sha256": source_plan["source_sha256"],

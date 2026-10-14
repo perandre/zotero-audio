@@ -51,6 +51,11 @@ The `markdown_ready` callback fires before speech. The catalog/index and private
 cloud mirror can become useful at that point. Narration is derived separately,
 removing reference lists, citation markers, long links, contact furniture and
 unsuitable layout artifacts. It does not use an LLM to paraphrase research.
+Typesetting repairs are evidence-based per paper: line-break hyphenation and
+split small-caps headings are rejoined only when the joined word appears
+elsewhere in the same paper, superscript citation digits are dropped only
+when the paper demonstrably uses them, and an unrecognized bibliography is
+skipped up to the next appendix heading.
 Brief uses a bounded authors’ abstract/conclusion or supported report summary;
 it does not fabricate a summary when suitable source content is unavailable.
 
