@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 PROTOCOL = 1
-DEFAULT_REMOTE_COMMAND = "~/1mp/venv/bin/python -m zotero_audio.remote_speech serve"
+DEFAULT_REMOTE_COMMAND = "HF_HOME=$HOME/1mp/hf $HOME/1mp/venv/bin/python -m zotero_audio.remote_speech serve"
 REMOTE_PROVIDER = "kokoro-remote"
 
 

@@ -224,6 +224,47 @@ CPU wheel index to avoid the CUDA download); final AAC encoding still uses macOS
 `afconvert`, so Linux currently produces Markdown and WAV segments only.
 The legacy `zotero-audio` CLI accepts `--engine auto|kokoro-torch|kokoro-mlx`.
 
+### Remote speech (synthesis on a Linux x86_64 box)
+
+The Mac worker keeps planning, the segment cache, assembly with `afconvert`, QA,
+publication and the single feed writer. Only per-segment synthesis runs on the
+other machine, over one persistent SSH process (`python -m
+zotero_audio.remote_speech serve`, newline-delimited JSON on stdin/stdout).
+The backend adopts the remote engine's real config (`engine: kokoro-torch`, model
+revision, torch version, voice, speed), so cache keys match what that engine
+produces locally and never collide with MLX. A different remote torch build
+(for example `+cpu`) is a different identity and re-synthesizes once. Requests
+time out, reconnect once, then fail the job; there is no fallback to MLX or any
+other voice.
+
+On the Linux box (no sudo; short paths because of the espeak-ng limit):
+
+```sh
+git archive HEAD | ssh user@box 'mkdir -p ~/1mp/repo ~/1mp/hf && tar -x -C ~/1mp/repo'
+ssh user@box
+uv venv --python 3.12 ~/1mp/venv
+uv pip install --python ~/1mp/venv/bin/python --index-url https://download.pytorch.org/whl/cpu torch
+cd ~/1mp/repo && uv pip install --python ~/1mp/venv/bin/python -e ".[kokoro-torch]"
+uv pip install --python ~/1mp/venv/bin/python \
+  https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+```
+
+The first request downloads the model into `~/1mp/hf`. On the Mac, create
+`$ZOTERO_AUDIO_RUNTIME/control/speech.json` (kept out of the synchronized app
+settings, whose cloud schema only allows `tts_model: "kokoro"`), then run
+`za doctor` and `za restart`:
+
+```json
+{"provider": "kokoro-remote", "host": "user@box"}
+```
+
+`command` optionally overrides the remote command (default
+`HF_HOME=$HOME/1mp/hf $HOME/1mp/venv/bin/python -m zotero_audio.remote_speech serve`);
+`ZOTERO_AUDIO_SPEECH_PROVIDER`, `ZOTERO_AUDIO_REMOTE_SPEECH_HOST` and
+`ZOTERO_AUDIO_REMOTE_SPEECH_COMMAND` override the file. Key-based SSH
+(BatchMode) is required. Delete the file to return to MLX. Re-extract the repo
+archive on the box when the protocol changes.
+
 `za install` installs a per-user `launchd` worker and disables the previous
 five-minute scheduler at cutover. The persistent service owns the new one-minute
 Zotero monitor. It preserves models and generated files.
