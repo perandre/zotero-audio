@@ -132,6 +132,15 @@ Markdown/audio backup is separate and disabled by default. Local copies are
 atomic; the worker does not wait for iCloud’s network synchronization. Filename
 collisions must preserve existing user files. Delivery retries remain visible.
 
+### Takedown
+
+`zotero-audio podcast takedown --config podcast.toml --guid <guid> [--guid …] --reason "…" [--sync]`
+removes episodes from both feeds and the site index. The removed manifest records are kept in
+`<state_root>/takedowns.json` with the reason, so the operation can be reviewed or reversed. Immutable audio and
+transcript objects stay in R2, and only the feeds, the site index and the pages of paired editions that linked to
+a removed episode change. It refuses to empty a feed. All manifest writers share `<state_root>/publication.lock`.
+When an episode is replaced by a new GUID, publish the replacement first and then take the old one down.
+
 ## State, restart and remote work
 
 The normal runtime is `/Users/pesh/Sites/zotero-audio-runtime`, outside Git:

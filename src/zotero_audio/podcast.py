@@ -5,6 +5,8 @@ mirror suitable for later upload by a credentialled object-storage adapter.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import html
 import hashlib
 import mimetypes
@@ -1472,20 +1474,43 @@ def _write_site(config: PodcastConfig, manifest: dict[str, Any], *, cover_url: s
     atomic_write_text(config.public_root / "index.html", page)  # type: ignore[operator]
 
 
+@contextlib.contextmanager
+def _publication_lock(config: PodcastConfig):
+    """Serialize every writer of the publication manifest and canonical feeds."""
+    config.state_root.mkdir(parents=True, exist_ok=True)
+    with open(config.state_root / "publication.lock", "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _show_images(config: PodcastConfig, publisher: LocalPublisher) -> dict[str, str]:
+    from .cover import copy_podcast_cover
+    images = {}
+    for edition in EDITIONS:
+        stage = config.state_root / "public-staging" / f"{edition}-show-cover.jpg"
+        copy_podcast_cover(stage, edition=edition)
+        images[edition] = _artifact_url(publisher, stage, "shows")
+    return images
+
+
 def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_records: dict[str, dict[str, Any]],
              license_result: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
-    from .cover import copy_podcast_cover
+    with _publication_lock(config):
+        return _publish_locked(config, paper_guid, source_sha, private_records, license_result)
+
+
+def _publish_locked(config: PodcastConfig, paper_guid: str, source_sha: str, private_records: dict[str, dict[str, Any]],
+                    license_result: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
     if not config.public_root: raise ValueError("public_root is required when publishing is enabled")
     if config.base_url.endswith(".invalid"): raise ValueError("replace the placeholder base_url before publishing")
     publisher = LocalPublisher(config.public_root, config.base_url); manifest_path = config.state_root / "publication-manifest.json"
     manifest = load_json(manifest_path) if manifest_path.is_file() else {"schema": "zotero-audio-publication/v1", "episodes": []}
     existing = {(item["guid"], item.get("revision")): item for item in manifest.get("episodes", [])}; public_records = []
     published_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    images = {}
-    for edition in EDITIONS:
-        stage = config.state_root / "public-staging" / f"{edition}-show-cover.jpg"
-        copy_podcast_cover(stage, edition=edition)
-        images[edition] = _artifact_url(publisher, stage, "shows")
+    images = _show_images(config, publisher)
     for edition, private in private_records.items():
         prefix = f"episodes/{paper_guid}/{source_sha[:16]}/{edition}"; previous = existing.get((private["guid"], source_sha), {})
         paired_edition = EDITION_FULL if edition == EDITION_BRIEF else EDITION_BRIEF
@@ -1532,6 +1557,14 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
         _copy_if_changed(page_stage, config.public_root / "papers" / paper_guid / edition / "index.html")
         public_records.append(record); existing[(record["guid"], source_sha)] = record
     manifest["episodes"] = sorted(existing.values(), key=lambda item: (item["guid"], item.get("revision", "")))
+    changed = _commit_manifest(config, publisher, manifest, images)
+    return public_records, changed
+
+
+def _commit_manifest(config: PodcastConfig, publisher: LocalPublisher, manifest: dict[str, Any],
+                     images: dict[str, str]) -> bool:
+    """Write feeds and site from the manifest; feeds are the final commit."""
+    manifest_path = config.state_root / "publication-manifest.json"
     feed_stages: list[tuple[str, Path]] = []
     for edition, show_config in ((EDITION_BRIEF, config.brief_show), (EDITION_FULL, config.full_show)):
         episodes = [item for item in manifest["episodes"] if item["edition"] == edition]
@@ -1565,7 +1598,68 @@ def _publish(config: PodcastConfig, paper_guid: str, source_sha: str, private_re
                 canonical.unlink(missing_ok=True)
         raise
     atomic_write_json(manifest_path, manifest)
-    return public_records, changed
+    return changed
+
+
+def _record_paper_guid(item: dict[str, Any]) -> str:
+    """Published records name their paper; older ones only in the audio URL path."""
+    if item.get("paper_guid"):
+        return str(item["paper_guid"])
+    match = re.search(r"/episodes/([^/]+)/", str(item.get("audio_url", "")))
+    if not match:
+        raise ValueError(f"Cannot identify the paper for episode {item.get('guid')}")
+    return match.group(1)
+
+
+def take_down_episodes(config: PodcastConfig, guids: Iterable[str], *, reason: str) -> dict[str, Any]:
+    """Remove published episodes from both feeds and the site, keeping an audit record.
+
+    Immutable audio/transcript objects are left in place; only the feeds, the
+    site index and the pages of paired editions that linked to a removed
+    episode change. Every removed manifest record is retained in
+    ``takedowns.json`` so the operation can be reviewed or reversed.
+    """
+    wanted = {str(guid).strip() for guid in guids if str(guid).strip()}
+    if not wanted:
+        raise ValueError("Name at least one episode GUID to take down")
+    if not str(reason).strip():
+        raise ValueError("A takedown needs a reason for the audit record")
+    if not config.public_root:
+        raise ValueError("public_root is required to take episodes down")
+    with _publication_lock(config):
+        publisher = LocalPublisher(config.public_root, config.base_url)
+        manifest_path = config.state_root / "publication-manifest.json"
+        manifest = load_json(manifest_path) if manifest_path.is_file() else {"schema": "zotero-audio-publication/v1", "episodes": []}
+        removed = [item for item in manifest.get("episodes", []) if item["guid"] in wanted]
+        missing = sorted(wanted - {item["guid"] for item in removed})
+        if missing:
+            raise ValueError(f"Not in the publication manifest: {', '.join(missing)}")
+        manifest["episodes"] = [item for item in manifest["episodes"] if item["guid"] not in wanted]
+        for edition in {item["edition"] for item in removed}:
+            if not any(item["edition"] == edition for item in manifest["episodes"]):
+                raise ValueError(f"Refusing to empty the {edition} feed")
+        removed_pages = {item.get("page_url") for item in removed if item.get("page_url")}
+        updated_pages = []
+        for item in manifest["episodes"]:
+            if item.get("paired_url") in removed_pages:
+                pair = item.pop("paired_url")
+                item["show_notes"] = "\n".join(line for line in str(item.get("show_notes", "")).splitlines()
+                                               if line.strip() != f"Paired edition: {pair}")
+                paper_guid = _record_paper_guid(item)
+                page_stage = config.state_root / "public-staging" / paper_guid / item["edition"] / "index.html"
+                atomic_write_text(page_stage, _episode_page(item))
+                key = f"papers/{paper_guid}/{item['edition']}/index.html"
+                _copy_if_changed(page_stage, config.public_root / key)
+                updated_pages.append(key)
+        audit_path = config.state_root / "takedowns.json"
+        audit = load_json(audit_path) if audit_path.is_file() else {"schema": "zotero-audio-takedowns/v1", "takedowns": []}
+        audit["takedowns"].append({"at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                                   "reason": str(reason).strip(), "episodes": removed})
+        atomic_write_json(audit_path, audit)
+        changed = _commit_manifest(config, publisher, manifest, _show_images(config, publisher))
+    editions = sorted({item["edition"] for item in removed})
+    return {"removed": [{"guid": item["guid"], "edition": item["edition"], "title": item["title"]} for item in removed],
+            "feed_changed": changed, "sync_keys": [f"{edition}/feed.xml" for edition in editions] + updated_pages + ["index.html"]}
 
 
 def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, Any]:
