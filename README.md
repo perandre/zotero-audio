@@ -1,5 +1,9 @@
 # 1 More Paper
 
+The public podcast is by Per André Rønsen for [Frontkom](https://www.frontkom.com/).
+Show creator, owner and production copyright credits use Frontkom; source-paper
+author attribution and licensing remain attached to each episode.
+
 The public podcast domain move is documented in
 [Podcast domain migration](docs/podcast-domain-migration.md).
 

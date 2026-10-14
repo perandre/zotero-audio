@@ -19,12 +19,12 @@ base_url = "https://1morepaper.com"
 site_title = "1 More Paper"
 site_description = "1 More Paper turns openly licensed research papers into carefully produced audio editions: a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading of the paper's approved prose."
 language = "en"
-author = "Per André Rønsen"
-owner_name = "Per André Rønsen"
+author = "Frontkom"
+owner_name = "Frontkom"
 # This address is public in RSS and is used for Spotify ownership verification.
 owner_email = "podcast@example.org"
 category = "Science"
-copyright = "1 More Paper"
+copyright = "Frontkom"
 
 # Safety defaults: preview only, with no public-tree or feed mutation.
 dry_run = true
