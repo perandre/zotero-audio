@@ -786,3 +786,41 @@ def test_brief_conclusion_stops_before_credit_and_declarations():
     brief = extract_brief(structure)
     assert brief["conclusion"]
     assert all("CRediT" not in b["text"] and "Declaration" not in b["text"] for b in brief["conclusion"])
+
+
+def test_takedown_removes_episodes_from_feeds_and_keeps_an_audit_record(tmp_path: Path, monkeypatch):
+    from zotero_audio.podcast import _record_paper_guid, take_down_episodes
+    _stub_media(monkeypatch); bundle = _bundle(tmp_path)
+    config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state",
+                           public_root=tmp_path / "public", base_url="https://audio.example",
+                           publishing_enabled=True, dry_run=False, owner_email="podcast@example.org")
+    published = {}
+    for key, title in (("ABCD1234", "Listening to Evidence"), ("EFGH5678", "A Second Paper")):
+        result = build_local_podcast(bundle, backend=Backend(), config=config, selected=True, license_record=_license(),
+                                     metadata={"zotero_key": key, "authors": ["Ada Smith"], "title": title,
+                                               "publication_year": "2026"})
+        guids = {item["guid"] for item in result["public_editions"]}
+        published[key] = {item["edition"]: item for item in load_json(tmp_path / "state" / "publication-manifest.json")["episodes"]
+                          if item["guid"] in guids}
+    old_brief, kept_full = published["ABCD1234"]["brief"], published["ABCD1234"]["full"]
+    assert old_brief["page_url"] in (tmp_path / "public" / "papers" / _record_paper_guid(kept_full) / "full" / "index.html").read_text()
+
+    with pytest.raises(ValueError, match="Not in the publication manifest"):
+        take_down_episodes(config, ["urn:uuid:missing"], reason="test")
+    result = take_down_episodes(config, [old_brief["guid"]], reason="Garbled narration; remade")
+
+    assert result["removed"] == [{"guid": old_brief["guid"], "edition": "brief", "title": old_brief["title"]}]
+    assert "brief/feed.xml" in result["sync_keys"] and "index.html" in result["sync_keys"]
+    brief_feed = (tmp_path / "public" / "brief" / "feed.xml").read_text()
+    assert old_brief["guid"] not in brief_feed and published["EFGH5678"]["brief"]["guid"] in brief_feed
+    assert kept_full["guid"] in (tmp_path / "public" / "full" / "feed.xml").read_text()
+    manifest = load_json(tmp_path / "state" / "publication-manifest.json")["episodes"]
+    full_record = next(item for item in manifest if item["guid"] == kept_full["guid"])
+    assert "paired_url" not in full_record and old_brief["page_url"] not in full_record["show_notes"]
+    assert old_brief["page_url"] not in (tmp_path / "public" / "papers" / _record_paper_guid(kept_full) / "full" / "index.html").read_text()
+    audit = load_json(tmp_path / "state" / "takedowns.json")["takedowns"]
+    assert audit[-1]["reason"] == "Garbled narration; remade" and audit[-1]["episodes"][0]["guid"] == old_brief["guid"]
+    assert health_check(config)["status"] == "pass"
+
+    with pytest.raises(ValueError, match="Refusing to empty the brief feed"):
+        take_down_episodes(config, [published["EFGH5678"]["brief"]["guid"]], reason="test")

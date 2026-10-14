@@ -12,6 +12,7 @@ from .audio import inspect_m4a
 from .cover import copy_podcast_cover
 from .literature import is_report, report_organisation
 from .podcast import (
+    _publication_lock,
     EDITION_FULL,
     EDITIONS,
     LocalPublisher,
@@ -245,6 +246,11 @@ def publish_existing_audio(config, *, batch_manifest_path: Path | None = None) -
         return {"status": "disabled", "added": 0, "skipped": 0}
     if not config.public_root:
         raise ValueError("public_root is required for feed-only publishing")
+    with _publication_lock(config):
+        return _publish_existing_audio_locked(config, batch_manifest_path=batch_manifest_path)
+
+
+def _publish_existing_audio_locked(config, *, batch_manifest_path: Path | None = None) -> dict[str, Any]:
     manifest_path = config.state_root / "publication-manifest.json"
     manifest = load_json(manifest_path) if manifest_path.is_file() else {
         "schema": "zotero-audio-publication/v1", "episodes": []

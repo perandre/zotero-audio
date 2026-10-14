@@ -10,7 +10,7 @@ from .extract import DEFAULT_ZOTERO_STORAGE, resolve_pdf
 from .models import default_model_dir, install_kokoro_models
 from .pipeline import prepare_bundle
 from .util import load_json
-from .podcast import PodcastConfig, build_intro, build_local_podcast, episode_title, health_check, load_podcast_config
+from .podcast import PodcastConfig, build_intro, build_local_podcast, episode_title, health_check, load_podcast_config, take_down_episodes
 from .zotero import DEFAULT_ZOTERO_DB
 from .zotero_local import zotero_metadata_preferred
 
@@ -96,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--publish", action=argparse.BooleanOptionalAction, default=None)
     build.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     _synthesis_arguments(build)
+    takedown = podcast_sub.add_parser("takedown", help="Remove published episodes from the feeds and site, keeping an audit record")
+    takedown.add_argument("--config", type=Path, required=True)
+    takedown.add_argument("--guid", action="append", required=True, help="Episode GUID; repeat for several")
+    takedown.add_argument("--reason", required=True, help="Why the episodes are withdrawn (kept in takedowns.json)")
+    takedown.add_argument("--sync", action="store_true", help="Upload the changed feeds, pages and site index to R2")
     health = podcast_sub.add_parser("health", help="Validate generated feeds and referenced resources")
     health.add_argument("--config", type=Path, required=True)
     health.add_argument("--remote", action="store_true", help="Also check the public HTTPS origin")
@@ -217,6 +222,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.sync and result.get("published"):
                 from .publish_sync import sync_public
                 sync_public(config, result["public_editions"])
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "podcast" and args.podcast_command == "takedown":
+            config = load_podcast_config(args.config)
+            if not config.publishing_enabled or config.dry_run:
+                raise ValueError("Publishing is disabled or in dry-run mode for this config")
+            result = take_down_episodes(config, args.guid, reason=args.reason)
+            if args.sync:
+                from .publish_sync import upload_keys
+                upload_keys(config.public_root, config.r2_bucket, config.state_root / "r2-sync-manifest.json", result["sync_keys"])
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "podcast" and args.podcast_command == "health":
