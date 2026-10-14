@@ -67,3 +67,71 @@ def test_stop_unloads_only_the_matching_service(installation, monkeypatch):
     monkeypatch.setattr(app_install, "_launchctl", lambda *args, **kwargs: commands.append(args) or SimpleNamespace(returncode=0))
     app_install.unload_installed_service(store)
     assert commands == [("print", app_install.service_target()), ("bootout", app_install.service_target())]
+
+
+# --- Linux systemd --user ---------------------------------------------------
+
+@pytest.fixture
+def linux(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(app_install.Path, "home", lambda: home)
+    monkeypatch.setattr(app_install.sys, "platform", "linux")
+    monkeypatch.setattr(app_install.shutil, "which", lambda name: "/usr/bin/" + name)
+    calls = []
+
+    def systemctl(*args, check=True):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
+
+    monkeypatch.setattr(app_install, "_systemctl", systemctl)
+    monkeypatch.setattr(app_install, "linger_enabled", lambda: False)
+    return Store(tmp_path / "runtime"), home, calls
+
+
+def test_systemd_unit_rendering(tmp_path):
+    store = Store(tmp_path / "run time")
+    text = app_install.render_systemd_unit(store, python="/opt/venv/bin/python", project=tmp_path / "proj",
+                                           path_env="/usr/bin:/home/u/.local/bin")
+    assert 'ExecStart="/opt/venv/bin/python" -m zotero_audio.app_cli serve' in text
+    assert f'Environment="ZOTERO_AUDIO_RUNTIME={store.runtime}"' in text
+    assert 'Environment="PATH=/usr/bin:/home/u/.local/bin"' in text
+    assert "Restart=on-failure" in text and "WantedBy=default.target" in text
+    assert f"StandardOutput=append:{store.root}/daemon.log" in text
+
+
+def test_systemd_unit_escapes_specifiers(tmp_path):
+    store = Store(tmp_path / "100%")
+    text = app_install.render_systemd_unit(store, python="/p/my$py", project=tmp_path, path_env="/bin")
+    assert "100%%" in text and '"/p/my$$py"' in text
+
+
+def test_install_writes_unit_and_enables_without_real_systemctl(linux, monkeypatch):
+    store, home, calls = linux
+    events = []
+    monkeypatch.setattr(app_cli, "stop_daemon", lambda _: events.append("stopped"))
+    monkeypatch.setattr(app_install.os, "access", lambda *args: False)
+    result = app_install.install(store)
+    unit = home / ".config/systemd/user" / app_install.SYSTEMD_UNIT
+    assert unit.is_file() and result["unit"] == str(unit)
+    assert events == ["stopped"]
+    assert [c[0] for c in calls] == ["daemon-reload", "enable", "start"]
+    assert result["service_manager"] == "systemd"
+    assert "enable-linger" in result["note"]
+    assert app_install.installed_unit(store) == unit
+
+
+def test_systemd_unit_for_another_runtime_is_untouched(linux, tmp_path):
+    store, home, calls = linux
+    unit = home / ".config/systemd/user" / app_install.SYSTEMD_UNIT
+    unit.parent.mkdir(parents=True)
+    unit.write_text(app_install.render_systemd_unit(store, python="/p", project=tmp_path, path_env="/bin"))
+    other = Store(tmp_path / "other")
+    assert app_install.start_installed_service(other) is False
+    assert app_install.disable_installed_service(other) is False
+    app_install.unload_installed_service(other)
+    assert calls == []
+    assert app_install.start_installed_service(store) is True
+    assert [c[0] for c in calls] == ["enable", "start"]
+    app_install.unload_installed_service(store)
+    assert calls[-1] == ("stop", app_install.SYSTEMD_UNIT)

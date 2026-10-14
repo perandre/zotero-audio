@@ -22,7 +22,7 @@ storage; the Mac supplies extraction and Apple-silicon speech processing.
 | Remote service | `cloud/src/` | Worker REST/MCP/OAuth, private R2 documents, D1 FTS/job/settings tables, OAuth KV. |
 | Local MCP/plugin | `app_mcp.py`, `plugins/one-more-paper/` | Official Python MCP stdio and the Agent Plugins 1.0.0 package. |
 | Project workspace | `app_projects.py`, `cloud/src/projects.ts`, `cloud/src/project-github.ts`, `cloud/src/project-mcp.ts` | Direct GitHub project reads/commits; local source-bound PDF/DOCX extraction. Separate from article generation. |
-| Installation | `app_install.py` | Per-user launchd service and cutover from the legacy scheduler. |
+| Installation | `app_install.py` | Per-user launchd (macOS) or systemd `--user` (Linux) service; cutover from the legacy scheduler on macOS. |
 
 Paths without a directory in the table are under `src/zotero_audio/`. The
 original `cli.py` and batch scripts remain available for direct pipeline work;

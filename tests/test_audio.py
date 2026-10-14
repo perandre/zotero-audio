@@ -141,3 +141,46 @@ def test_resume_and_deterministic_m4a_assembly(tmp_path: Path):
     assert qa["checks"]["embedded_chapter_count"] == 1
     assert qa["checks"]["episode_stinger"]["sha256"] == episode_stinger_metadata()["sha256"]
     assert qa["checks"]["expected_duration_seconds"] > 1.8
+
+
+def test_encoder_selection_and_identity(monkeypatch):
+    from zotero_audio import audio
+    monkeypatch.delenv("ZOTERO_AUDIO_ENCODER", raising=False)
+    monkeypatch.setattr(audio, "_has_tool", lambda path: path == audio.AFCONVERT)
+    assert audio.audio_encoder() == "afconvert"
+    assert audio.assembly_encoder_identity() == {}  # macOS assembly hashes are unchanged
+    monkeypatch.setattr(audio, "_has_tool", lambda path: False)
+    assert audio.audio_encoder() == "ffmpeg-aac"
+    assert audio.assembly_encoder_identity() == {"encoder": "ffmpeg-aac"}
+    base = {"policy": "p", "bitrate": 64000}
+    assert json_digest(base) != json_digest({**base, **audio.assembly_encoder_identity()})
+    monkeypatch.setenv("ZOTERO_AUDIO_ENCODER", "afconvert")
+    with pytest.raises(RuntimeError, match="Core Audio"):
+        audio.audio_encoder()
+    monkeypatch.setenv("ZOTERO_AUDIO_ENCODER", "ffmpeg")
+    assert audio.audio_encoder() == "ffmpeg-aac"
+    monkeypatch.setenv("ZOTERO_AUDIO_ENCODER", "lame")
+    with pytest.raises(RuntimeError, match="afconvert or ffmpeg"):
+        audio.audio_encoder()
+
+
+def test_ffmpeg_aac_command_matches_product_format():
+    from zotero_audio import audio
+    command = audio.ffmpeg_aac_command("ffmpeg", Path("in.wav"), Path("out"), 64_000)
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-profile:a") + 1] == "aac_low"
+    assert command[command.index("-b:a") + 1] == "64000"
+    assert command[command.index("-ac") + 1] == "1" and command[command.index("-ar") + 1] == "24000"
+    assert command[command.index("-f") + 1] == "ipod"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None, reason="requires ffmpeg")
+def test_ffmpeg_encoder_round_trip(tmp_path: Path, monkeypatch):
+    from zotero_audio import audio
+    monkeypatch.setenv("ZOTERO_AUDIO_ENCODER", "ffmpeg")
+    wav = tmp_path / "in.wav"
+    _write_wav(wav, frames=2 * TARGET_SAMPLE_RATE, tone=True)
+    info = audio.encode_wav_to_m4a(wav, tmp_path / "out.m4a", title="T", artist="A", album="Al", comment="c")
+    assert (info["codec"], info["channels"], info["sample_rate"]) == ("aac", 1, 24000)
+    assert 1.8 < info["duration_seconds"] < 2.4
+    assert audio._inspect_m4a_ffprobe(tmp_path / "out.m4a")["codec"] == "aac"

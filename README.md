@@ -221,8 +221,12 @@ The `mlx` extra is restricted to Apple silicon by environment markers, so
 `pip install -e '.[mlx]'` is harmless elsewhere. Expect CPU synthesis on an old
 Intel Mac to be several times slower than MLX; a Full Reading can take longer
 than the audio it produces. On x86_64 Linux install the same extra (use PyTorch's
-CPU wheel index to avoid the CUDA download); final AAC encoding still uses macOS
-`afconvert`, so Linux currently produces Markdown and WAV segments only.
+CPU wheel index to avoid the CUDA download). Without `/usr/bin/afconvert` the final
+M4A is encoded by FFmpeg's native AAC-LC (same M4A container, mono 24 kHz, same
+bitrate setting) and inspected with `ffprobe`. The encoder (`ffmpeg-aac`) is part of
+the assembly identity, so finished files from different encoders are never reused for
+each other; macOS identities are unchanged. `ZOTERO_AUDIO_ENCODER=ffmpeg|afconvert`
+forces a choice. `za doctor` reports platform, encoder and service manager.
 The legacy `zotero-audio` CLI accepts `--engine auto|kokoro-torch|kokoro-mlx`.
 
 ### Remote speech (synthesis on a Linux x86_64 box)
@@ -270,6 +274,13 @@ archive on the box when the protocol changes.
 five-minute scheduler at cutover. The persistent service owns the new one-minute
 Zotero monitor. It preserves models and generated files.
 For foreground development, use `za serve` instead of installing the service.
+
+On Linux, `za install` writes `~/.config/systemd/user/one-more-paper.service`
+(`Restart=on-failure`, `ZOTERO_AUDIO_RUNTIME` in its environment, logs in
+`control/daemon*.log`) and enables/starts it with `systemctl --user`; `za restart`,
+`za stop` and `za status` use the same lifecycle rules as on macOS. For the service to
+run without a login session, run once (may need sudo): `sudo loginctl enable-linger
+<user>`. `za install` reports whether linger is enabled.
 One generation worker owns the model and the runtime lock; do not run a legacy
 batch against the same runtime concurrently.
 
