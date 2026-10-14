@@ -309,6 +309,9 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         key = (row.get("key") or (data or {}).get("key")) if isinstance(row, dict) else None
         if not isinstance(data, dict) or not key:
             return None
+        # The local API omits empty fields; the Web API returns them as "".  Drop
+        # them so downstream metadata is identical (None, not "", for unset fields).
+        data = {k: v for k, v in data.items() if v not in ("", None, [], {})}
         return str(key), {**data, "key": str(key), "version": row.get("version", data.get("version"))}
 
     def sync(self) -> dict[str, Any]:

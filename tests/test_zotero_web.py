@@ -156,6 +156,13 @@ def test_downloads_and_verifies_pdf_and_matches_local_metadata_shape(server, tmp
     assert expected["title"] == "A Synthetic Paper"
 
 
+def test_empty_web_fields_are_dropped_like_the_local_api(server, tmp_path):
+    server.items["PARENT01"][1].update(abstractNote="", publisher="", tags=[], language="")
+    metadata = client(server, tmp_path).metadata("ATTACH01")
+    assert metadata["abstract"] is None and metadata["publisher"] is None
+    assert metadata["tags"] == [] and metadata["language"] is None
+
+
 def test_requests_are_gets_and_key_never_reaches_storage_host(server, tmp_path):
     client(server, tmp_path).pdf_attachments()
     assert any(p.startswith("/storage/") for p, _, _ in server.log)
