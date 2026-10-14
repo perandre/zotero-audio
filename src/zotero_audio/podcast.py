@@ -438,11 +438,11 @@ class PodcastConfig:
                              "a Brief with the authors' abstract and, when suitable, conclusion, and a Full Reading "
                              "of the paper's approved prose.")
     language: str = "en"
-    author: str = "Per André Rønsen"
-    owner_name: str = PODCAST_NAME
+    author: str = "Frontkom"
+    owner_name: str = "Frontkom"
     owner_email: str = "podcast@example.invalid"
     category: str = "Science"
-    copyright: str = PODCAST_NAME
+    copyright: str = "Frontkom"
     publishing_enabled: bool = False
     dry_run: bool = True
     r2_bucket: str = ""
