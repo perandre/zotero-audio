@@ -202,8 +202,69 @@ def _run(command: list[str]) -> None:
         raise RuntimeError(f"Command failed ({command[0]}): {detail[-2000:]}")
 
 
+AFCONVERT = "/usr/bin/afconvert"
+AFINFO = "/usr/bin/afinfo"
+ENCODER_AFCONVERT = "afconvert"
+ENCODER_FFMPEG = "ffmpeg-aac"
+
+
+def _has_tool(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def audio_encoder() -> str:
+    """Final AAC encoder: Core Audio where present, otherwise FFmpeg's native AAC-LC.
+
+    ``ZOTERO_AUDIO_ENCODER`` (``afconvert`` or ``ffmpeg``) forces a choice. Both write
+    M4A/AAC-LC, mono, 24 kHz at the requested bitrate, but the bitstreams differ, so
+    the encoder is part of the assembly identity (see ``assembly_encoder_identity``).
+    """
+    forced = os.environ.get("ZOTERO_AUDIO_ENCODER", "").strip().lower()
+    if forced in {"afconvert", ENCODER_AFCONVERT}:
+        if not _has_tool(AFCONVERT):
+            raise RuntimeError("ZOTERO_AUDIO_ENCODER=afconvert needs macOS Core Audio (/usr/bin/afconvert)")
+        return ENCODER_AFCONVERT
+    if forced in {"ffmpeg", ENCODER_FFMPEG}:
+        return ENCODER_FFMPEG
+    if forced:
+        raise RuntimeError("ZOTERO_AUDIO_ENCODER must be afconvert or ffmpeg")
+    return ENCODER_AFCONVERT if _has_tool(AFCONVERT) else ENCODER_FFMPEG
+
+
+def assembly_encoder_identity() -> dict[str, str]:
+    """Extra assembly-config keys. Empty for afconvert so existing macOS hashes are unchanged."""
+    encoder = audio_encoder()
+    return {} if encoder == ENCODER_AFCONVERT else {"encoder": encoder}
+
+
+def _inspect_m4a_ffprobe(path: Path) -> dict[str, Any]:
+    ffprobe = _require_executable("ffprobe")
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
+         "stream=codec_name,channels,sample_rate,bit_rate,duration:format=duration,bit_rate", "-of", "json", str(path)],
+        check=False, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"ffprobe could not inspect {path}: {(result.stderr or result.stdout).strip()}")
+    try:
+        data = json.loads(result.stdout)
+        stream = data["streams"][0]
+        duration = float(data.get("format", {}).get("duration") or stream["duration"])
+        bitrate = stream.get("bit_rate") or data.get("format", {}).get("bit_rate")
+        return {
+            "channels": int(stream["channels"]),
+            "sample_rate": int(stream["sample_rate"]),
+            "codec": str(stream["codec_name"]),
+            "duration_seconds": duration,
+            "bitrate": int(bitrate) if bitrate else None,
+        }
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Could not parse ffprobe output for {path}") from exc
+
+
 def inspect_m4a(path: Path) -> dict[str, Any]:
-    afinfo = _require_executable("/usr/bin/afinfo")
+    if not _has_tool(AFINFO):
+        return _inspect_m4a_ffprobe(path)
+    afinfo = _require_executable(AFINFO)
     result = subprocess.run([afinfo, str(path)], check=False, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f"afinfo could not inspect {path}: {(result.stderr or result.stdout).strip()}")
@@ -854,6 +915,13 @@ def _concatenate_pcm(bundle: Path, plan: dict[str, Any], manifest: dict[str, Any
                 output.writeframes(stream.readframes(stream.getnframes()))
 
 
+def ffmpeg_aac_command(ffmpeg: str, source: Path, destination: Path, bitrate: int) -> list[str]:
+    """FFmpeg native AAC-LC, mono 24 kHz, M4A (ipod muxer), no encoder/metadata stamps."""
+    return [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-vn", "-map_metadata", "-1",
+            "-c:a", "aac", "-profile:a", "aac_low", "-b:a", str(bitrate), "-ac", "1", "-ar", str(TARGET_SAMPLE_RATE),
+            "-fflags", "+bitexact", "-flags:a", "+bitexact", "-f", "ipod", str(destination)]
+
+
 def encode_wav_to_m4a(
     source: Path,
     destination: Path,
@@ -866,30 +934,33 @@ def encode_wav_to_m4a(
 ) -> dict[str, Any]:
     if not 32_000 <= bitrate <= 256_000:
         raise ValueError("AAC bitrate must be between 32000 and 256000")
-    afconvert = _require_executable("/usr/bin/afconvert")
+    encoder = audio_encoder()
     validate_wav(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
     os.close(descriptor)
     temporary_path = Path(temporary)
     try:
-        _run(
-            [
-                afconvert,
-                str(source),
-                str(temporary_path),
-                "-f",
-                "m4af",
-                "-d",
-                "aac",
-                "-b",
-                str(bitrate),
-                "-c",
-                "1",
-                "-s",
-                "3",
-            ]
-        )
+        if encoder == ENCODER_AFCONVERT:
+            _run(
+                [
+                    _require_executable(AFCONVERT),
+                    str(source),
+                    str(temporary_path),
+                    "-f",
+                    "m4af",
+                    "-d",
+                    "aac",
+                    "-b",
+                    str(bitrate),
+                    "-c",
+                    "1",
+                    "-s",
+                    "3",
+                ]
+            )
+        else:
+            _run(ffmpeg_aac_command(_require_executable("ffmpeg"), source, temporary_path, bitrate))
         tags = MP4(temporary_path)
         tags["\xa9nam"] = [title]
         if artist:
@@ -1016,6 +1087,7 @@ def assemble_m4a(bundle: Path, *, bitrate: int = 64_000,
             "m4a_sample_rate": final_info["sample_rate"],
             "m4a_codec": final_info["codec"],
             "m4a_bitrate": final_info["bitrate"],
+            "encoder": audio_encoder(),
             "m4a_tags": tag_names,
             "required_tags_present": required_tags.issubset(tag_names),
             "embedded_chapter_count": embedded_chapter_count,

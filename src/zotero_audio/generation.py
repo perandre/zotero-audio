@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from .audio import (SpeechBackend, assemble_m4a, canonical_synthesis_config, episode_stinger_metadata,
+from .audio import (SpeechBackend, assemble_m4a, assembly_encoder_identity, canonical_synthesis_config, episode_stinger_metadata,
                     loudness_is_competitive, measure_loudness, synthesize_plan)
 from .article_files import episode_title_for, research_markdown_path, review_markdown_path
 from .research_library import (adopt as adopt_research_markdown, link_legacy_path, register as register_research_markdown,
@@ -454,7 +454,8 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
             assembly_config = {"policy": ASSEMBLY_POLICY, "plan_sha256": plan["plan_sha256"],
                 "synthesis_config_sha256": json_digest(synthesis_config), "bitrate": bitrate,
                 "opening_sound": opening_sound, "closing_sound": closing_sound,
-                "stinger_sha256": episode_stinger_metadata()["sha256"] if opening_sound or closing_sound else None}
+                "stinger_sha256": episode_stinger_metadata()["sha256"] if opening_sound or closing_sound else None,
+                **assembly_encoder_identity()}
             fingerprint = json_digest(assembly_config)
             cached = _read_json(stage / "edition.json")
             audio_path = Path(cached.get("audio", stage / "audio" / f"{edition}.m4a"))

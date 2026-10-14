@@ -155,7 +155,8 @@ def make_handler(store: Store, worker, port: int):
                         if kind not in {"markdown", "audio", "review"}:
                             raise ValueError("Choose Markdown, audio or review")
                         target = artifact_path(article, kind, body.get("edition", "full"))
-                        subprocess.run(["/usr/bin/open", *(["-R"] if body.get("reveal") else []), str(target)], check=True)
+                        from .desktop import open_target
+                        open_target(target, reveal=bool(body.get("reveal")))
                         return self.send_json({"opened": True, "title": article["title"], "artifact": kind})
                 if method == "GET":
                     if path in {"/", "/login"} or path.startswith("/articles/"):

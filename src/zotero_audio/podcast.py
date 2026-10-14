@@ -26,7 +26,9 @@ from typing import Any, Iterable, Protocol
 from . import __version__
 from .audio import (
     SpeechBackend,
+    ENCODER_AFCONVERT,
     assemble_m4a,
+    audio_encoder,
     episode_stinger_duration,
     episode_stinger_metadata,
     synthesize_plan,
@@ -1821,6 +1823,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
             and cached_manifest.get("plan_sha256") == plan["plan_sha256"]
             and cached_manifest.get("synthesis_config_sha256") == json_digest(backend.config)
             and cached_qa.get("status") == "pass"
+            and cached_qa.get("checks", {}).get("encoder", ENCODER_AFCONVERT) == audio_encoder()
             and cached_audio.is_file()
             and cached_qa.get("output", {}).get("sha256") == sha256_file(cached_audio)
             and cached_qa.get("checks", {}).get("episode_stinger", {}).get("sha256") == episode_stinger_metadata()["sha256"]

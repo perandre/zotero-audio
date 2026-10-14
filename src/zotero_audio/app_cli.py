@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -57,7 +58,8 @@ def _process_alive(pid: int) -> bool:
 
 def _is_daemon_process(pid: int) -> bool:
     # A stale database PID must never signal an unrelated process after PID reuse.
-    result = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False)
+    ps = "/bin/ps" if os.path.exists("/bin/ps") else (shutil.which("ps") or "ps")
+    result = subprocess.run([ps, "-p", str(pid), "-o", "command="], capture_output=True, text=True, check=False)
     return result.returncode == 0 and bool(re.search(r"(?:\bzotero_audio\.app_cli|(?:^|/)za)\s+serve(?:\s|$)", result.stdout))
 
 
@@ -298,7 +300,13 @@ def main(argv=None):
             from .audio import default_kokoro_engine
             engine = default_kokoro_engine()
             runtime_module = "mlx_audio" if engine == "kokoro-mlx" else "kokoro"
-            checks = {"architecture": platform.machine(), "python": platform.python_version(), "ffmpeg": bool(shutil.which("ffmpeg")),
+            from .app_install import service_status
+            from .audio import audio_encoder
+            service = service_status(store)
+            checks = {"platform": platform.system().lower(), "audio_encoder": audio_encoder(),
+                      "ffprobe": bool(shutil.which("ffprobe")), "service_manager": service["manager"],
+                      "service_installed": service["installed"], "service_active": service["active"],
+                      "architecture": platform.machine(), "python": platform.python_version(), "ffmpeg": bool(shutil.which("ffmpeg")),
                       "speech_engine": engine,
                       "kokoro_installed": importlib.util.find_spec(runtime_module) is not None,
                       "mcp_installed": importlib.util.find_spec("mcp") is not None,
@@ -320,8 +328,10 @@ def main(argv=None):
                 finally:
                     if backend:
                         backend.close()
+            if "linger" in service:
+                checks["linger_enabled"] = service["linger"]
             emit(checks, args.json)
-            return 0 if checks["ffmpeg"] and checks.get("remote_speech", {"reachable": True})["reachable"] else 1
+            return 0 if checks["ffmpeg"] and (checks["ffprobe"] or checks["audio_encoder"] == "afconvert") and checks.get("remote_speech", {"reachable": True})["reachable"] else 1
         if command == "list":
             articles = store.library(args.query or "", limit=500)
             if args.json:
@@ -351,7 +361,8 @@ def main(argv=None):
             elif command == "review":
                 print(path.read_text(encoding="utf-8"))
             else:
-                subprocess.run(["/usr/bin/open", *(["-R"] if args.reveal else []), str(path)], check=True)
+                from .desktop import open_target
+                open_target(path, reveal=args.reveal)
                 print(f"Opened {kind}: {article['title']}")
             return 0
         if command == "status":
@@ -370,7 +381,8 @@ def main(argv=None):
         if command == "dashboard":
             url = f"http://127.0.0.1:{store.state('daemon', {}).get('port',8765)}/"
             if not args.json:
-                subprocess.run(["/usr/bin/open", url], check=True)
+                from .desktop import open_target
+                open_target(url)
             emit({"url": url} if args.json else url, args.json)
             return 0
         if command in {"retry", "cancel"}:
