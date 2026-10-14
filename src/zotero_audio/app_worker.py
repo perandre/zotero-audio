@@ -39,8 +39,15 @@ class BackendPool:
     def get(self, name="kokoro"):
         if name not in self.loaded:
             from .audio import resolve_kokoro_engine
+            from .remote_speech import REMOTE_PROVIDER, RemoteSpeechBackend, configured_provider
+            # The synchronized `tts_model` setting stays "kokoro"; a local-only
+            # control/speech.json (or env) may route it to the remote engine.
+            if name in {"kokoro", "auto"} and configured_provider() == REMOTE_PROVIDER:
+                name = REMOTE_PROVIDER
             engine = resolve_kokoro_engine(name)
-            if engine == "kokoro-mlx":
+            if engine == REMOTE_PROVIDER:
+                self.loaded[name] = RemoteSpeechBackend.from_settings(expected_engine="kokoro-torch")
+            elif engine == "kokoro-mlx":
                 from .audio import MlxKokoroBackend
                 self.loaded[name] = MlxKokoroBackend()
             elif engine == "kokoro-torch":

@@ -151,7 +151,7 @@ def register_backend(name: str, factory: Callable[..., SpeechBackend]) -> None:
     Providers must identify their model/revision and settings in ``config``
     and produce a validated mono 24 kHz PCM WAV. No remote fallback occurs.
     """
-    if not name.strip() or name in {"auto", "kokoro", "kokoro-mlx", "kokoro-onnx", "kokoro-torch"}:
+    if not name.strip() or name in {"auto", "kokoro", "kokoro-mlx", "kokoro-onnx", "kokoro-remote", "kokoro-torch"}:
         raise ValueError("Choose a nonempty custom backend name")
     _BACKEND_FACTORIES[name] = factory
 
