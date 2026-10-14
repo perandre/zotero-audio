@@ -28,7 +28,8 @@ class WorkerStopping(Cancelled):
 class BackendPool:
     """Lazy providers keep the model warm and let third-party packages register TTS.
 
-    Entry point group: zotero_audio.tts. A provider exports a zero-argument factory
+    "kokoro" selects MLX on Apple silicon and CPU PyTorch Kokoro elsewhere; both
+    can also be requested by name. Entry point group: zotero_audio.tts. A provider exports a zero-argument factory
     returning the existing SpeechBackend protocol. No cloud fallback is implicit.
     """
     def __init__(self):
@@ -37,9 +38,14 @@ class BackendPool:
 
     def get(self, name="kokoro"):
         if name not in self.loaded:
-            if name == "kokoro":
+            from .audio import resolve_kokoro_engine
+            engine = resolve_kokoro_engine(name)
+            if engine == "kokoro-mlx":
                 from .audio import MlxKokoroBackend
                 self.loaded[name] = MlxKokoroBackend()
+            elif engine == "kokoro-torch":
+                from .audio import TorchKokoroBackend
+                self.loaded[name] = TorchKokoroBackend()
             else:
                 from importlib.metadata import entry_points
                 candidates = [p for p in entry_points(group="zotero_audio.tts") if p.name == name]

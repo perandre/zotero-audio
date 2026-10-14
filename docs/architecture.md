@@ -80,7 +80,9 @@ abstract and provenance in a marked paragraph for site renderers; the public
 episode page consumes those saved fields rather than looking up metadata again.
 
 The model stays warm in one generation worker. The default is Kokoro through
-MLX on Apple silicon. `SpeechBackend` and registered providers/entry points are
+MLX on Apple silicon and the CPU PyTorch `kokoro-torch` provider on x86_64
+(same model, voices and assembly; distinct `engine` identity so caches never
+mix). `SpeechBackend` and registered providers/entry points are
 the extension boundaries; there is no silent network or system-voice fallback.
 Provider identity includes model revision, voice, speed and other synthesis
 settings. Model changes must invalidate affected cache identities.

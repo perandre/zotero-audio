@@ -38,9 +38,9 @@ def _prepare_arguments(parser: argparse.ArgumentParser) -> None:
 def _synthesis_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--engine",
-        choices=("kokoro-mlx", "kokoro-onnx"),
-        default="kokoro-mlx",
-        help="Kokoro runtime; MLX BF16 is the quality default",
+        choices=("auto", "kokoro-mlx", "kokoro-torch", "kokoro-onnx"),
+        default="auto",
+        help="Kokoro runtime; auto uses MLX BF16 on Apple silicon and CPU PyTorch on x86_64",
     )
     parser.add_argument("--voice", default=DEFAULT_ENGLISH_VOICE,
                         help=f"Kokoro voice preset; defaults to {DEFAULT_ENGLISH_VOICE}")
