@@ -304,8 +304,24 @@ def main(argv=None):
                       "mcp_installed": importlib.util.find_spec("mcp") is not None,
                       "runtime": str(store.runtime), "daemon_online": daemon_status(store) is not None,
                       "cloud_configured": (store.root / "cloud.json").is_file(), "icloud_configured": bool(store.settings()["icloud_folder"])}
+            from .remote_speech import REMOTE_PROVIDER, RemoteSpeechBackend, RemoteSpeechError, configured_provider
+            try:
+                remote_selected = configured_provider(store.runtime) == REMOTE_PROVIDER
+            except RemoteSpeechError as exc:
+                remote_selected, checks["remote_speech"] = False, {"reachable": False, "error": str(exc)}
+            if remote_selected:
+                checks["speech_engine"], checks["kokoro_installed"] = REMOTE_PROVIDER, None
+                backend = None
+                try:
+                    backend = RemoteSpeechBackend.from_settings(store.runtime, connect_timeout=120, expected_engine="kokoro-torch")
+                    checks["remote_speech"] = backend.status()
+                except RemoteSpeechError as exc:
+                    checks["remote_speech"] = {"reachable": False, "error": str(exc)}
+                finally:
+                    if backend:
+                        backend.close()
             emit(checks, args.json)
-            return 0 if checks["ffmpeg"] else 1
+            return 0 if checks["ffmpeg"] and checks.get("remote_speech", {"reachable": True})["reachable"] else 1
         if command == "list":
             articles = store.library(args.query or "", limit=500)
             if args.json:
