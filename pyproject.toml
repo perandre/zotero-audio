@@ -21,8 +21,19 @@ kokoro-onnx = [
   "kokoro-onnx==0.6.1",
 ]
 mlx = [
-  "mlx-audio==0.4.1",
-  "misaki[en]==0.9.4",
+  # Apple silicon only; the markers make `pip install '.[mlx]'` a no-op elsewhere.
+  "mlx-audio==0.4.1; platform_machine == 'arm64'",
+  "misaki[en]==0.9.4; platform_machine == 'arm64'",
+]
+# CPU PyTorch Kokoro for Intel Macs and x86_64 Linux (no MLX). Intel macOS has
+# no wheels newer than torch 2.2.2 (Python <= 3.12), which needs NumPy 1.x and
+# a transformers release that still supports it.
+kokoro-torch = [
+  "kokoro==0.9.4; platform_machine != 'arm64'",
+  "misaki[en]==0.9.4; platform_machine != 'arm64'",
+  "torch==2.2.2; platform_machine == 'x86_64' and sys_platform == 'darwin'",
+  "numpy<2; platform_machine == 'x86_64' and sys_platform == 'darwin'",
+  "transformers<5; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
 dev = [
   "pytest>=8.4,<9",

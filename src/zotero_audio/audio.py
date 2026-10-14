@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import platform
 import math
 import re
 import shutil
@@ -150,7 +151,7 @@ def register_backend(name: str, factory: Callable[..., SpeechBackend]) -> None:
     Providers must identify their model/revision and settings in ``config``
     and produce a validated mono 24 kHz PCM WAV. No remote fallback occurs.
     """
-    if not name.strip() or name in {"kokoro-mlx", "kokoro-onnx"}:
+    if not name.strip() or name in {"auto", "kokoro", "kokoro-mlx", "kokoro-onnx", "kokoro-torch"}:
         raise ValueError("Choose a nonempty custom backend name")
     _BACKEND_FACTORIES[name] = factory
 
@@ -501,6 +502,160 @@ class MlxKokoroBackend:
         return {"chunks": chunk_records}
 
 
+def default_kokoro_engine(machine: str | None = None, system: str | None = None) -> str:
+    """Choose the Kokoro runtime for this machine; never silently substitute a voice.
+
+    Apple silicon keeps MLX (unchanged cache identity). Everything else, notably
+    Intel Macs and x86_64 Linux, uses the CPU PyTorch runtime.
+    """
+    machine = (machine if machine is not None else platform.machine()).lower()
+    system = (system if system is not None else platform.system()).lower()
+    if system == "darwin" and machine in {"arm64", "aarch64"}:
+        return "kokoro-mlx"
+    return "kokoro-torch"
+
+
+def resolve_kokoro_engine(name: str) -> str:
+    """Map the product alias ``auto``/``kokoro`` to a concrete engine name."""
+    return default_kokoro_engine() if name in {"auto", "kokoro"} else name
+
+
+class TorchKokoroBackend:
+    """Kokoro-82M fp32 on CPU through the ``kokoro`` PyTorch package (non-MLX hosts).
+
+    Uses the same misaki G2P, phoneme planning, text normalization, voices, 24 kHz
+    output and PCM path as the MLX backend. Its ``engine`` differs, so segment
+    caches are never shared between runtimes.
+    """
+
+    MODEL_ID = "hexgrad/Kokoro-82M"
+
+    def __init__(
+        self,
+        *,
+        model_id: str = MODEL_ID,
+        voice: str = DEFAULT_ENGLISH_VOICE,
+        speed: float = 1.0,
+        language: str = "a",
+    ) -> None:
+        try:
+            import torch
+            from huggingface_hub import snapshot_download
+            from kokoro import KModel, KPipeline
+        except ImportError as exc:
+            raise RuntimeError(
+                "Install the CPU Kokoro backend with `pip install -e '.[kokoro-torch]'`"
+            ) from exc
+        snapshot = Path(
+            snapshot_download(
+                repo_id=model_id,
+                allow_patterns=["config.json", "kokoro-v1_0.pth", "voices/*.pt"],
+            )
+        ).resolve()
+        self._torch = torch
+        self._snapshot = snapshot
+        self.model = KModel(
+            repo_id=model_id,
+            config=str(snapshot / "config.json"),
+            model=str(snapshot / "kokoro-v1_0.pth"),
+        ).to("cpu").eval()
+        self._pipelines: dict[str, Any] = {}
+        self._pipeline_class = KPipeline
+        self.model_id = model_id
+        self.model_revision = snapshot.name
+        self.engine_version = _package_version("kokoro")
+        self.torch_version = _package_version("torch")
+        self.configure(voice=voice, speed=speed, language=language)
+
+    def _pipeline(self, language: str):
+        if language not in {"a", "b"}:
+            raise ValueError("Verified phoneme planning currently supports English only")
+        if language not in self._pipelines:
+            self._pipelines[language] = self._pipeline_class(
+                lang_code=language, repo_id=self.model_id, model=self.model
+            )
+        return self._pipelines[language]
+
+    def configure(self, *, voice: str, speed: float, language: str) -> None:
+        self.config = {
+            "engine": "kokoro-torch",
+            "engine_version": self.engine_version,
+            "torch_version": self.torch_version,
+            "model": self.model_id,
+            "model_revision": self.model_revision,
+            "precision": "fp32",
+            "voice": voice,
+            "speed": float(speed),
+            "language": language,
+            "sample_rate": TARGET_SAMPLE_RATE,
+            "device": "CPU",
+            "input_chunking": {
+                "algorithm": "sentence-phoneme-verified-v2",
+                "max_phonemes": min(510, self.model.context_length - 2),
+                "purpose": "preserve sentence prosody and reject truncation",
+            },
+            "text_normalization": "nfkc-spoken-symbols-v1",
+            "determinism": "cached segments are exact; fresh CPU synthesis may differ at the sample level",
+        }
+
+    def synthesize(self, text: str, destination: Path) -> dict[str, Any]:
+        import numpy as np
+
+        normalized_text = normalize_kokoro_text(text)
+        pipeline = self._pipeline(self.config["language"])
+
+        def phonemize(value: str) -> str:
+            _, tokens = pipeline.g2p(value)
+            return "".join((token.phonemes or "").replace("ɾ", "T") +
+                           (" " if token.whitespace else "") for token in tokens).strip()
+
+        utterances = plan_kokoro_utterances(normalized_text, phonemize,
+                                          self.config["input_chunking"]["max_phonemes"])
+        voice_file = self._snapshot / "voices" / f"{self.config['voice']}.pt"
+        if not voice_file.is_file():
+            raise FileNotFoundError(f"Kokoro voice {self.config['voice']!r} is not in model revision {self.model_revision}")
+        audio_parts: list[Any] = []
+        chunk_records: list[dict[str, Any]] = []
+        with self._torch.inference_mode():
+            for utterance in utterances:
+                generated = list(pipeline.generate_from_tokens(
+                    utterance["phonemes"], voice=str(voice_file), speed=self.config["speed"]))
+                if len(generated) != 1 or generated[0].phonemes != utterance["phonemes"] or generated[0].audio is None:
+                    raise RuntimeError("Kokoro altered or split the verified phoneme input")
+                audio = np.asarray(generated[0].audio.detach().cpu().numpy()).reshape(-1)
+                if audio.size <= 0 or not np.isfinite(audio).all():
+                    raise RuntimeError("Kokoro returned empty or non-finite utterance audio")
+                audio_parts.append(audio)
+                chunk_records.append({**utterance, "duration_seconds": round(audio.size / TARGET_SAMPLE_RATE, 6)})
+        if not audio_parts:
+            raise RuntimeError(f"Kokoro PyTorch returned no audio for text: {normalized_text[:120]!r}")
+        samples = np.concatenate(audio_parts)
+        pcm = np.rint(np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+        os.close(descriptor)
+        temporary_path = Path(temporary)
+        try:
+            with wave.open(str(temporary_path), "wb") as stream:
+                stream.setnchannels(TARGET_CHANNELS)
+                stream.setsampwidth(TARGET_SAMPLE_WIDTH)
+                stream.setframerate(TARGET_SAMPLE_RATE)
+                stream.writeframes(pcm.tobytes())
+            validate_wav(temporary_path)
+            os.replace(temporary_path, destination)
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
+        return {"chunks": chunk_records}
+
+
+def _package_version(name: str) -> str:
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def create_backend(
     engine: str,
     *,
@@ -511,6 +666,13 @@ def create_backend(
     voices: Path,
     mlx_model: str,
 ) -> SpeechBackend:
+    engine = resolve_kokoro_engine(engine)
+    if engine == "kokoro-torch":
+        return TorchKokoroBackend(
+            voice=voice or DEFAULT_ENGLISH_VOICE,
+            speed=speed,
+            language=language,
+        )
     if engine == "kokoro-mlx":
         return MlxKokoroBackend(
             model_id=mlx_model,

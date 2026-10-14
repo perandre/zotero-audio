@@ -166,8 +166,9 @@ deliveries reuse finished audio and retry without generation.
 
 ## Install and iterate on this Mac
 
-Requirements: Apple silicon macOS, Python 3.11+, FFmpeg, macOS `afconvert`, Zotero
-and local Kokoro model storage. Enable Zotero’s **Allow other applications on this
+Requirements: macOS (Apple silicon, or Intel via the CPU backend described
+below), Python 3.11+, FFmpeg, macOS `afconvert`, Zotero and local Kokoro model
+storage. Enable Zotero’s **Allow other applications on this
 computer to communicate with Zotero** setting. The normal integration reads
 `http://localhost:23119/api/`; Zotero itself supplies stored/linked PDF paths and
 parent metadata. Direct database/storage arguments remain recovery fallbacks.
@@ -186,6 +187,42 @@ za install
 za sync --wait
 za dashboard
 ```
+
+### Intel Macs (x86_64, CPU only)
+
+Apple silicon uses Kokoro through MLX. On x86_64 the provider named `kokoro`
+automatically resolves to **`kokoro-torch`**: the same Kokoro-82M model, voices
+(`am_michael`, `af_heart`), misaki phonemizer, 24 kHz sample rate and
+loudness/assembly path, run in fp32 by the `kokoro` PyTorch package on the CPU.
+Its synthesis config records `engine: kokoro-torch`, so cached segments are
+never shared with MLX output. There is no fallback to system or network voices;
+if the runtime is missing the job fails with an install hint. Intel macOS has no
+PyTorch wheels newer than 2.2.2, which caps Python at **3.12** (3.11 also works;
+3.13 does not). Keep the runtime path short (under about 150 characters): the
+bundled espeak-ng library cannot open its data files from very long paths.
+
+```sh
+brew install ffmpeg python@3.12          # afconvert ships with macOS
+REPO=~/Sites/zotero-audio; RUNTIME=~/Sites/zotero-audio-runtime
+mkdir -p "$RUNTIME" && python3.12 -m venv "$RUNTIME/venv"
+"$RUNTIME/venv/bin/python" -m pip install -e "${REPO}[kokoro-torch,dev]"
+"$RUNTIME/venv/bin/python" -m spacy download en_core_web_sm   # misaki's English model
+export PATH="$RUNTIME/venv/bin:$PATH" ZOTERO_AUDIO_RUNTIME="$RUNTIME" HF_HOME="$RUNTIME/huggingface"
+python - <<'PY'   # one-time ~330 MB download of model + voices (otherwise first job does it)
+from huggingface_hub import snapshot_download
+snapshot_download("hexgrad/Kokoro-82M", allow_patterns=["config.json", "kokoro-v1_0.pth", "voices/*.pt"])
+PY
+za doctor   # expect speech_engine: kokoro-torch, kokoro_installed: true
+za install
+```
+
+The `mlx` extra is restricted to Apple silicon by environment markers, so
+`pip install -e '.[mlx]'` is harmless elsewhere. Expect CPU synthesis on an old
+Intel Mac to be several times slower than MLX; a Full Reading can take longer
+than the audio it produces. On x86_64 Linux install the same extra (use PyTorch's
+CPU wheel index to avoid the CUDA download); final AAC encoding still uses macOS
+`afconvert`, so Linux currently produces Markdown and WAV segments only.
+The legacy `zotero-audio` CLI accepts `--engine auto|kokoro-torch|kokoro-mlx`.
 
 `za install` installs a per-user `launchd` worker and disables the previous
 five-minute scheduler at cutover. The persistent service owns the new one-minute

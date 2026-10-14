@@ -295,8 +295,12 @@ def main(argv=None):
             import importlib.util
             import platform
             import shutil
+            from .audio import default_kokoro_engine
+            engine = default_kokoro_engine()
+            runtime_module = "mlx_audio" if engine == "kokoro-mlx" else "kokoro"
             checks = {"architecture": platform.machine(), "python": platform.python_version(), "ffmpeg": bool(shutil.which("ffmpeg")),
-                      "kokoro_installed": importlib.util.find_spec("mlx_audio") is not None,
+                      "speech_engine": engine,
+                      "kokoro_installed": importlib.util.find_spec(runtime_module) is not None,
                       "mcp_installed": importlib.util.find_spec("mcp") is not None,
                       "runtime": str(store.runtime), "daemon_online": daemon_status(store) is not None,
                       "cloud_configured": (store.root / "cloud.json").is_file(), "icloud_configured": bool(store.settings()["icloud_folder"])}
