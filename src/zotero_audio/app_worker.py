@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from .app_library import artifact_path, import_existing, migrate_catalog_markdown, read_json, refresh_zotero
+from .app_outbox import private_audio_mode
 from .article_files import research_markdown_filename, review_markdown_path
 from .app_state import Store, TERMINAL, now
 from .util import sha256_file
@@ -240,8 +241,10 @@ class LocalWorker:
                     record["markdown"] = str(self.snapshot(Path(record["markdown"]), name=research_markdown_filename(display)))
                 publishing = bool(settings["auto_publish"] and record.get("public_eligible") and record.get("selected"))
                 private = not record.get("public_eligible")
+                mode = private_audio_mode(self.store.runtime, settings) if private else "none"
                 destination = (str(Path(settings["icloud_folder"]) / readable_filename(display, edition))
-                               if private and settings.get("icloud_folder") else None)
+                               if mode == "icloud" else None)
+                outbox = mode == "outbox"
                 with self.store.edit_article(article_id) as current:
                     previous = current.setdefault("editions", {}).get(edition, {})
                     already_published = (publishing and previous.get("audio_sha256") == record.get("audio_sha256")
@@ -255,9 +258,12 @@ class LocalWorker:
                     current.setdefault("artifacts", {})["audio"] = True
                     current["publication_status"] = _publication_status(current, record["publication_status"])
                     if private:
-                        current["icloud_status"] = "pending" if destination else "not_configured"
+                        current["icloud_status"] = "pending" if destination or outbox else "not_configured"
                 if publishing and not already_published:
                     self.store.enqueue_delivery("publish", article_id, {"record": record})
+                elif outbox:
+                    self.store.enqueue_delivery("outbox", article_id, {"source": record["audio"], "filename": readable_filename(display, edition),
+                                                                       "sha256": record.get("audio_sha256"), "title": display["title"], "edition": edition})
                 elif destination:
                     self.store.enqueue_delivery("icloud", article_id, {"source": record["audio"], "target": destination, "sha256": record.get("audio_sha256")})
                 self.queue_backup(current, Path(record["audio"]), edition, settings)
@@ -330,7 +336,7 @@ class LocalWorker:
         while not self.stop.is_set():
             with self.store.db() as db:
                 row = db.execute("""SELECT * FROM deliveries WHERE status='pending' AND next_attempt <= ?
-                    ORDER BY CASE kind WHEN 'publish' THEN 0 WHEN 'icloud' THEN 1 ELSE 2 END,updated_at LIMIT 1""", (time.time(),)).fetchone()
+                    ORDER BY CASE kind WHEN 'publish' THEN 0 WHEN 'icloud' THEN 1 WHEN 'outbox' THEN 1 ELSE 2 END,updated_at LIMIT 1""", (time.time(),)).fetchone()
                 if row:
                     db.execute("UPDATE deliveries SET status='running',updated_at=? WHERE id=?", (now(), row["id"]))
             if not row:
@@ -340,6 +346,12 @@ class LocalWorker:
                 payload = json.loads(row["data"])
                 if row["kind"] == "publish":
                     self.publish(row["article_id"], payload["record"])
+                elif row["kind"] == "outbox":
+                    from .app_outbox import deliver_to_outbox
+                    deliver_to_outbox(self.store.runtime, payload, article_id=row["article_id"], title=payload.get("title", ""),
+                                      edition=payload.get("edition", ""), now=now())
+                    with self.store.edit_article(row["article_id"]) as current:
+                        current["icloud_status"] = "outbox"
                 else:
                     self.copy_artifact(payload)
                     with self.store.edit_article(row["article_id"]) as current:
@@ -360,7 +372,7 @@ class LocalWorker:
                             edition["publication_status"] = "retry_pending"
                             current["publication_status"] = _publication_status(current, "retry_pending")
                     else:
-                        current[row["kind"] + "_status"] = "retry_pending"
+                        current[("icloud" if row["kind"] == "outbox" else row["kind"]) + "_status"] = "retry_pending"
                 self.store.event("delivery_retry", kind=row["kind"], title=current["title"], message=str(exc), attempts=attempts)
 
     @staticmethod
@@ -371,28 +383,8 @@ class LocalWorker:
         if source.resolve() == target.resolve():
             return
         # Atomic local export; do not poll iCloud network synchronization.
-        target.parent.mkdir(parents=True, exist_ok=True)
-        content_hash = payload.get("sha256") or sha256_file(source)
-        original_target = target
-        collision = 0
-        while target.exists():
-            if target.stat().st_size == source.stat().st_size and sha256_file(target) == content_hash:
-                return
-            # Keep collisions/revisions instead of overwriting a user's other file.
-            collision += 1
-            ending = "" if collision == 1 else f"-{collision}"
-            target = original_target.with_name(original_target.stem + " — " + content_hash[:8] + ending + original_target.suffix)
-        # The destination may already be close to the filesystem component
-        # limit (especially after a collision suffix), so don't derive the
-        # temporary name from it.
-        temporary = target.parent / f".{uuid.uuid4().hex}.copying"
-        try:
-            shutil.copyfile(source, temporary)
-            if sha256_file(temporary) != content_hash:
-                raise RuntimeError("Export checksum did not match")
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
+        from .app_outbox import place_file
+        place_file(source, target, payload.get("sha256") or sha256_file(source))
 
     def publish(self, article_id, record):
         from .generation import publish_finished_episode

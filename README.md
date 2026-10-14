@@ -132,6 +132,7 @@ not select additional audio editions.
 | Private Cloudflare R2 | Current full Markdown and QA reports, including private/non-open articles. |
 | Cloudflare D1 | Search index, article metadata, durable jobs and settings. |
 | Your chosen iCloud folder | Readably named private M4A audio, without podcast metadata or logs. |
+| Server outbox (headless server only) | Private audio waits in `outbox/` until `za pull-audio` copies it to iCloud; see [docs/private-audio-outbox.md](docs/private-audio-outbox.md). |
 | Optional backup folder | Separate versions of Markdown/audio; disabled by default. |
 
 Cloudflare Workers Free hosts the authenticated dashboard and MCP. R2 Standard,

@@ -132,6 +132,10 @@ Markdown/audio backup is separate and disabled by default. Local copies are
 atomic; the worker does not wait for iCloud’s network synchronization. Filename
 collisions must preserve existing user files. Delivery retries remain visible.
 
+On a server without iCloud (Linux, or `control/delivery.json` `private_audio: outbox`) private audio goes to a durable
+runtime outbox and `za pull-audio` on a Mac copies it into the iCloud folder; see
+[private-audio-outbox.md](private-audio-outbox.md).
+
 ### Takedown
 
 `zotero-audio podcast takedown --config podcast.toml --guid <guid> [--guid …] --reason "…" [--sync]`

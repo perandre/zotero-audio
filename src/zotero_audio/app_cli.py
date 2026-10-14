@@ -165,6 +165,15 @@ def parser():
         command = sub.add_parser(name)
         command.add_argument("job", nargs="?", help="Job ID; omitted uses the most recent eligible job")
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    pull = sub.add_parser("pull-audio", help="Copy finished private audio from the server outbox into the local iCloud folder")
+    pull.add_argument("--from", dest="source", help="SSH host of the server, e.g. perandre@imac")
+    pull.add_argument("--runtime-path", default=None, help="Server runtime directory (default ~/Sites/zotero-audio-runtime)")
+    pull.add_argument("--dest", help="Destination folder (default: the icloud_folder setting)")
+    pull.add_argument("--dry-run", action="store_true")
+    pull.add_argument("--install", action="store_true", help="Install a launchd agent running this every 15 minutes and at login")
+    pull.add_argument("--uninstall", action="store_true")
+    pull.add_argument("--interval", type=int, default=900, help="Seconds between runs for --install")
+    pull.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     server = sub.add_parser("serve")
     server.add_argument("--port", type=int, default=8765)
     return root
@@ -267,6 +276,29 @@ def main(argv=None):
         if command == "mcp":
             from .app_mcp import main as mcp_main
             return mcp_main()
+        if command == "pull-audio":
+            from . import app_pull
+            if args.uninstall:
+                emit(app_pull.uninstall_agent(), args.json)
+                return 0
+            if not args.source:
+                raise ValueError("Supply --from <ssh host>, e.g. --from perandre@imac")
+            runtime_path = args.runtime_path or app_pull.DEFAULT_REMOTE_RUNTIME
+            if args.install:
+                emit(app_pull.install_agent(store, host=args.source, runtime_path=runtime_path, dest=args.dest, interval=args.interval), args.json)
+                return 0
+            result = app_pull.run_pull(store, host=args.source, runtime_path=runtime_path, dest=args.dest, dry_run=args.dry_run)
+            if args.json:
+                emit(result, True)
+            else:
+                for item in result["pulled"]:
+                    print(f"Pulled: {item['title'] or item['filename']}\n  {item['filename']}")
+                for item in result["failed"]:
+                    print(f"FAILED: {item['title']}: {item['error']}", file=sys.stderr)
+                for item in result.get("would_pull", []):
+                    print(f"Would pull: {item['title'] or item['filename']}")
+                print(f"{len(result['pulled'])} pulled, {result.get('skipped', 0)} already pulled, {len(result['failed'])} failed")
+            return 1 if result["failed"] else 0
         if command == "install":
             from .app_install import install
             emit(install(store), args.json)
