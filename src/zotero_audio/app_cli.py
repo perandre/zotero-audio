@@ -228,13 +228,13 @@ def main(argv=None):
             from . import app_research as research
             if args.action == "enrich":
                 import fcntl
-                from .zotero_local import ZoteroLocalAPI
+                from .zotero_web import make_zotero_api
                 with (store.root / "research-fit.lock").open("a") as lock:
                     try:
                         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError:
                         raise ValueError("A research-fit job is already running") from None
-                    records = research.discover(ZoteroLocalAPI(timeout=15))
+                    records = research.discover(make_zotero_api(store.root, timeout=15))
                     research.prepare(store, records)
                     research.enrich(store, records, limit=args.limit,
                                     progress=(lambda _: None) if args.json else lambda text: print(text, flush=True))

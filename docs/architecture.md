@@ -38,6 +38,8 @@ Python integration prefers **GET requests to Zotero’s local API** at
 SQLite/storage access is a compatibility fallback. The optional Zotero add-on
 maintains its own status tags/saved search and exposes a read-only feed inbox;
 those existing add-on responsibilities are separate from core GET discovery.
+On a headless host without Zotero desktop, select [Zotero Web API
+discovery](background-sync.md#zotero-web-api-mode-headless-hosts) instead.
 
 `generation.process_article` resolves source metadata, extracts the PDF when
 needed, and writes a human-readable Markdown filename matching the episode
@@ -248,6 +250,13 @@ direct GitHub reads and commits, private caches, source-bound PDF/DOCX extractio
 independent document-write consent and recovery after interrupted cloud saves.
 
 ## Automatic Zotero discovery
+
+`app_library._refresh_zotero` and `za research-fit` obtain their client from
+`zotero_web.make_zotero_api(control)`: the local API (default, unchanged) or,
+when `control/zotero.json` says `{"mode": "web"}`, `ZoteroWebAPI`, a read-only
+subclass of the local client. It keeps the same `pdf_attachments()`/`metadata()`
+surface, so metadata, source hashing and generation are identical; PDFs resolve
+to files in `control/zotero-web/files/<attachment>/<md5>.pdf`.
 
 `LocalWorker.start` starts discovery alongside generation and delivery. Shutdown
 signals and joins all three threads. Scans serialize with explicit sync jobs but
