@@ -293,7 +293,15 @@ class CloudBridge:
                         payload[key] = path.read_text(encoding="utf-8")
                 fingerprint = digest({"sync_schema": self.SYNC_SCHEMA_VERSION, "payload": payload})
                 if row["cloud_hash"] != fingerprint:
-                    self.request("PUT", f"/api/bridge/articles/{quote(row['id'], safe='')}", payload)
+                    path = f"/api/bridge/articles/{quote(row['id'], safe='')}"
+                    try:
+                        self.request("PUT", path, payload)
+                    except HTTPError as exc:
+                        if exc.code != 413:
+                            raise
+                        # Very long sources (e.g. full legal texts) exceed the cloud
+                        # upload limit. List them without Markdown rather than retry forever.
+                        self.request("PUT", path, {"article": visible})
                     with self.store.db() as db:
                         db.execute("UPDATE articles SET cloud_hash=? WHERE id=? AND data=?", (fingerprint, row["id"], row["data"]))
                     sent += 1

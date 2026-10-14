@@ -178,6 +178,23 @@ def test_bad_article_does_not_prevent_other_articles_from_syncing(bridge, tmp_pa
     assert calls.count("BAD") == 1  # unchanged permanent rejection backs off
 
 
+def test_oversized_article_syncs_without_markdown(bridge, tmp_path):
+    markdown = tmp_path / "act.md"
+    markdown.write_text("# Very long regulation\n\nText.")
+    bridge.store.put_article({"id": "HUGE", "title": "Very long regulation", "source_url": None, "markdown": str(markdown)})
+    calls = []
+    def request(method, path, data=None):
+        calls.append(data)
+        if "markdown" in data:
+            raise error(413)
+        return {"article": data["article"]}
+    bridge.request = request
+    assert bridge.sync_articles() == 1
+    assert "markdown" not in calls[-1]
+    assert not bridge.store.state("cloud_article_errors")
+    assert bridge.sync_articles() == 0
+
+
 def test_lease_renewal_has_its_own_thread_and_does_not_wait_for_uploads(bridge):
     started = threading.Event()
     bridge.sync_jobs = lambda: started.set() or bridge.worker.stop.set()
