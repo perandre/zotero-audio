@@ -59,12 +59,17 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def filename_part(value: str, max_length: int = 180) -> str:
+def filename_part(value: str, max_length: int = 180, max_bytes: int = 240) -> str:
     value = unicodedata.normalize("NFKC", value)
     value = value.replace("–", " - ").replace("—", " - ")
     value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " - ", value)
     value = re.sub(r"\s+", " ", value).strip(" .")
-    return value[:max_length].rstrip(" .") or "document"
+    value = value[:max_length]
+    # Linux filesystems cap names at 255 bytes (macOS counts characters), so
+    # non-Latin titles must also fit in bytes, leaving room for suffixes.
+    while len(value.encode("utf-8")) > max_bytes:
+        value = value[:-1]
+    return value.rstrip(" .") or "document"
 
 
 def _surname(name: str) -> str:
