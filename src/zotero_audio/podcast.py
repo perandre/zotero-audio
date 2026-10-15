@@ -1344,10 +1344,50 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
             "new_feed_url": f"{feed_base}/{show.slug}/feed.xml" if config.previous_feed_base_url else None}
 
 
-def listen_links(config: PodcastConfig, edition: str) -> dict[str, str]:
-    """Show-level directory links for the edition's feed; unset links are omitted."""
+def listen_links(config: PodcastConfig, edition: str, guid: str = "") -> dict[str, str]:
+    """Episode links in the podcast apps, falling back to the edition's show page.
+
+    Episode URLs come from ``listen-links.json`` (see ``refresh_listen_links``);
+    unset links are omitted.
+    """
     show = config.brief_show if edition == EDITION_BRIEF else config.full_show
-    return {"Spotify": show.spotify_url, "Apple Podcasts": show.apple_podcasts_url}
+    store_path = config.state_root / "listen-links.json"
+    stored = (load_json(store_path).get("episodes", {}).get(guid, {}) if store_path.is_file() else {})
+    return {"Spotify": stored.get("spotify") or show.spotify_url,
+            "Apple Podcasts": stored.get("apple_podcasts") or show.apple_podcasts_url}
+
+
+def refresh_listen_links(config: PodcastConfig, *, fetch: Any = None) -> dict[str, Any]:
+    """Resolve episode URLs in Apple Podcasts/Spotify and rewrite pages whose links changed."""
+    from . import listen_links as resolver
+    if not config.public_root:
+        raise ValueError("public_root is required to refresh listen links")
+    manifest_path = config.state_root / "publication-manifest.json"
+    manifest = load_json(manifest_path) if manifest_path.is_file() else {"episodes": []}
+    episodes = manifest.get("episodes", [])
+    shows = {EDITION_BRIEF: config.brief_show, EDITION_FULL: config.full_show}
+    kwargs = {"fetch": fetch} if fetch else {}
+    found = resolver.resolve(
+        episodes, apple_show_urls={e: s.apple_podcasts_url for e, s in shows.items()},
+        spotify_show_urls={e: s.spotify_url for e, s in shows.items()}, **kwargs)
+    store_path = config.state_root / "listen-links.json"
+    previous = load_json(store_path).get("episodes", {}) if store_path.is_file() else {}
+    merged = {**previous, **{guid: {**previous.get(guid, {}), **entry} for guid, entry in found.items()}}
+    atomic_write_json(store_path, {"schema": "zotero-audio-listen-links/v1", "episodes": merged})
+    updated = []
+    with _publication_lock(config):
+        for item in episodes:
+            paper_guid = _record_paper_guid(item)
+            key = f"papers/{paper_guid}/{item['edition']}/index.html"
+            page = _episode_page(item, listen_links(config, item["edition"], str(item.get("guid") or "")))
+            destination = config.public_root / key
+            if destination.is_file() and destination.read_text(encoding="utf-8") == page:
+                continue
+            page_stage = config.state_root / "public-staging" / paper_guid / item["edition"] / "index.html"
+            atomic_write_text(page_stage, page)
+            _copy_if_changed(page_stage, destination)
+            updated.append(key)
+    return {"resolved": len(found), "episodes": len(episodes), "updated_pages": updated, "sync_keys": updated}
 
 
 def _episode_page(record: dict[str, Any], listen: dict[str, str] | None = None) -> str:
@@ -1569,7 +1609,7 @@ def _publish_locked(config: PodcastConfig, paper_guid: str, source_sha: str, pri
             record["show_notes"] = record["show_notes"] + f"\nPaired edition: {pair_url}"
             if record.get("generated_show_notes"):
                 record["generated_show_notes"] += f"\nPaired edition: {pair_url}"
-        page_stage = config.state_root / "public-staging" / paper_guid / edition / "index.html"; atomic_write_text(page_stage, _episode_page(record, listen_links(config, edition)))
+        page_stage = config.state_root / "public-staging" / paper_guid / edition / "index.html"; atomic_write_text(page_stage, _episode_page(record, listen_links(config, edition, str(record.get("guid") or ""))))
         _copy_if_changed(page_stage, config.public_root / "papers" / paper_guid / edition / "index.html")
         public_records.append(record); existing[(record["guid"], source_sha)] = record
     manifest["episodes"] = sorted(existing.values(), key=lambda item: (item["guid"], item.get("revision", "")))
@@ -1663,7 +1703,7 @@ def take_down_episodes(config: PodcastConfig, guids: Iterable[str], *, reason: s
                                                if line.strip() != f"Paired edition: {pair}")
                 paper_guid = _record_paper_guid(item)
                 page_stage = config.state_root / "public-staging" / paper_guid / item["edition"] / "index.html"
-                atomic_write_text(page_stage, _episode_page(item, listen_links(config, item["edition"])))
+                atomic_write_text(page_stage, _episode_page(item, listen_links(config, item["edition"], str(item.get("guid") or ""))))
                 key = f"papers/{paper_guid}/{item['edition']}/index.html"
                 _copy_if_changed(page_stage, config.public_root / key)
                 updated_pages.append(key)

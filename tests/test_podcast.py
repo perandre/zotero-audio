@@ -832,3 +832,43 @@ def test_takedown_removes_episodes_from_feeds_and_keeps_an_audit_record(tmp_path
 
     with pytest.raises(ValueError, match="Refusing to empty the brief feed"):
         take_down_episodes(config, [published["EFGH5678"]["brief"]["guid"]], reason="test")
+
+
+def test_listen_links_resolve_episode_urls_and_refresh_pages(tmp_path):
+    import json as _json
+    from zotero_audio import listen_links as resolver
+
+    def fetch(url):
+        if url.startswith("https://itunes.apple.com/lookup?id=11"):
+            return _json.dumps({"results": [
+                {"trackName": "Show", "trackViewUrl": "https://podcasts.apple.com/us/podcast/s/id11?uo=4"},
+                {"episodeGuid": "urn:uuid:g1", "trackViewUrl": "https://podcasts.apple.com/us/podcast/t/id11?i=99&uo=4"}]})
+        if url == "https://open.spotify.com/show/full":
+            return '<a href="/episode/' + "A" * 22 + '">x</a><a href="/episode/' + "B" * 22 + '">y</a>'
+        if url.endswith("A" * 22):
+            return _json.dumps({"title": "Paper  One"})
+        raise OSError("offline")
+
+    episodes = [{"guid": "urn:uuid:g1", "edition": "full", "title": "Paper One"},
+                {"guid": "urn:uuid:g2", "edition": "full", "title": "Other"}]
+    found = resolver.resolve(episodes, apple_show_urls={"full": "https://podcasts.apple.com/us/podcast/s/id11"},
+                             spotify_show_urls={"full": "https://open.spotify.com/show/full"}, fetch=fetch)
+    assert found == {"urn:uuid:g1": {"apple_podcasts": "https://podcasts.apple.com/us/podcast/t/id11?i=99",
+                                     "spotify": "https://open.spotify.com/episode/" + "A" * 22}}
+
+    full = podcast_module.ShowConfig("Full", "d", "full", "g", "https://open.spotify.com/show/full",
+                                     "https://podcasts.apple.com/us/podcast/s/id11")
+    config = podcast_module.PodcastConfig(tmp_path / "private", tmp_path / "state", tmp_path / "public",
+                                          full_show=full, publishing_enabled=True, dry_run=False)
+    config.state_root.mkdir()
+    paper = "11111111-1111-1111-1111-111111111111"
+    record = {**episodes[0], "audio": "x", "revision": "r", "pub_date": "2026-10-01T00:00:00Z",
+              "guid": "urn:uuid:g1", "audio_url": "https://a.example/a.m4a", "paper_guid": paper,
+              "page_url": f"https://1morepaper.com/papers/{paper}/full/index.html"}
+    (config.state_root / "publication-manifest.json").write_text(_json.dumps({"episodes": [record]}))
+    first = podcast_module.refresh_listen_links(config, fetch=fetch)
+    page = (config.public_root / "papers" / paper / "full" / "index.html").read_text()
+    assert first["updated_pages"] and 'href="https://podcasts.apple.com/us/podcast/t/id11?i=99"' in page
+    assert 'href="https://open.spotify.com/episode/' + "A" * 22 + '"' in page
+    assert podcast_module.refresh_listen_links(config, fetch=fetch)["updated_pages"] == []
+    assert podcast_module.listen_links(config, "full", "urn:uuid:unknown")["Spotify"] == "https://open.spotify.com/show/full"
