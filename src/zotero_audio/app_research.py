@@ -93,22 +93,26 @@ def article_input(data: dict, markdown: str = "") -> dict:
 def discover(api: ZoteroLocalAPI) -> list[dict]:
     """Paginate the supported GET API; classify parents rather than attachments."""
     records = {}
-    start = 0
-    while True:
-        page = api._get(f"items/top?limit=100&start={start}&sort=dateAdded&direction=asc")
-        if not isinstance(page, list):
-            raise ZoteroLocalAPIError("Unexpected Zotero top-level response")
-        for item in page:
-            data = item.get("data", {})
-            if data.get("itemType") in {"attachment", "note", "annotation"} or data.get("deleted") or not data.get("title"):
-                continue
-            key = item.get("key") or data.get("key")
-            if not key:
-                raise ZoteroLocalAPIError("Zotero record is missing its key")
-            records[str(key)] = {"key": str(key), "library_id": "users/0", "data": data}
-        start += len(page)
-        if len(page) < 100:
-            return list(records.values())
+    # Enabled Web API group libraries are classified alongside the personal one.
+    for client in [api, *getattr(api, "group_clients", lambda: [])()]:
+        library_id = getattr(client, "library_id", "users/0")
+        start = 0
+        while True:
+            page = client._get(f"items/top?limit=100&start={start}&sort=dateAdded&direction=asc")
+            if not isinstance(page, list):
+                raise ZoteroLocalAPIError("Unexpected Zotero top-level response")
+            for item in page:
+                data = item.get("data", {})
+                if data.get("itemType") in {"attachment", "note", "annotation"} or data.get("deleted") or not data.get("title"):
+                    continue
+                key = item.get("key") or data.get("key")
+                if not key:
+                    raise ZoteroLocalAPIError("Zotero record is missing its key")
+                records[(library_id, str(key))] = {"key": str(key), "library_id": library_id, "data": data}
+            start += len(page)
+            if len(page) < 100:
+                break
+    return list(records.values())
 
 
 def init_tables(store: Store):
