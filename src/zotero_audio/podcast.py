@@ -425,6 +425,8 @@ class ShowConfig:
     description: str
     slug: str
     guid: str
+    spotify_url: str = ""
+    apple_podcasts_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -467,7 +469,9 @@ def load_podcast_config(path: Path) -> PodcastConfig:
     def show(slug: str, fallback: ShowConfig) -> ShowConfig:
         value = shows.get(slug, {})
         return ShowConfig(str(value.get("title", fallback.title)), str(value.get("description", fallback.description)),
-                          slug, str(value.get("guid", fallback.guid)))
+                          slug, str(value.get("guid", fallback.guid)),
+                          str(value.get("spotify_url", fallback.spotify_url)).strip(),
+                          str(value.get("apple_podcasts_url", fallback.apple_podcasts_url)).strip())
     return PodcastConfig(
         private_root=Path(paths["private_root"]).expanduser().resolve(),
         state_root=Path(paths["state_root"]).expanduser().resolve(),
@@ -1340,7 +1344,13 @@ def _show(config: PodcastConfig, show: ShowConfig, image_url: str) -> dict[str, 
             "new_feed_url": f"{feed_base}/{show.slug}/feed.xml" if config.previous_feed_base_url else None}
 
 
-def _episode_page(record: dict[str, Any]) -> str:
+def listen_links(config: PodcastConfig, edition: str) -> dict[str, str]:
+    """Show-level directory links for the edition's feed; unset links are omitted."""
+    show = config.brief_show if edition == EDITION_BRIEF else config.full_show
+    return {"Spotify": show.spotify_url, "Apple Podcasts": show.apple_podcasts_url}
+
+
+def _episode_page(record: dict[str, Any], listen: dict[str, str] | None = None) -> str:
     def link(label: str, value: Any) -> str:
         safe = _safe_url(str(value or ""))
         return f'<a href="{html.escape(safe, quote=True)}">{label}</a>' if safe else ""
@@ -1396,6 +1406,10 @@ def _episode_page(record: dict[str, Any]) -> str:
         link("Research Markdown", record.get("markdown_url")),
         link("Chapters", record.get("chapters_url")),
     )))
+    listen_html = ""
+    listen_items = "".join(filter(None, (link(f"Listen on {name}", url) for name, url in (listen or {}).items())))
+    if listen_items:
+        listen_html = f'<div class="link-list listen-links" aria-label="Listen on podcast apps">{listen_items}</div>'
     paired_link = ""
     for note_line in str(record.get("show_notes", "")).splitlines():
         paired = re.match(r"^\s*Paired edition:\s*(https?://\S+)\s*$", note_line, re.IGNORECASE)
@@ -1420,7 +1434,7 @@ def _episode_page(record: dict[str, Any]) -> str:
             "@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}"
             "</style></head><body><main class=\"page-shell\"><article class=\"episode\">"
             f"<header class=\"episode-header\"><div class=\"eyebrow\">{html.escape(PODCAST_NAME)}</div><h1>{title}</h1>"
-            f"{image}<p class=\"episode-meta\"><span>{html.escape(edition.title())} edition</span>{'<span>' + html.escape(duration) + '</span>' if duration else ''}</p>{audio}</header>"
+            f"{image}<p class=\"episode-meta\"><span>{html.escape(edition.title())} edition</span>{'<span>' + html.escape(duration) + '</span>' if duration else ''}</p>{audio}{listen_html}</header>"
             f"{abstract_section}"
             f"<section aria-labelledby=\"recording-title\"><h2 id=\"recording-title\">Recording</h2><dl>{recording_items}</dl><p>Narration: Read verbatim by an AI-generated voice.</p></section>"
             f"<section aria-labelledby=\"source-title\"><h2 id=\"source-title\">Source</h2><dl>{source_items}</dl><div class=\"link-list\">{read_link}</div></section>"
@@ -1555,7 +1569,7 @@ def _publish_locked(config: PodcastConfig, paper_guid: str, source_sha: str, pri
             record["show_notes"] = record["show_notes"] + f"\nPaired edition: {pair_url}"
             if record.get("generated_show_notes"):
                 record["generated_show_notes"] += f"\nPaired edition: {pair_url}"
-        page_stage = config.state_root / "public-staging" / paper_guid / edition / "index.html"; atomic_write_text(page_stage, _episode_page(record))
+        page_stage = config.state_root / "public-staging" / paper_guid / edition / "index.html"; atomic_write_text(page_stage, _episode_page(record, listen_links(config, edition)))
         _copy_if_changed(page_stage, config.public_root / "papers" / paper_guid / edition / "index.html")
         public_records.append(record); existing[(record["guid"], source_sha)] = record
     manifest["episodes"] = sorted(existing.values(), key=lambda item: (item["guid"], item.get("revision", "")))
@@ -1649,7 +1663,7 @@ def take_down_episodes(config: PodcastConfig, guids: Iterable[str], *, reason: s
                                                if line.strip() != f"Paired edition: {pair}")
                 paper_guid = _record_paper_guid(item)
                 page_stage = config.state_root / "public-staging" / paper_guid / item["edition"] / "index.html"
-                atomic_write_text(page_stage, _episode_page(item))
+                atomic_write_text(page_stage, _episode_page(item, listen_links(config, item["edition"])))
                 key = f"papers/{paper_guid}/{item['edition']}/index.html"
                 _copy_if_changed(page_stage, config.public_root / key)
                 updated_pages.append(key)

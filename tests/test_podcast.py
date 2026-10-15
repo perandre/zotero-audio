@@ -158,6 +158,14 @@ def test_show_notes_render_safe_labeled_links_and_recording_disclosure():
     assert "Recording</h2>" in page and "Source</h2>" in page and "Licensing</h2>" in page
     assert "02:05" in page and "Hughes, Fern Davies" in page
     assert "Paired edition" not in page
+    assert "Listen on" not in page
+    listened = podcast_module._episode_page(
+        {"title": "Listen", "edition": "full"},
+        {"Spotify": "https://open.spotify.com/show/abc", "Apple Podcasts": "https://podcasts.apple.com/us/podcast/x/id1",
+         "Unset": "", "Bad": "javascript:alert(1)"})
+    assert '<a href="https://open.spotify.com/show/abc">Listen on Spotify</a>' in listened
+    assert '<a href="https://podcasts.apple.com/us/podcast/x/id1">Listen on Apple Podcasts</a>' in listened
+    assert "Unset" not in listened and "javascript:" not in listened
     manual_page = podcast_module._episode_page({"title": "Custom note", "edition": "full", "show_notes": "Editor supplied notes.",
                                                 "description_abstract": "This is not an abstract.", "description_is_manual": True})
     assert "Authors’ abstract" not in manual_page
