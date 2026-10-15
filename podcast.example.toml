@@ -36,8 +36,15 @@ r2_bucket = ""
 title = "1 More Paper (Brief)"
 description = "Discover how organizations adopt AI, reshape work, and govern its use. Research abstracts and key conclusions, in the authors' own words, read verbatim (by AI)."
 guid = "f25aa92b-5bea-51f8-b842-0836db8713ed"
+# Optional show pages in podcast apps. Episode pages link to the episode itself
+# once `zotero-audio podcast links --config ... --sync` has resolved it, and to
+# the show page until then.
+spotify_url = ""
+apple_podcasts_url = ""
 
 [shows.full]
 title = "1 More Paper"
 description = "Listen to the latest research on how organizations adopt AI, reshape work, and govern its use. Full papers, read verbatim (by AI)."
 guid = "119266cf-33b9-5795-bcc2-0e81e72291ef"
+spotify_url = ""
+apple_podcasts_url = ""
