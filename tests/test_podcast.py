@@ -824,3 +824,27 @@ def test_takedown_removes_episodes_from_feeds_and_keeps_an_audit_record(tmp_path
 
     with pytest.raises(ValueError, match="Refusing to empty the brief feed"):
         take_down_episodes(config, [published["EFGH5678"]["brief"]["guid"]], reason="test")
+
+
+def test_health_check_accepts_show_artwork_on_canonical_feed_host(tmp_path: Path, monkeypatch):
+    _stub_media(monkeypatch); bundle = _bundle(tmp_path)
+    config = PodcastConfig(private_root=tmp_path / "private", state_root=tmp_path / "state",
+                           public_root=tmp_path / "public", base_url="https://audio.example",
+                           feed_base_url="https://www.audio.example",
+                           publishing_enabled=True, dry_run=False, owner_email="podcast@example.org")
+    build_local_podcast(bundle, backend=Backend(), config=config, selected=True, license_record=_license(),
+                        metadata={"zotero_key": "ABCD1234", "authors": ["Ada Smith"],
+                                  "title": "Listening to Evidence", "publication_year": "2026"})
+    feed = tmp_path / "public" / "brief" / "feed.xml"
+    root = ET.fromstring(feed.read_text(encoding="utf-8"))
+    show_image = root.find(f"./channel/{{{podcast_module.ITUNES_NS}}}image").attrib["href"]
+    assert show_image.startswith("https://www.audio.example/")
+    assert health_check(config)["status"] == "pass"
+    # Without the canonical host configured the same artwork is rejected.
+    assert health_check(replace(config, feed_base_url=""))["status"] == "fail"
+    # Episode media on the canonical host is still rejected.
+    enclosure = root.find(".//enclosure").attrib["url"]
+    feed.write_text(feed.read_text(encoding="utf-8").replace(
+        enclosure, enclosure.replace("https://audio.example/", "https://www.audio.example/")), encoding="utf-8")
+    failures = health_check(config)["failures"]
+    assert any("outside the configured publisher" in failure for failure in failures)

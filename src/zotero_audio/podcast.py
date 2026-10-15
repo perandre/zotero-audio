@@ -1664,6 +1664,17 @@ def take_down_episodes(config: PodcastConfig, guids: Iterable[str], *, reason: s
             "feed_changed": changed, "sync_keys": [f"{edition}/feed.xml" for edition in editions] + updated_pages + ["index.html"]}
 
 
+def _head_any(publishers: list[LocalPublisher], url: str) -> dict[str, Any]:
+    """HEAD through the first publisher whose origin owns ``url``."""
+    for candidate in publishers[:-1]:
+        try:
+            return candidate.head(url)
+        except ValueError as exc:
+            if str(exc) != "URL is outside the configured publisher":
+                raise
+    return publishers[-1].head(url)
+
+
 def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, Any]:
     """Validate both canonical feeds and every URL they reference.
 
@@ -1674,6 +1685,11 @@ def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, An
     if not config.public_root:
         raise ValueError("public_root is required for podcast health checks")
     publisher = LocalPublisher(config.public_root, config.base_url)
+    # Show artwork is served from the canonical feed host (matching
+    # publish_sync.sync_public); episode media must stay on base_url.
+    artwork_publishers = [publisher]
+    if config.feed_base_url and config.feed_base_url != config.base_url:
+        artwork_publishers.append(LocalPublisher(config.public_root, config.feed_base_url))
     failures: list[str] = []
     checked = 0
     for edition in EDITIONS:
@@ -1705,9 +1721,14 @@ def health_check(config: PodcastConfig, *, remote: bool = False) -> dict[str, An
             *((node, "url") for node in root.findall(f".//{{{PODCAST_NS}}}transcript")),
             *((node, "url") for node in root.findall(f".//{{{PODCAST_NS}}}chapters")),
         ) if node.attrib.get(attribute)]
+        show_artwork = {node.attrib["href"] for node in root.findall(f"./channel/{{{ITUNES_NS}}}image")
+                        if node.attrib.get("href")}
         for url in sorted(set(urls)):
             try:
-                result = publisher.head(url)
+                if url in show_artwork:
+                    result = _head_any(artwork_publishers, url)
+                else:
+                    result = publisher.head(url)
                 if not result["accept_ranges"] or result["bytes"] <= 0 or not result["content_type"]:
                     raise RuntimeError("missing length, MIME type, or byte-range support")
                 if remote:
