@@ -11,6 +11,13 @@ Library data is synchronised incrementally (``since`` plus
 ``If-Modified-Since-Version``) into ``<runtime>/control/zotero-web/`` and PDF
 attachments are downloaded once per ``(attachment key, md5)`` into a cache.
 The API key is read from a file or the environment and is never logged.
+
+Group libraries are opt-in (``"groups": "all"`` or a list of group IDs).  Each
+group syncs into ``zotero-web/groups/<id>/`` with its own state and file cache,
+and its attachments get library-qualified IDs (``g<groupID>:<itemKey>``) so
+they never collide with personal-library keys, which stay unchanged.  When the
+same DOI has a usable PDF in more than one library, the personal library wins,
+then the lowest group ID; the other copies are reported as duplicates.
 """
 
 from __future__ import annotations
@@ -38,6 +45,8 @@ DEFAULT_MAX_DOWNLOADS = 20
 _KEY_FILE_NAMES = ("Zotero API key.txt", "zotero-api-key.txt")
 _MD5_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 _ITEM_KEY_RE = re.compile(r"^[A-Za-z0-9]{8}$")
+_GROUP_ID_RE = re.compile(r"^g([0-9]{1,12}):([A-Za-z0-9]{8})$")
+_DOI_PREFIX_RE = re.compile(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re.IGNORECASE)
 
 # Zotero's Backoff/Retry-After apply to the whole API key, not one client
 # object, and the monitor builds a fresh client each scan.
@@ -74,9 +83,11 @@ def zotero_settings(control: Path, environ: dict[str, str] | None = None) -> dic
 
         {"mode": "web", "user_id": 1234567}
 
-    Optional keys: ``api_key_file``, ``base_url``, ``max_downloads_per_sync``.
+    Optional keys: ``api_key_file``, ``base_url``, ``max_downloads_per_sync``,
+    ``groups`` (``"all"`` or a list of group IDs; default: personal library only).
     Environment overrides: ``ZOTERO_AUDIO_ZOTERO_MODE``,
-    ``ZOTERO_AUDIO_ZOTERO_USER_ID``, ``ZOTERO_AUDIO_ZOTERO_KEY_FILE``;
+    ``ZOTERO_AUDIO_ZOTERO_USER_ID``, ``ZOTERO_AUDIO_ZOTERO_KEY_FILE``,
+    ``ZOTERO_AUDIO_ZOTERO_GROUPS`` (``all`` or comma-separated IDs);
     ``ZOTERO_API_KEY`` supplies the key itself.
     """
     env = os.environ if environ is None else environ
@@ -96,11 +107,33 @@ def zotero_settings(control: Path, environ: dict[str, str] | None = None) -> dic
         value["user_id"] = env["ZOTERO_AUDIO_ZOTERO_USER_ID"]
     if env.get("ZOTERO_AUDIO_ZOTERO_KEY_FILE"):
         value["api_key_file"] = env["ZOTERO_AUDIO_ZOTERO_KEY_FILE"]
+    if env.get("ZOTERO_AUDIO_ZOTERO_GROUPS"):
+        value["groups"] = env["ZOTERO_AUDIO_ZOTERO_GROUPS"]
     mode = str(value.get("mode") or "local").strip().lower()
     if mode not in {"local", "web"}:
         raise ValueError("Zotero mode must be 'local' or 'web'")
     value["mode"] = mode
+    value["groups"] = _group_selection(value.get("groups"))
     return value
+
+
+def _group_selection(value: Any) -> str | list[str]:
+    """Normalise the ``groups`` setting to ``"all"`` or a sorted list of IDs."""
+    if value in (None, False, "", [], "none"):
+        return []
+    if value is True or (isinstance(value, str) and value.strip().lower() == "all"):
+        return "all"
+    items = value.split(",") if isinstance(value, str) else value if isinstance(value, list) else None
+    if items is None:
+        raise ValueError("Zotero groups must be 'all' or a list of group IDs")
+    ids = {str(item).strip() for item in items if str(item).strip()}
+    if not all(re.fullmatch(r"[0-9]{1,12}", group) for group in ids):
+        raise ValueError("Zotero group IDs must be numeric")
+    return sorted(ids, key=int)
+
+
+def normalize_doi(value: Any) -> str:
+    return _DOI_PREFIX_RE.sub("", str(value or "").strip()).strip().casefold()
 
 
 def read_api_key(control: Path, settings: dict[str, Any], environ: dict[str, str] | None = None) -> str:
@@ -154,10 +187,20 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         clock: Callable[[], float] = time.monotonic,
         max_downloads: int = DEFAULT_MAX_DOWNLOADS,
         page_size: int = PAGE_SIZE,
+        groups: Any = None,
+        group_id: str | None = None,
+        group_name: str | None = None,
     ) -> None:
         super().__init__(base_url, timeout=timeout, opener=opener)
         self._key = api_key
         self.user_id = str(user_id) if user_id not in (None, "") else None
+        # A group client reads /groups/<id>/...; the personal client owns the
+        # group clients and is the only object the rest of the app sees.
+        self.group_id = str(group_id) if group_id else None
+        self.group_name = group_name
+        self.groups = _group_selection(groups) if not self.group_id else []
+        self._group_clients: list[ZoteroWebAPI] | None = None
+        self.duplicates: list[dict[str, str]] = []
         self.cache_dir = Path(cache_dir)
         self.sleep = sleep
         self.clock = clock
@@ -168,7 +211,21 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         self._synced = False
 
     def __repr__(self) -> str:  # never expose the key
+        if self.group_id:
+            return f"ZoteroWebAPI(group_id={self.group_id!r})"
         return f"ZoteroWebAPI(user_id={self.user_id!r})"
+
+    @property
+    def id_prefix(self) -> str:
+        return f"g{self.group_id}:" if self.group_id else ""
+
+    @property
+    def library_id(self) -> str:
+        """Research-fit library identifier (personal stays ``users/0`` as before)."""
+        return f"groups/{self.group_id}" if self.group_id else "users/0"
+
+    def _library_path(self) -> str:
+        return f"groups/{self.group_id}" if self.group_id else f"users/{self._resolve_user()}"
 
     # ------------------------------------------------------------------ HTTP
     def _wait(self) -> None:
@@ -235,7 +292,7 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         return self.user_id
 
     def _get(self, path: str, *, raw: bool = False, headers: dict[str, str] | None = None) -> Any:
-        url = f"{self.base_url}/users/{self._resolve_user()}/{path.lstrip('/')}"
+        url = f"{self.base_url}/{self._library_path()}/{path.lstrip('/')}"
         _, _, body = self._request(url, headers=headers)
         try:
             return body.decode("utf-8") if raw else json.loads(body.decode("utf-8"))
@@ -251,7 +308,7 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         while True:
             query = urlencode({**params, "limit": self.page_size, "start": start,
                                **({"since": since} if since else {})})
-            url = f"{self.base_url}/users/{self._resolve_user()}/{path}?{query}"
+            url = f"{self.base_url}/{self._library_path()}/{path}?{query}"
             send = {"If-Modified-Since-Version": str(since)} if since and first else {}
             status, headers, body = self._request(url, headers=send)
             if status == 304:
@@ -354,6 +411,9 @@ class ZoteroWebAPI(ZoteroLocalAPI):
 
     # ------------------------------------------- local-API-compatible surface
     def item(self, key: str) -> dict[str, Any]:
+        if not self.group_id and _GROUP_ID_RE.match(str(key)):
+            api, plain = self._client_for(key)
+            return api.item(plain)
         data = self.sync()["items"].get(str(key))
         if data is None:
             raise ZoteroLocalAPIError(f"Zotero item {key} was not found")
@@ -362,9 +422,6 @@ class ZoteroWebAPI(ZoteroLocalAPI):
     def _collections(self) -> dict[str, dict[str, Any]]:
         self.sync()
         return self._collections_cache or {}
-
-    def attachment_path(self, key: str) -> Path | None:
-        return self._cached_path(str(key), self.item(key))
 
     # ---------------------------------------------------------- attachments
     @staticmethod
@@ -414,7 +471,7 @@ class ZoteroWebAPI(ZoteroLocalAPI):
         target = self._file_path(key, md5)
         if target.is_file():
             return target.resolve()
-        url = f"{self.base_url}/users/{self._resolve_user()}/items/{key}/file"
+        url = f"{self.base_url}/{self._library_path()}/items/{key}/file"
         status, headers, body = self._request(url)
         if status in {301, 302, 303, 307, 308}:
             location = _header(headers, "Location") or ""
@@ -436,33 +493,113 @@ class ZoteroWebAPI(ZoteroLocalAPI):
                 old.unlink(missing_ok=True)
         return target.resolve()
 
-    def pdf_attachments(self) -> list[tuple[str, Path]]:
+    def _parent_doi(self, state: dict[str, Any], data: dict[str, Any]) -> str:
+        parent = state["items"].get(str(data.get("parentItem") or "")) or {}
+        return normalize_doi(parent.get("DOI"))
+
+    def _scan(self, budget: int, claimed: dict[str, str]) -> tuple[list[tuple[str, Path]], int]:
+        """Discover this library's PDFs; keys are returned library-qualified.
+
+        ``claimed`` maps DOIs already provided by an earlier library to that
+        article ID.  This library's usable PDFs add their DOIs to it afterwards.
+        """
         state = self.sync()
-        self.unavailable, self.pending = [], []
+        self.unavailable, self.pending, self.duplicates = [], [], []
         found: list[tuple[str, Path]] = []
-        budget = self.max_downloads
+        mine: dict[str, str] = {}
+        prefix = self.id_prefix
         for key in sorted(state["items"]):
             data = state["items"][key]
             if data.get("itemType") != "attachment" or data.get("deleted") or not self._is_pdf(data):
                 continue
+            qualified = prefix + key
+            doi = self._parent_doi(state, data)
+            if doi and doi in claimed:
+                self.duplicates.append({"key": qualified, "title": self._title(state, data),
+                                        "duplicate_of": claimed[doi]})
+                continue
             reason = self._classify(data)
             if reason:
-                self.unavailable.append({"key": key, "title": self._title(state, data), "reason": reason})
+                self.unavailable.append({"key": qualified, "title": self._title(state, data), "reason": reason})
                 continue
             cached = self._cached_path(key, data)
             if cached is not None:
-                found.append((key, cached))
+                found.append((qualified, cached))
             elif budget <= 0:
-                self.pending.append(key)
+                self.pending.append(qualified)
             else:
                 budget -= 1
                 try:
-                    found.append((key, self.download(key, data)))
+                    found.append((qualified, self.download(key, data)))
                 except (ZoteroLocalAPIUnavailable, ZoteroWebAuthError):
                     raise
                 except ZoteroLocalAPIError as exc:
-                    self.unavailable.append({"key": key, "title": self._title(state, data), "reason": str(exc)})
+                    self.unavailable.append({"key": qualified, "title": self._title(state, data), "reason": str(exc)})
+                    continue
+            if doi:
+                mine.setdefault(doi, qualified)
+        for doi, qualified in mine.items():
+            claimed.setdefault(doi, qualified)
+        return found, budget
+
+    def group_clients(self) -> list["ZoteroWebAPI"]:
+        """Clients for the configured group libraries, ordered by group ID."""
+        if self.group_id or not self.groups:
+            return []
+        if self._group_clients is None:
+            url = f"{self.base_url}/users/{self._resolve_user()}/groups?limit=100"
+            _, _, body = self._request(url)
+            try:
+                rows = json.loads(body.decode("utf-8"))
+            except ValueError as exc:
+                raise ZoteroLocalAPIError("Zotero Web API returned unreadable groups") from exc
+            names = {str(row.get("id")): str((row.get("data") or {}).get("name") or "")
+                     for row in rows if isinstance(row, dict) and row.get("id")} if isinstance(rows, list) else {}
+            wanted = sorted(names, key=int) if self.groups == "all" else list(self.groups)
+            self._group_clients = [
+                ZoteroWebAPI(self._key, self.user_id, cache_dir=self.cache_dir / "groups" / group,
+                             base_url=self.base_url, timeout=self.timeout, opener=self.opener,
+                             sleep=self.sleep, clock=self.clock, max_downloads=self.max_downloads,
+                             page_size=self.page_size, group_id=group,
+                             group_name=names.get(group) or f"Group {group}")
+                for group in wanted
+            ]
+        return self._group_clients
+
+    def _client_for(self, key: str) -> tuple["ZoteroWebAPI", str]:
+        match = _GROUP_ID_RE.match(str(key))
+        if not match:
+            return self, str(key)
+        for group in self.group_clients():
+            if group.group_id == match.group(1):
+                return group, match.group(2)
+        raise ZoteroLocalAPIError(f"Zotero item {key} belongs to a group library that is not enabled")
+
+    def pdf_attachments(self) -> list[tuple[str, Path]]:
+        claimed: dict[str, str] = {}
+        found, budget = self._scan(self.max_downloads, claimed)
+        for group in self.group_clients():
+            more, budget = group._scan(budget, claimed)
+            found.extend(more)
+            self.unavailable.extend({**row, "library": group.group_name} for row in group.unavailable)
+            self.pending.extend(group.pending)
+            self.duplicates.extend({**row, "library": group.group_name} for row in group.duplicates)
         return found
+
+    def metadata(self, attachment_key: str) -> dict[str, Any] | None:
+        api, key = self._client_for(attachment_key)
+        if api is self:
+            return super().metadata(key)
+        value = api.metadata(key)
+        if value is not None:
+            # Collection names stay plain so collection filters match; the
+            # library is recorded alongside them.
+            value.update(zotero_library=api.library_id, zotero_library_name=api.group_name)
+        return value
+
+    def attachment_path(self, key: str) -> Path | None:
+        api, plain = self._client_for(key)
+        return api._cached_path(plain, api.item(plain))
 
     def retained_keys(self) -> set[str]:
         """Attachments present in Zotero but not downloaded yet (per-sync budget)."""
@@ -486,4 +623,5 @@ def make_zotero_api(control: Path, *, timeout: float = 5.0, environ: dict[str, s
         base_url=str(settings.get("base_url") or DEFAULT_WEB_API),
         timeout=max(timeout, 30.0),
         max_downloads=int(settings.get("max_downloads_per_sync") or DEFAULT_MAX_DOWNLOADS),
+        groups=settings.get("groups"),
     )

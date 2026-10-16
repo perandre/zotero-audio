@@ -21,7 +21,7 @@ def md5(data):
 
 
 class Library:
-    def __init__(self):
+    def __init__(self, seed=True):
         self.version = 10
         self.items = {}      # key -> (version, data)
         self.collections = {}
@@ -30,6 +30,9 @@ class Library:
         self.log = []        # (path, query, headers)
         self.fail = []       # queued (status, headers) responses for /items
         self.corrupt = set()
+        self.groups = {}     # group id -> (name, Library)
+        if not seed:
+            return
         self.add_parent("PARENT01", "A Synthetic Paper", collections=["CHILD001"])
         self.add_pdf("ATTACH01", "PARENT01", PDF_A)
         self.collections["ROOT0001"] = (5, {"name": "Research", "parentCollection": False})
@@ -39,10 +42,10 @@ class Library:
         self.version += 1
         return self.version
 
-    def add_parent(self, key, title, collections=()):
+    def add_parent(self, key, title, collections=(), doi="10.1/x"):
         self.items[key] = (self.bump(), {"itemType": "journalArticle", "title": title, "date": "2026-04-05",
             "creators": [{"creatorType": "author", "firstName": "Ada", "lastName": "Smith"}],
-            "tags": [{"tag": "podcast"}], "collections": list(collections), "DOI": "10.1/x"})
+            "tags": [{"tag": "podcast"}], "collections": list(collections), "DOI": doi})
 
     def add_pdf(self, key, parent, content, **extra):
         data = {"itemType": "attachment", "parentItem": parent, "linkMode": "imported_file",
@@ -77,31 +80,43 @@ def server():
             lib.log.append((url.path, query, dict(self.headers)))
             if url.path.startswith("/storage/"):
                 assert "Zotero-API-Key" not in self.headers
-                return self.send(200, lib.files[url.path.split("/")[2]])
+                _, _, library, key, _ = url.path.split("/")
+                owner = lib if library == "user" else lib.groups[library][1]
+                return self.send(200, owner.files[key])
             if self.headers.get("Zotero-API-Key") != KEY:
                 return self.send(403)
             if url.path == "/keys/current":
                 return self.send(200, json.dumps({"userID": 42}).encode())
-            base = "/users/42/"
+            if url.path == "/users/42/groups":
+                rows = [{"id": int(g), "data": {"id": int(g), "name": name}} for g, (name, _) in lib.groups.items()]
+                return self.send(200, json.dumps(rows).encode())
+            if url.path.startswith("/groups/"):
+                group = url.path.split("/")[2]
+                base, current, library = f"/groups/{group}/", lib.groups[group][1], group
+            else:
+                base, current, library = "/users/42/", lib, "user"
             assert url.path.startswith(base)
             name = url.path[len(base):]
             if name.endswith("/file"):
                 key = name.split("/")[1]
-                if key in lib.corrupt:
-                    lib.files[key] = b"corrupted"
-                return self.send(302, headers={"Location": f"http://127.0.0.1:{self.server.server_port}/storage/{key}/f"})
+                if key in current.corrupt:
+                    current.files[key] = b"corrupted"
+                return self.send(302, headers={"Location": f"http://127.0.0.1:{self.server.server_port}/storage/{library}/{key}/f"})
             if name == "deleted":
-                return self.send(200, json.dumps({"items": lib.deleted_items, "collections": []}).encode())
-            if name == "items" and lib.fail:
-                status, headers = lib.fail.pop(0)
+                return self.send(200, json.dumps({"items": current.deleted_items, "collections": []}).encode())
+            if name == "items" and current.fail:
+                status, headers = current.fail.pop(0)
                 return self.send(status, headers=headers)
-            table = {"items": lib.items, "collections": lib.collections}[name]
+            if name == "items/top":
+                table = {k: v for k, v in current.items.items() if not v[1].get("parentItem")}
+            else:
+                table = {"items": current.items, "collections": current.collections}[name]
             since = int(query.get("since", 0))
-            hv = {"Last-Modified-Version": str(lib.version)}
-            if since and self.headers.get("If-Modified-Since-Version") and since >= lib.version:
+            hv = {"Last-Modified-Version": str(current.version)}
+            if since and self.headers.get("If-Modified-Since-Version") and since >= current.version:
                 return self.send(304, headers=hv)
             rows = [{"key": k, "version": v, "data": d} for k, (v, d) in sorted(table.items()) if v > since]
-            start, limit = int(query["start"]), int(query["limit"])
+            start, limit = int(query.get("start", 0)), int(query.get("limit", 100))
             self.send(200, json.dumps(rows[start:start + limit]).encode(), {**hv, "Total-Results": str(len(rows))})
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -325,3 +340,105 @@ def test_refresh_zotero_in_web_mode_surfaces_unavailable(server, tmp_path):
     assert article["title"] == "A Synthetic Paper" and article["in_zotero"] and article["source_path"].endswith(".pdf")
     state = store.state("zotero")
     assert state["mode"] == "web" and state["unavailable"][0]["title"] == "Linked Paper"
+
+
+GROUP = "6696698"
+
+
+def add_group(server, name="synthetic-group", group=GROUP):
+    glib = Library(seed=False)
+    glib.version = 50
+    glib.collections["GCOLL001"] = (51, {"name": "Application", "parentCollection": False})
+    glib.add_parent("GPARENT1", "A Group Paper", collections=["GCOLL001"], doi="10.9/group")
+    glib.add_pdf("GATTACH1", "GPARENT1", b"%PDF-1.4 group")
+    server.groups[group] = (name, glib)
+    return glib
+
+
+def test_groups_are_off_by_default(server, tmp_path):
+    add_group(server)
+    assert [k for k, _ in client(server, tmp_path).pdf_attachments()] == ["ATTACH01"]
+    assert not any(p.startswith("/groups/") or p.endswith("/groups") for p, _, _ in server.log)
+
+
+def test_group_items_get_qualified_ids_and_library_metadata(server, tmp_path):
+    glib = add_group(server)
+    api = client(server, tmp_path, groups="all")
+    found = dict(api.pdf_attachments())
+    assert set(found) == {"ATTACH01", f"g{GROUP}:GATTACH1"}
+    personal, grouped = found["ATTACH01"], found[f"g{GROUP}:GATTACH1"]
+    assert personal == (tmp_path / "cache/files/ATTACH01" / f"{md5(PDF_A)}.pdf").resolve()  # unchanged path
+    assert grouped == (tmp_path / f"cache/groups/{GROUP}/files/GATTACH1/{md5(glib.files['GATTACH1'])}.pdf").resolve()
+    metadata = api.metadata(f"g{GROUP}:GATTACH1")
+    assert metadata["title"] == "A Group Paper" and metadata["collections"] == ["Application"]
+    assert metadata["zotero_library"] == f"groups/{GROUP}" and metadata["zotero_library_name"] == "synthetic-group"
+    assert "zotero_library" not in api.metadata("ATTACH01")
+    assert api.attachment_path(f"g{GROUP}:GATTACH1") == grouped
+    assert api.item(f"g{GROUP}:GATTACH1")["parentItem"] == "GPARENT1"
+    for path, _, headers in server.log:
+        assert ("Zotero-Api-Key" in headers) == (not path.startswith("/storage/"))
+
+
+def test_explicit_group_list_and_disabled_group_keys(server, tmp_path):
+    add_group(server)
+    add_group(server, "other", group="1234")
+    api = client(server, tmp_path, groups=[int(GROUP)])
+    assert {k for k, _ in api.pdf_attachments()} == {"ATTACH01", f"g{GROUP}:GATTACH1"}
+    assert not any(p.startswith("/groups/1234/") for p, _, _ in server.log)
+    with pytest.raises(zotero_web.ZoteroLocalAPIError):
+        api.metadata("g1234:GATTACH1")
+
+
+def test_duplicate_doi_prefers_personal_then_lowest_group(server, tmp_path):
+    glib = add_group(server)
+    glib.add_parent("GPARENT2", "Same Paper In Group", doi="https://doi.org/10.1/X")
+    glib.add_pdf("GATTACH2", "GPARENT2", b"%PDF-1.4 dup")
+    other = add_group(server, "other", group="99")  # lower ID than GROUP
+    api = client(server, tmp_path, groups="all")
+    keys = {k for k, _ in api.pdf_attachments()}
+    assert keys == {"ATTACH01", "g99:GATTACH1"}
+    assert {(d["key"], d["duplicate_of"]) for d in api.duplicates} == {
+        (f"g{GROUP}:GATTACH2", "ATTACH01"), (f"g{GROUP}:GATTACH1", "g99:GATTACH1")}
+    assert not any("GATTACH2" in p for p, _, _ in server.log)  # duplicates are never downloaded
+    assert other.items  # sanity
+
+
+def test_download_budget_is_shared_across_libraries(server, tmp_path):
+    add_group(server)
+    api = client(server, tmp_path, groups="all", max_downloads=1)
+    assert [k for k, _ in api.pdf_attachments()] == ["ATTACH01"]
+    assert api.retained_keys() == {f"g{GROUP}:GATTACH1"}
+    api = client(server, tmp_path, groups="all", max_downloads=1)
+    assert {k for k, _ in api.pdf_attachments()} == {"ATTACH01", f"g{GROUP}:GATTACH1"}
+
+
+def test_group_settings_parse(tmp_path):
+    control = tmp_path / "control"
+    control.mkdir()
+    (control / "zotero.json").write_text(json.dumps({"mode": "web", "groups": ["12", 3]}))
+    assert zotero_web.zotero_settings(control, {})["groups"] == ["3", "12"]
+    assert zotero_web.zotero_settings(control, {"ZOTERO_AUDIO_ZOTERO_GROUPS": "all"})["groups"] == "all"
+    (control / "zotero.json").write_text(json.dumps({"mode": "web"}))
+    assert zotero_web.zotero_settings(control, {})["groups"] == []
+    (control / "zotero.json").write_text(json.dumps({"mode": "web", "groups": ["x"]}))
+    with pytest.raises(ValueError):
+        zotero_web.zotero_settings(control, {})
+
+
+def test_refresh_zotero_and_research_discover_include_groups(server, tmp_path):
+    from zotero_audio import app_research
+    from zotero_audio.app_library import refresh_zotero
+    from zotero_audio.app_state import Store
+
+    add_group(server)
+    store = Store(tmp_path / "runtime")
+    (store.root / "zotero.json").write_text(json.dumps(
+        {"mode": "web", "user_id": 42, "base_url": server.url, "groups": "all"}))
+    (store.root / "Zotero API key.txt").write_text(KEY)
+    assert refresh_zotero(store) == {"online": True, "count": 2}
+    article = store.article(f"g{GROUP}:GATTACH1")
+    assert article["title"] == "A Group Paper" and article["in_zotero"]
+    assert article["metadata"]["collections"] == ["Application"]
+    assert store.article("ATTACH01")["title"] == "A Synthetic Paper"
+    records = app_research.discover(make_zotero_api(store.root))
+    assert {(r["library_id"], r["key"]) for r in records} == {("users/0", "PARENT01"), (f"groups/{GROUP}", "GPARENT1")}

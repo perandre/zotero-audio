@@ -279,7 +279,8 @@ def _refresh_zotero(store: Store) -> dict:
     state = {"online": True, "count": count, "checked_at": checked_at, "last_success_at": checked_at}
     if hasattr(api, "unavailable"):
         # Web mode: PDFs Zotero cannot serve (linked files, never-uploaded files) are listed, never silent.
-        state.update(mode="web", unavailable=list(api.unavailable), pending_downloads=len(api.pending))
+        state.update(mode="web", unavailable=list(api.unavailable), pending_downloads=len(api.pending),
+                     duplicates=list(getattr(api, "duplicates", [])))
     store.set_state("zotero", state)
     return {"online": True, "count": count}
 

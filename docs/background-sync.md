@@ -35,6 +35,29 @@ attachment key and md5, are verified against Zotero's md5 and cached in
 `max_downloads_per_sync` (default 20) PDFs download per scan, so a large library
 fills over several minutes; remaining ones stay `in_zotero`.
 
+### Group libraries (opt-in)
+
+Add `"groups": "all"` (every group the key's user belongs to) or a list of
+group IDs, e.g. `{"mode": "web", "groups": [6696698]}`;
+`ZOTERO_AUDIO_ZOTERO_GROUPS=all|<id>,<id>` overrides it. The default is the
+personal library only. The key needs read access to those groups.
+
+- Each group syncs separately into `control/zotero-web/groups/<id>/` (own
+  `library.json` and `files/<attachment>/<md5>.pdf` cache), with the same
+  incremental sync, Backoff/Retry-After handling and read-only GETs. The
+  per-scan download limit is shared across all libraries.
+- Group articles get library-qualified IDs, `g<groupID>:<attachmentKey>`
+  (e.g. `g6696698:ABCD2345`). Personal-library IDs, paths and cache keys are
+  unchanged, so enabling groups never re-generates existing work.
+- Metadata keeps plain collection names (so collection filters such as
+  "PhD Application" match) and adds `zotero_library` (`groups/<id>`) and
+  `zotero_library_name`. `za research-fit` classifies group parents under
+  `library_id = groups/<id>`.
+- Duplicates: when a usable PDF with the same DOI exists in several libraries,
+  the personal library wins, then the lowest group ID. Skipped copies are not
+  downloaded and are listed under `zotero.duplicates` in `za status --json`
+  with the ID they defer to. Items without a DOI are never merged.
+
 Limits: linked-file attachments and files never uploaded to Zotero storage
 cannot be downloaded. They are listed under `zotero.unavailable` in
 `za status --json` with the article title and reason, and no article is created

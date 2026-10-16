@@ -256,7 +256,11 @@ independent document-write consent and recovery after interrupted cloud saves.
 when `control/zotero.json` says `{"mode": "web"}`, `ZoteroWebAPI`, a read-only
 subclass of the local client. It keeps the same `pdf_attachments()`/`metadata()`
 surface, so metadata, source hashing and generation are identical; PDFs resolve
-to files in `control/zotero-web/files/<attachment>/<md5>.pdf`.
+to files in `control/zotero-web/files/<attachment>/<md5>.pdf`. Opt-in group
+libraries (`"groups"`) use per-group child clients under
+`control/zotero-web/groups/<id>/` and library-qualified article IDs
+(`g<groupID>:<key>`); a DOI present in several libraries is generated once
+(personal first, then lowest group ID). See [background sync](background-sync.md).
 
 `LocalWorker.start` starts discovery alongside generation and delivery. Shutdown
 signals and joins all three threads. Scans serialize with explicit sync jobs but
