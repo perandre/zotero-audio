@@ -15,6 +15,46 @@ from .runtime import configure_tool_path
 WRANGLER_PACKAGE = "wrangler@4.145.0"
 
 
+def verify_publication(config, record: dict) -> None:
+    """A successful upload command is insufficient evidence of live RSS."""
+    import xml.etree.ElementTree as ET
+    from urllib.request import Request, urlopen
+    from urllib.parse import urlencode
+    edition = record["edition"]
+    feed_key = edition + "/feed.xml"
+    origin = getattr(config, "feed_base_url", "") or config.base_url
+    revision = sha256_file(config.public_root / feed_key)[:16]
+    feed_url = origin.rstrip("/") + "/" + feed_key + "?" + urlencode({"publication": revision})
+    try:
+        with urlopen(Request(feed_url, headers={"Cache-Control": "no-cache"}), timeout=20) as response:
+            data = response.read(32 * 1024 * 1024 + 1)
+        if len(data) > 32 * 1024 * 1024:
+            raise ValueError("public RSS exceeds verification bound")
+        root = ET.fromstring(data)
+        matches = [item for item in root.findall("./channel/item") if item.findtext("guid") == record["guid"]]
+        if len(matches) != 1:
+            raise ValueError("expected exactly one episode in public RSS")
+        enclosure = matches[0].find("enclosure")
+        if enclosure is None or enclosure.get("url") != record["audio_url"]:
+            raise ValueError("public RSS has a different audio revision")
+        expected_bytes = int(record["bytes"])
+        if int(enclosure.get("length", "0")) != expected_bytes:
+            raise ValueError("public RSS has an incorrect audio size")
+        with urlopen(Request(record["audio_url"], method="HEAD"), timeout=20) as media:
+            if media.status != 200 or int(media.headers.get("Content-Length", "0")) != expected_bytes:
+                raise ValueError("public audio is unavailable or has an incorrect size")
+    except Exception as exc:
+        # Invalidate the upload cache so a stale/missing remote object can be
+        # repaired on retry, even if its local bytes have not changed.
+        state_path = config.state_root / "r2-sync-manifest.json"
+        if state_path.is_file():
+            state = load_json(state_path)
+            for key in (feed_key, _public_key(record["audio_url"], config.base_url)):
+                state.get("files", {}).pop(key, None)
+            atomic_write_json(state_path, state)
+        raise RuntimeError(f"Live publication verification failed for {record['title']}: {type(exc).__name__}") from exc
+
+
 def _public_key(url: str, base_url: str) -> str:
     """Map a public URL back to a key in the local podcast mirror."""
     parsed, base = urlsplit(url), urlsplit(base_url)

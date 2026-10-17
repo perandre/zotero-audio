@@ -305,6 +305,9 @@ worker also repairs stranded publication requests and refreshes source-bound
 license evidence for editions selected by a completed audio job. Imports alone
 never establish publication intent. New restrictive Rights or changed source
 bytes still block publication. Existing finished audio is reused without encoding.
+Public delivery is only marked published after the live RSS contains exactly
+one matching episode/enclosure and its audio URL reports the expected size.
+A failed live check retries delivery and invalidates stale upload-cache entries.
 
 Most Python changes need only `za restart`; editable installation avoids an app
 bundle rebuild. Frontend files are ordinary HTML/CSS/JavaScript. Reinstall Python

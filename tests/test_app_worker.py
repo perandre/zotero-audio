@@ -219,6 +219,7 @@ def test_publisher_envelope_uploads_ready_assets_without_synthesis(article_store
         "published": True, "feed_changed": True, "public_editions": [published]})
     uploaded = []
     monkeypatch.setattr(publish_sync, "sync_public", lambda settings, records: uploaded.extend(records))
+    monkeypatch.setattr(publish_sync, "verify_publication", lambda settings, record: None)
     LocalWorker(store).publish(article["id"], record)
     assert uploaded == [published]
     assert store.article(article["id"])["editions"]["full"]["publication_status"] == "published"
@@ -402,3 +403,21 @@ def test_failed_loop_recovers_own_claims_without_resetting_other_work(article_st
         assert state == ('pending' if thread_name == 'delivery' else 'running')
         worker.stop.set()
     worker.supervise(loop, thread_name)
+
+
+def test_successful_upload_without_live_xml_never_marks_published(article_store, monkeypatch):
+    from types import SimpleNamespace
+    from zotero_audio import podcast, publish_sync
+    store, article = article_store
+    (store.runtime / 'podcast.toml').write_text('[podcast]\n')
+    record = {'edition': 'full', 'title': article['title'], 'audio_sha256': 'b' * 64, 'publication_status': 'pending'}
+    store.put_article({**article, 'editions': {'full': record}})
+    monkeypatch.setattr(podcast, 'load_podcast_config', lambda _: SimpleNamespace())
+    monkeypatch.setattr(generation, 'publish_finished_episode', lambda *a: {
+        'published': True, 'public_editions': [{**record, 'audio_url': 'https://example.org/audio.m4a'}]})
+    monkeypatch.setattr(publish_sync, 'sync_public', lambda *a: None)
+    def missing(*args): raise RuntimeError('Live publication verification failed')
+    monkeypatch.setattr(publish_sync, 'verify_publication', missing)
+    with pytest.raises(RuntimeError, match='Live publication verification failed'):
+        LocalWorker(store).publish(article['id'], record)
+    assert store.article(article['id'])['editions']['full']['publication_status'] == 'pending'

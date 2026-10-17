@@ -87,3 +87,65 @@ def test_sync_show_artwork_accepts_original_or_configured_canonical_origin(tmp_p
     with pytest.raises(ValueError, match='outside the configured'):
         sync_public(config, [{'edition': 'full', 'audio_url': 'https://www.assets.example/media/episodes/paper/audio.m4a'}])
     assert len(calls) == 1
+
+
+@pytest.fixture
+def live_publication(tmp_path):
+    import json
+    root = tmp_path / 'public'
+    (root / 'full').mkdir(parents=True)
+    (root / 'full/feed.xml').write_text('local feed revision')
+    config = SimpleNamespace(public_root=root, state_root=tmp_path, base_url='https://assets.example',
+                             feed_base_url='https://www.assets.example')
+    record = {'edition': 'full', 'guid': 'urn:uuid:synthetic', 'audio_url': 'https://assets.example/episodes/audio.m4a',
+              'bytes': 1234, 'title': 'A complete synthetic article title'}
+    (tmp_path / 'r2-sync-manifest.json').write_text(json.dumps({'files': {
+        'full/feed.xml': 'feedhash', 'episodes/audio.m4a': 'audiohash', 'other.m4a': 'untouched'}}))
+    return config, record
+
+
+def test_verify_publication_requires_current_unique_xml_enclosure_and_available_audio(live_publication, monkeypatch):
+    from io import BytesIO
+    from zotero_audio.publish_sync import verify_publication
+    config, record = live_publication
+    calls = []
+    def fetch(request, **kwargs):
+        calls.append((request.full_url, request.get_method()))
+        if request.get_method() == 'HEAD':
+            result = BytesIO()
+            result.status = 200
+            result.headers = {'Content-Length': '1234'}
+            return result
+        return BytesIO(b'<rss><channel><item><guid>urn:uuid:synthetic</guid>'
+                       b'<enclosure url="https://assets.example/episodes/audio.m4a" length="1234"/>'
+                       b'</item></channel></rss>')
+    monkeypatch.setattr('urllib.request.urlopen', fetch)
+    verify_publication(config, record)
+    assert calls[0][0].startswith('https://www.assets.example/full/feed.xml?publication=')
+    assert calls[1] == (record['audio_url'], 'HEAD')
+    assert len(load_json(config.state_root / 'r2-sync-manifest.json')['files']) == 3
+
+
+@pytest.mark.parametrize('failure', ['absent', 'duplicate', 'revision', 'enclosure_size', 'media_size', 'offline'])
+def test_verification_failure_retries_real_upload_without_invalidating_other_assets(live_publication, monkeypatch, failure):
+    from io import BytesIO
+    from urllib.error import URLError
+    from zotero_audio.publish_sync import verify_publication
+    config, record = live_publication
+    item = '<item><guid>urn:uuid:synthetic</guid><enclosure url="https://assets.example/episodes/audio.m4a" length="1234"/></item>'
+    if failure == 'absent': item = ''
+    if failure == 'duplicate': item *= 2
+    if failure == 'revision': item = item.replace('audio.m4a', 'old.m4a')
+    if failure == 'enclosure_size': item = item.replace('1234', '123')
+    def fetch(request, **kwargs):
+        if failure == 'offline': raise URLError('synthetic offline failure')
+        if request.get_method() == 'HEAD':
+            result = BytesIO()
+            result.status = 200
+            result.headers = {'Content-Length': '1' if failure == 'media_size' else '1234'}
+            return result
+        return BytesIO(('<rss><channel>' + item + '</channel></rss>').encode())
+    monkeypatch.setattr('urllib.request.urlopen', fetch)
+    with pytest.raises(RuntimeError, match='Live publication verification failed for A complete synthetic article title'):
+        verify_publication(config, record)
+    assert load_json(config.state_root / 'r2-sync-manifest.json')['files'] == {'other.m4a': 'untouched'}

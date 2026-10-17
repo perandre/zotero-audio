@@ -236,6 +236,10 @@ immutable Markdown hashes and resolves current licensing before queuing the
 finished file. Pending deliveries are deduplicated. Publication rechecks newer
 Zotero Rights and source changes before uploading. RSS and audio URLs remain
 the evidence of live publication; a completed generation job is insufficient.
+The delivery worker verifies public RSS GUID uniqueness, enclosure revision and
+byte length, and the audio HEAD response after uploading. Missing/stale XML or
+media leaves delivery retryable and invalidates the affected upload-cache entries,
+so a prior successful upload command cannot permanently hide missing remote data.
 Authorized MCP retrieval sends requested private text to the connected client.
 Initial production checks covered S256 PKCE, read/write isolation, search,
 exact private-Markdown fetch and a remotely queued Markdown job completed by
