@@ -170,7 +170,16 @@ class LocalWorker:
         content_hash = expected_hash or sha256_file(source)
         target = self.store.root / "artifacts" / content_hash / (name or source.name)
         if target.is_file():
-            return target
+            if sha256_file(target) == content_hash:
+                return target
+            if source.resolve() == target.resolve():
+                raise RuntimeError("The finished artifact no longer matches its recorded checksum")
+            # An interrupted migration may leave a truncated existing file.
+            # Preserve it for diagnosis, then recreate from verified generation
+            # output instead of repeatedly returning an unusable snapshot.
+            quarantine = self.store.root / "artifact-quarantine" / uuid.uuid4().hex / target.name
+            quarantine.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.replace(target, quarantine)
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         # Keep the temporary component short. The final name is bounded for
         # readability, but adding a UUID to it can exceed macOS's 255-byte

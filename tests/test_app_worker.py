@@ -421,3 +421,29 @@ def test_successful_upload_without_live_xml_never_marks_published(article_store,
     with pytest.raises(RuntimeError, match='Live publication verification failed'):
         LocalWorker(store).publish(article['id'], record)
     assert store.article(article['id'])['editions']['full']['publication_status'] == 'pending'
+
+
+def test_snapshot_repairs_truncated_existing_copy_and_preserves_damaged_bytes(tmp_path):
+    store = Store(tmp_path / 'runtime')
+    worker = LocalWorker(store)
+    source = tmp_path / 'completed.m4a'
+    source.write_bytes(b'complete verified generation output')
+    target = worker.snapshot(source)
+    target.write_bytes(b'truncated')
+    assert worker.snapshot(source) == target
+    assert target.read_bytes() == source.read_bytes()
+    quarantined = list((store.root / 'artifact-quarantine').rglob('*.m4a'))
+    assert len(quarantined) == 1 and quarantined[0].read_bytes() == b'truncated'
+
+
+def test_damaged_source_snapshot_is_not_silently_reclassified_as_valid(tmp_path):
+    store = Store(tmp_path / 'runtime')
+    worker = LocalWorker(store)
+    source = tmp_path / 'completed.m4a'
+    source.write_bytes(b'valid generation')
+    digest = sha256_file(source)
+    target = worker.snapshot(source)
+    target.write_bytes(b'damaged')
+    with pytest.raises(RuntimeError, match='recorded checksum'):
+        worker.snapshot(target, expected_hash=digest)
+    assert target.read_bytes() == b'damaged'
