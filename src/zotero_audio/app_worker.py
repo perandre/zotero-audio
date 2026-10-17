@@ -110,10 +110,19 @@ class LocalWorker:
         self.threads = []
 
     def supervise(self, target, name):
+        failed = False
         while not self.stop.is_set():
             try:
+                if failed:
+                    # Recover only this loop's abandoned claims. The other
+                    # thread may still own a live generation or upload.
+                    if name == "generation":
+                        self.store.recover_jobs()
+                    elif name == "delivery":
+                        self.store.recover_deliveries()
                 target()
             except Exception as exc:
+                failed = True
                 self.store.event("worker_thread_retry", thread=name, error=type(exc).__name__)
                 self._error_log("thread-" + name)
             self.stop.wait(5)

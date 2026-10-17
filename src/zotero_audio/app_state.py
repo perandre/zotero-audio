@@ -385,6 +385,10 @@ class Store:
         return job
 
     def recover(self):
+        self.recover_jobs()
+        self.recover_deliveries()
+
+    def recover_jobs(self):
         with self.db() as db:
             active = [json.loads(r[0]) for r in db.execute("SELECT data FROM jobs WHERE status IN ('running','cancel_requested')")]
         for job in active:
@@ -392,6 +396,8 @@ class Store:
                 self.update_job(job["id"], status="queued", stage="queued", message="Resuming after worker restart")
             elif job["status"] == "cancel_requested":
                 self.update_job(job["id"], status="cancelled")
+
+    def recover_deliveries(self):
         with self.db() as db:
             db.execute("UPDATE deliveries SET status='pending' WHERE status='running'")
 

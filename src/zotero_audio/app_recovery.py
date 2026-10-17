@@ -27,7 +27,8 @@ def reconcile_publications(store):
         ids = [job["article_id"]] if job.get("article_id") else [r["id"] for r in job.get("results", [])]
         for key in ids:
             for edition in editions:
-                intents[key, edition] = job
+                outcome = next((r for r in job.get("results", []) if r.get("id") == key), {})
+                intents[key, edition] = (job if outcome.get("status") != "failed" else {"status": "failed"})
     pending = {(v.get("audio_sha256"), v.get("edition")) for v in deliveries}
     queued = 0
     for article in store.all_articles():

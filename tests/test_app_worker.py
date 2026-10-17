@@ -380,3 +380,25 @@ def test_publication_rejects_a_replaced_source_before_staging(article_store, mon
     monkeypatch.setattr(generation, 'publish_finished_episode', lambda *a: pytest.fail('Replaced source'))
     with pytest.raises(RuntimeError, match='Source changed before publication'):
         LocalWorker(store).publish(article['id'], {'source_sha256': 'c' * 64})
+
+
+@pytest.mark.parametrize('thread_name', ['generation', 'delivery'])
+def test_failed_loop_recovers_own_claims_without_resetting_other_work(article_store, monkeypatch, thread_name):
+    store, _ = article_store
+    job = claim(store)
+    delivery = store.enqueue_delivery('backup', 'ARTICLE1', {'source': 'synthetic'})
+    with store.db() as db:
+        db.execute("UPDATE deliveries SET status='running' WHERE id=?", (delivery,))
+    worker = LocalWorker(store)
+    calls = []
+    monkeypatch.setattr(worker.stop, 'wait', lambda seconds: None)
+    def loop():
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError('transient storage failure')
+        assert store.job(job['id'])['status'] == ('queued' if thread_name == 'generation' else 'running')
+        with store.db() as db:
+            state = db.execute('SELECT status FROM deliveries WHERE id=?', (delivery,)).fetchone()[0]
+        assert state == ('pending' if thread_name == 'delivery' else 'running')
+        worker.stop.set()
+    worker.supervise(loop, thread_name)

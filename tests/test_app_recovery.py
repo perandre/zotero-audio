@@ -105,3 +105,10 @@ def test_restored_snapshot_must_match_current_requested_narration_revision(recov
     data[field] = 'different'
     path.write_text(json.dumps(data))
     assert reconcile_publications(store) == 0
+
+
+def test_failed_article_in_partially_completed_batch_cannot_revive_old_revision(recovery):
+    store, _, _ = recovery
+    batch = store.create_job({'action': 'full', 'scope': 'all'})
+    store.update_job(batch['id'], status='completed', results=[{'id': 'PAPER', 'status': 'failed'}])
+    assert reconcile_publications(store) == 0
