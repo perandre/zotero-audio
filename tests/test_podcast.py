@@ -421,7 +421,7 @@ def test_config_preserves_safe_defaults(tmp_path: Path):
     assert config.dry_run and not config.publishing_enabled and config.public_root is None
     assert config.site_title == config.full_show.title == "1 More Paper"
     assert config.brief_show.title == "1 More Paper (Brief)"
-    assert config.author == "Per André Rønsen"
+    assert config.author == config.owner_name == config.copyright == "Frontkom"
 
 
 def test_site_accepts_existing_feed_only_episodes_without_individual_artwork(tmp_path: Path):
@@ -872,3 +872,13 @@ def test_listen_links_resolve_episode_urls_and_refresh_pages(tmp_path):
     assert 'href="https://open.spotify.com/episode/' + "A" * 22 + '"' in page
     assert podcast_module.refresh_listen_links(config, fetch=fetch)["updated_pages"] == []
     assert podcast_module.listen_links(config, "full", "urn:uuid:unknown")["Spotify"] == "https://open.spotify.com/show/full"
+
+
+def test_local_publisher_writes_headers_for_long_multibyte_audio_name(tmp_path):
+    source = tmp_path / 'finished.m4a'
+    source.write_bytes(b'synthetic completed audio')
+    publisher = podcast_module.LocalPublisher(tmp_path / 'public', 'https://example.org')
+    name = 'ø' * 114 + '.m4a'
+    url = publisher.put(source, 'episodes/' + name, 'audio/x-m4a')
+    assert publisher.head(url)['content_type'] == 'audio/x-m4a'
+    assert publisher.head(url)['bytes'] == source.stat().st_size

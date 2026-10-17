@@ -63,4 +63,11 @@ class ZoteroMonitor:
             # select it for publication as a side effect of making another one.
             action = "both" if len(missing) == 2 else missing[0]
         job_id = "zotero-" + digest({"article": article["id"], "source": article["source_sha256"], "action": action})[:32]
-        self.store.create_job({"action": action, "scope": "one", "article_id": article["id"], "qa": qa}, job_id=job_id, automatic=True)
+        # A previously finished recording with a missing file is recoverable,
+        # unlike an edition that was unavailable or explicitly failed/cancelled.
+        lost = action != "markdown" and any(
+            article.get("editions", {}).get(e, {}).get("audio")
+            and article["editions"][e].get("status") in {"ready", "ready_with_warnings"}
+            for e in missing)
+        self.store.create_job({"action": action, "scope": "one", "article_id": article["id"], "qa": qa},
+                              job_id=job_id, automatic=True, recover_missing=lost)

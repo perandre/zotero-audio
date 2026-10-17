@@ -273,7 +273,8 @@ class Store:
         return {"results": [{"id": d["id"], "title": d["title"], "authors": d.get("authors", []), "year": d.get("year"),
                              "url": f"/articles/{d['id']}", "snippet": row["snippet"]} for row in rows for d in [json.loads(row["data"])]]}
 
-    def create_job(self, request: dict, *, job_id: str | None = None, remote: dict | None = None, automatic=False):
+    def create_job(self, request: dict, *, job_id: str | None = None, remote: dict | None = None, automatic=False,
+                   recover_missing=False):
         action, scope = request.get("action"), request.get("scope", "one")
         if action not in ACTIONS or scope not in {"new", "all", "one"}:
             raise ValueError("Choose markdown, full, brief, both or sync and a valid scope")
@@ -303,8 +304,12 @@ class Store:
                     previous_outputs = {"brief", "full"} if prior["action"] == "both" else {prior["action"]}
                     # Completed Markdown does not satisfy an audio request. A
                     # prior failure/cancellation still requires intentional Retry.
-                    if prior["status"] != "completed" or requested_outputs & previous_outputs:
+                    if prior["status"] != "completed" or (requested_outputs & previous_outputs and not recover_missing):
                         return None
+                if recover_missing:
+                    # Keep historical receipts; a new attempt is serialized by
+                    # the same transaction and active-job check above.
+                    job_id = uuid.uuid4().hex
             if idem:
                 for row in db.execute("SELECT data FROM jobs"):
                     old = json.loads(row[0])
@@ -358,7 +363,7 @@ class Store:
     def claim_job(self):
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT data FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+            row = db.execute("SELECT data FROM jobs WHERE status='queued' ORDER BY COALESCE(json_extract(data,'$.priority'),0) DESC, created_at LIMIT 1").fetchone()
             if not row:
                 return None
             job = json.loads(row[0])
@@ -380,6 +385,10 @@ class Store:
         return job
 
     def recover(self):
+        self.recover_jobs()
+        self.recover_deliveries()
+
+    def recover_jobs(self):
         with self.db() as db:
             active = [json.loads(r[0]) for r in db.execute("SELECT data FROM jobs WHERE status IN ('running','cancel_requested')")]
         for job in active:
@@ -387,6 +396,8 @@ class Store:
                 self.update_job(job["id"], status="queued", stage="queued", message="Resuming after worker restart")
             elif job["status"] == "cancel_requested":
                 self.update_job(job["id"], status="cancelled")
+
+    def recover_deliveries(self):
         with self.db() as db:
             db.execute("UPDATE deliveries SET status='pending' WHERE status='running'")
 

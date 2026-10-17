@@ -109,6 +109,24 @@ class LocalWorker:
         self.last_activity = now()
         self.threads = []
 
+    def supervise(self, target, name):
+        failed = False
+        while not self.stop.is_set():
+            try:
+                if failed:
+                    # Recover only this loop's abandoned claims. The other
+                    # thread may still own a live generation or upload.
+                    if name == "generation":
+                        self.store.recover_jobs()
+                    elif name == "delivery":
+                        self.store.recover_deliveries()
+                target()
+            except Exception as exc:
+                failed = True
+                self.store.event("worker_thread_retry", thread=name, error=type(exc).__name__)
+                self._error_log("thread-" + name)
+            self.stop.wait(5)
+
     def start(self):
         from .app_zotero import ZoteroMonitor
         self.store.recover()
@@ -116,7 +134,7 @@ class LocalWorker:
         migrate_catalog_markdown(self.store)
         monitor = ZoteroMonitor(self.store, self.stop)
         for target, name in ((self.run, "generation"), (self.deliver, "delivery"), (monitor.run, "zotero-discovery")):
-            thread = threading.Thread(target=target, name=name, daemon=True)
+            thread = threading.Thread(target=self.supervise, args=(target, name), name=name, daemon=True)
             thread.start()
             self.threads.append(thread)
 
@@ -234,6 +252,7 @@ class LocalWorker:
             def ready(record):
                 display = self.store.article(article_id)
                 edition = record["edition"]
+                record["generation_job_id"] = job["id"]
                 # The generator's cache path can change on the next run. Delivery
                 # and listening use an immutable, readable revision instead.
                 record["audio"] = str(self.snapshot(Path(record["audio"]), expected_hash=record.get("audio_sha256"), name=readable_filename(display, edition)))
@@ -333,7 +352,12 @@ class LocalWorker:
             self.store.event("backup_failed", title=current["title"], message=str(exc))
 
     def deliver(self):
+        reconciled_at = 0
         while not self.stop.is_set():
+            if time.monotonic() - reconciled_at >= 60:
+                from .app_recovery import reconcile_publications
+                reconcile_publications(self.store)
+                reconciled_at = time.monotonic()
             with self.store.db() as db:
                 row = db.execute("""SELECT * FROM deliveries WHERE status='pending' AND next_attempt <= ?
                     ORDER BY CASE kind WHEN 'publish' THEN 0 WHEN 'icloud' THEN 1 WHEN 'outbox' THEN 1 ELSE 2 END,updated_at LIMIT 1""", (time.time(),)).fetchone()
@@ -394,6 +418,18 @@ class LocalWorker:
         if not config_path.is_file():
             raise RuntimeError("Podcast publishing is not configured")
         config = load_podcast_config(config_path)
+        article = self.store.article(article_id)
+        if record.get("source_sha256"):
+            if article.get("source_changed") or record["source_sha256"] != article.get("source_sha256"):
+                raise RuntimeError(f"Source changed before publication: {article['title']}")
+            # A queued snapshot must also respect newer restrictive Rights.
+            if article.get("metadata", {}).get("rights"):
+                from .zotero import license_record_from_metadata
+                from .podcast import resolve_license
+                evidence = license_record_from_metadata(article["metadata"], record["source_sha256"])
+                license_result = resolve_license(evidence, source_sha256=record["source_sha256"])
+                record = {**record, "license_record": evidence, "source_license": license_result,
+                          "public_eligible": bool(license_result.get("allowed"))}
         publication = publish_finished_episode(record, config)
         published = next(iter(publication.get("public_editions", [])), {})
         if publication.get("published") and published.get("audio_url"):
@@ -411,6 +447,9 @@ class LocalWorker:
         with self.store.edit_article(article_id) as current:
             latest = current.get("editions", {}).get(edition, {})
             if latest.get("audio_sha256") == record.get("audio_sha256"):
+                for field in ("license_record", "source_license", "public_eligible"):
+                    if field in record:
+                        latest[field] = record[field]
                 latest.update(audio_url=published["audio_url"], publication_status="published")
                 current["publication_status"] = _publication_status(current, "published")
         self.store.event("episode_published", title=current["title"], edition=edition)

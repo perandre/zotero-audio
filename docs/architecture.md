@@ -217,6 +217,25 @@ Neither scope grants bridge ingestion, arbitrary shell execution or arbitrary
 filesystem access. Local stdio MCP inherits the local user’s authority.
 
 Synced search works while the Mac sleeps; generation waits for it to return.
+With a dedicated Linux worker in Zotero Web API mode, discovery, synthesis and
+publication instead continue on that host independently of the laptop. Enable
+user-service linger and the local `control/service.json` `prevent_sleep` policy
+for unattended operation. Private delivery can remain in the durable outbox.
+
+Each background loop is supervised independently. Missing files from an
+otherwise ready edition can create a new automatic recovery job without
+replacing its historical completed receipt or overriding explicit cancellation.
+Unavailable editions are not retried every scan. Queue entries may carry an
+internal numeric `priority` (default zero); larger values run first, with FIFO
+within a priority, so maintenance re-recordings can run behind new work.
+
+Delivery reconciles incomplete publication intent once per minute. Both the
+edition's selection flag and a completed durable audio request are required;
+imported output alone cannot publish. Recovery verifies source, audio and
+immutable Markdown hashes and resolves current licensing before queuing the
+finished file. Pending deliveries are deduplicated. Publication rechecks newer
+Zotero Rights and source changes before uploading. RSS and audio URLs remain
+the evidence of live publication; a completed generation job is insufficient.
 Authorized MCP retrieval sends requested private text to the connected client.
 Initial production checks covered S256 PKCE, read/write isolation, search,
 exact private-Markdown fetch and a remotely queued Markdown job completed by

@@ -32,7 +32,9 @@ def json_digest(data: Any) -> str:
 
 def atomic_write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    # Sidecars can already approach NAME_MAX; do not append the final name
+    # to the temporary component (especially with multibyte article titles).
+    descriptor, temporary = tempfile.mkstemp(prefix=".atomic-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             stream.write(value)

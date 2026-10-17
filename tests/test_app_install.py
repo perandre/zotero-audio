@@ -135,3 +135,22 @@ def test_systemd_unit_for_another_runtime_is_untouched(linux, tmp_path):
     assert [c[0] for c in calls] == ["enable", "start"]
     app_install.unload_installed_service(store)
     assert calls[-1] == ("stop", app_install.SYSTEMD_UNIT)
+
+
+def test_dedicated_systemd_service_inhibits_sleep_only_when_configured(tmp_path, monkeypatch):
+    store = Store(tmp_path / 'runtime')
+    monkeypatch.setattr(app_install.shutil, 'which', lambda name: '/usr/bin/' + name)
+    text = app_install.render_systemd_unit(store, python='/venv/python', project=tmp_path,
+                                           path_env='/usr/bin', prevent_sleep=True)
+    assert 'ExecStart="/usr/bin/systemd-inhibit" --what=sleep:idle --mode=block' in text
+    assert '"/venv/python" -m zotero_audio.app_cli serve' in text
+    assert 'StartLimitIntervalSec=0' in text
+
+
+def test_install_reads_local_sleep_policy(linux, monkeypatch):
+    store, home, _ = linux
+    (store.root / 'service.json').write_text('{"prevent_sleep": true}')
+    monkeypatch.setattr(app_cli, 'stop_daemon', lambda _: None)
+    monkeypatch.setattr(app_install.os, 'access', lambda *args: False)
+    app_install.install_systemd(store)
+    assert '--what=sleep:idle' in app_install.unit_path().read_text()

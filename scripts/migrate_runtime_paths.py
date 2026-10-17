@@ -29,6 +29,31 @@ SKIP_NAMES = {"events.jsonl"}
 FTS_SHADOW_SUFFIXES = ("_data", "_idx", "_docsize", "_config", "_content")
 
 
+def audit_artifacts(runtime: Path, *, verify_hashes=False) -> dict:
+    """A rewritten catalog is not a complete migration without its recordings."""
+    from hashlib import sha256
+    report = {"checked_audio": 0, "missing": [], "invalid": []}
+    with sqlite3.connect(runtime / "control" / "library.sqlite3") as db:
+        articles = [json.loads(row[0]) for row in db.execute("SELECT data FROM articles")]
+    for article in articles:
+        for edition, record in article.get("editions", {}).items():
+            if not record.get("audio"):
+                continue
+            report["checked_audio"] += 1
+            item = {"id": article.get("id"), "title": article.get("title"), "edition": edition}
+            path = Path(record["audio"])
+            if not path.is_file():
+                report["missing"].append(item)
+            elif verify_hashes and record.get("audio_sha256"):
+                digest = sha256()
+                with path.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(block)
+                if digest.hexdigest() != record["audio_sha256"]:
+                    report["invalid"].append(item)
+    return report
+
+
 def _text_files(runtime: Path):
     for root, dirs, files in os.walk(runtime):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith("backups") and not d.endswith("-backup")]
@@ -116,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--old-prefix", required=True, help="Runtime path on the original host")
     parser.add_argument("--new-prefix", help="Defaults to the resolved --runtime path")
     parser.add_argument("--apply", action="store_true", help="Write changes (default: dry run)")
+    parser.add_argument("--check-artifacts", action="store_true", help="Fail cutover if catalogued audio is missing or corrupt")
     args = parser.parse_args(argv)
     runtime = args.runtime.expanduser().resolve()
     new = args.new_prefix or str(runtime)
@@ -125,9 +151,13 @@ def main(argv: list[str] | None = None) -> int:
     if not (runtime / "control" / "library.sqlite3").is_file():
         parser.error(f"{runtime} is not a runtime (control/library.sqlite3 missing)")
     report = migrate(runtime, old, new.rstrip("/"), args.apply)
+    if args.check_artifacts:
+        report["artifacts"] = audit_artifacts(runtime, verify_hashes=True)
     print(json.dumps(report, indent=2))
     remaining = report["remaining"]
-    return 1 if args.apply and (remaining.get("sqlite") or remaining.get("files") or remaining.get("symlinks")) else 0
+    incomplete = report.get("artifacts", {})
+    return 1 if (incomplete.get("missing") or incomplete.get("invalid") or
+                 (args.apply and (remaining.get("sqlite") or remaining.get("files") or remaining.get("symlinks")))) else 0
 
 
 if __name__ == "__main__":

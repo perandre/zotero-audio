@@ -138,3 +138,11 @@ def test_automatic_generation_settings_validate_choices_and_upgrade_existing_set
     for action in ('delete', True, None):
         with pytest.raises(ValueError):
             store.update_settings({'auto_generate': action})
+
+
+def test_queue_priority_preserves_fifo_within_priority(store):
+    maintenance = store.create_job({'action': 'full', 'scope': 'one', 'article_id': 'ARTICLE1'})
+    store.update_job(maintenance['id'], priority=-10)
+    new = store.create_job({'action': 'brief', 'scope': 'one', 'article_id': 'ARTICLE1'})
+    assert store.claim_job()['id'] == new['id']
+    assert store.claim_job()['id'] == maintenance['id']

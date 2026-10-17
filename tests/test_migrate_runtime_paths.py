@@ -48,3 +48,19 @@ def test_apply_rewrites_catalog_json_and_symlinks_but_not_published_files(tmp_pa
     assert OLD in (runtime / "podcast" / "public" / "feed.json").read_text()
     again = migrate_runtime_paths.migrate(runtime, OLD, "/home/me/rt", apply=True)
     assert again["sqlite_rows"] == {} and again["files"] == 0
+
+
+def test_artifact_audit_detects_missing_and_corrupt_audio_without_rewriting(tmp_path):
+    import hashlib
+    runtime = _runtime(tmp_path)
+    audio = runtime / 'finished.m4a'
+    audio.write_bytes(b'valid finished audio')
+    record = {'audio': str(audio), 'audio_sha256': hashlib.sha256(audio.read_bytes()).hexdigest()}
+    article = {'id': 'K1', 'title': 'A complete synthetic title', 'editions': {'full': record}}
+    with sqlite3.connect(runtime / 'control/library.sqlite3') as db:
+        db.execute('UPDATE articles SET data=?', (json.dumps(article),))
+    assert migrate_runtime_paths.audit_artifacts(runtime, verify_hashes=True)['invalid'] == []
+    audio.write_bytes(b'corrupt')
+    assert len(migrate_runtime_paths.audit_artifacts(runtime, verify_hashes=True)['invalid']) == 1
+    audio.unlink()
+    assert len(migrate_runtime_paths.audit_artifacts(runtime)['missing']) == 1
