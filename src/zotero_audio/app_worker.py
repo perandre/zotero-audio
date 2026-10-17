@@ -413,7 +413,7 @@ class LocalWorker:
     def publish(self, article_id, record):
         from .generation import publish_finished_episode
         from .podcast import load_podcast_config
-        from .publish_sync import sync_public
+        from .publish_sync import sync_public, verify_publication
         config_path = self.store.runtime / "podcast.toml"
         if not config_path.is_file():
             raise RuntimeError("Podcast publishing is not configured")
@@ -434,6 +434,7 @@ class LocalWorker:
         published = next(iter(publication.get("public_editions", [])), {})
         if publication.get("published") and published.get("audio_url"):
             sync_public(config, [published])
+            verify_publication(config, published)
         elif not publication.get("published"):
             with self.store.edit_article(article_id) as current:
                 edition = current.get("editions", {}).get(record.get("edition"), {})
