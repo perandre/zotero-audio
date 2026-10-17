@@ -72,6 +72,16 @@ cancelled/failed requests are preserved. A finished Markdown file does not block
 automatic creation of the selected audio editions. Use Retry for a failed job or an explicit
 regeneration when a source PDF changed.
 
+For a dedicated Linux publisher, also enable user-service linger and set
+`control/service.json` to `{"prevent_sleep": true}`, then run `za install`.
+Keep synthesis local to that host and configure its own public upload credentials.
+Private audio may accumulate in the outbox without a laptop connected.
+During runtime migration copy the immutable `control/artifacts/` recordings,
+not just JSON/catalog metadata. Before cutover run
+`scripts/migrate_runtime_paths.py --runtime <runtime> --old-prefix <old-runtime> --apply --check-artifacts`;
+the command verifies recorded audio hashes and fails on missing/corrupt files.
+Keep the source runtime as a backup until that check passes.
+
 The following notification details apply to the legacy scheduled sync scripts,
 which `za install` disables when the persistent service takes over.
 

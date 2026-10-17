@@ -233,6 +233,33 @@ def test_completed_markdown_does_not_block_missing_audio(catalog, tmp_path):
     assert len(store.jobs()['jobs']) == 2  # Do not retry unavailable editions every minute.
 
 
+def test_missing_previously_ready_audio_gets_one_new_recovery_job(catalog, tmp_path):
+    store, _, monitor = catalog
+    store.update_settings({'auto_generate': 'full'})
+    monitor.cycle()
+    old = store.jobs()['jobs'][0]
+    store.update_job(old['id'], status='completed')
+    with store.edit_article('NEWPAPER') as article:
+        article['editions'] = {'full': {'audio': str(tmp_path / 'lost.m4a'), 'status': 'ready'}}
+    monitor.cycle()
+    monitor.cycle()
+    jobs = store.jobs()['jobs']
+    assert len(jobs) == 2
+    assert sum(j['status'] == 'queued' for j in jobs) == 1
+    assert store.job(old['id'])['status'] == 'completed'
+
+
+def test_lost_audio_does_not_override_explicit_cancellation(catalog, tmp_path):
+    store, _, monitor = catalog
+    store.update_settings({'auto_generate': 'full'})
+    monitor.cycle()
+    store.cancel(store.jobs()['jobs'][0]['id'])
+    with store.edit_article('NEWPAPER') as article:
+        article['editions'] = {'full': {'audio': str(tmp_path / 'lost.m4a'), 'status': 'ready'}}
+    monitor.cycle()
+    assert len(store.jobs()['jobs']) == 1
+
+
 def test_existing_audio_is_not_selected_for_publication_when_filling_another_edition(catalog, tmp_path):
     store, _, monitor = catalog
     store.update_settings({'auto_generate': 'off'})

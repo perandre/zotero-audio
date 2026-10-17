@@ -332,3 +332,51 @@ def test_generation_completion_preserves_a_source_change_discovered_during_work(
     LocalWorker(store).process(claim(store))
     assert store.article(article['id'])['source_sha256'] == 'b' * 64
     assert store.article(article['id'])['source_changed'] is True
+
+
+def test_thread_supervisor_restarts_failed_loop_without_losing_other_threads(article_store, monkeypatch):
+    store, _ = article_store
+    worker = LocalWorker(store)
+    calls = []
+    monkeypatch.setattr(worker.stop, 'wait', lambda seconds: None)
+    def loop():
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError('synthetic transport failure')
+        worker.stop.set()
+    worker.supervise(loop, 'delivery')
+    assert len(calls) == 2
+    assert 'worker_thread_retry' in (store.root / 'events.jsonl').read_text()
+
+
+def test_publication_rechecks_new_restrictive_rights(article_store, monkeypatch):
+    from types import SimpleNamespace
+    from zotero_audio import podcast, publish_sync
+    store, article = article_store
+    (store.runtime / 'podcast.toml').write_text('[podcast]\n')
+    with store.edit_article(article['id']) as current:
+        current['metadata']['rights'] = 'All rights reserved'
+    record = {'edition': 'full', 'title': article['title'], 'source_sha256': article['source_sha256'],
+              'audio_sha256': 'b' * 64, 'selected': True, 'source_license': {'allowed': True}}
+    store.put_article({**store.article(article['id']), 'editions': {'full': record}})
+    monkeypatch.setattr(podcast, 'load_podcast_config', lambda _: SimpleNamespace())
+    seen = []
+    def publish(value, _):
+        seen.append(value)
+        return {'published': False, 'reason': 'license-not-open'}
+    monkeypatch.setattr(generation, 'publish_finished_episode', publish)
+    monkeypatch.setattr(publish_sync, 'sync_public', lambda *a: pytest.fail('Restrictive rights must block upload'))
+    LocalWorker(store).publish(article['id'], record)
+    assert not seen[0]['source_license']['allowed']
+    assert store.article(article['id'])['editions']['full']['publication_status'] == 'license-not-open'
+
+
+def test_publication_rejects_a_replaced_source_before_staging(article_store, monkeypatch):
+    from types import SimpleNamespace
+    from zotero_audio import podcast
+    store, article = article_store
+    (store.runtime / 'podcast.toml').write_text('[podcast]\n')
+    monkeypatch.setattr(podcast, 'load_podcast_config', lambda _: SimpleNamespace())
+    monkeypatch.setattr(generation, 'publish_finished_episode', lambda *a: pytest.fail('Replaced source'))
+    with pytest.raises(RuntimeError, match='Source changed before publication'):
+        LocalWorker(store).publish(article['id'], {'source_sha256': 'c' * 64})

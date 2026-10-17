@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import plistlib
 import shlex
 import shutil
@@ -35,21 +36,29 @@ def unit_path() -> Path:
     return Path.home() / ".config/systemd/user" / SYSTEMD_UNIT
 
 
-def render_systemd_unit(store: Store, *, python: str, project: Path, path_env: str) -> str:
+def render_systemd_unit(store: Store, *, python: str, project: Path, path_env: str, prevent_sleep=False) -> str:
     """The unit file text; pure so it can be tested without systemd."""
     # Environment= is subject to specifier (%) expansion only, not $ expansion.
     def environment(key: str, value: str) -> str:
         text = f"{key}={value}".replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
         return f'Environment="{text}"'
+    command = f"{_systemd_quote(python)} -m zotero_audio.app_cli serve"
+    if prevent_sleep:
+        inhibitor = shutil.which("systemd-inhibit")
+        if not inhibitor:
+            raise RuntimeError("prevent_sleep requires systemd-inhibit")
+        command = (f'{_systemd_quote(inhibitor)} --what=sleep:idle --mode=block '
+                   f'--who="1 More Paper" --why="Continuous podcast production" ' + command)
     return "\n".join([
         "[Unit]",
         "Description=1 More Paper worker (Zotero monitor, generation, delivery, local API)",
         "After=network-online.target",
         "Wants=network-online.target",
+        "StartLimitIntervalSec=0",
         "",
         "[Service]",
         "Type=simple",
-        f"ExecStart={_systemd_quote(python)} -m zotero_audio.app_cli serve",
+        f"ExecStart={command}",
         f"WorkingDirectory={str(project).replace(chr(37), chr(37) * 2)}",
         environment("ZOTERO_AUDIO_RUNTIME", str(store.runtime)),
         environment("PYTHONUNBUFFERED", "1"),
@@ -204,12 +213,18 @@ def _install_launcher(candidates) -> Path | None:
 
 def install_systemd(store: Store):
     from .app_cli import stop_daemon
-    stop_daemon(store)
     project = Path(__file__).resolve().parents[2]
+    options_path = store.root / "service.json"
+    options = json.loads(options_path.read_text()) if options_path.is_file() else {}
+    prevent_sleep = options.get("prevent_sleep", False)
+    if not isinstance(prevent_sleep, bool):
+        raise ValueError("service.json prevent_sleep must be a boolean")
+    text = render_systemd_unit(store, python=sys.executable, project=project,
+                               path_env=os.environ.get("PATH", os.defpath), prevent_sleep=prevent_sleep)
+    stop_daemon(store)
     target = unit_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_systemd_unit(store, python=sys.executable, project=project,
-                                          path_env=os.environ.get("PATH", os.defpath)), encoding="utf-8")
+    target.write_text(text, encoding="utf-8")
     _systemctl("daemon-reload")
     start_installed_service(store)
     launcher = _install_launcher([Path.home() / ".local/bin"])

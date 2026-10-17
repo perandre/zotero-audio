@@ -288,6 +288,24 @@ run without a login session, run once (may need sudo): `sudo loginctl enable-lin
 One generation worker owns the model and the runtime lock; do not run a legacy
 batch against the same runtime concurrently.
 
+For a dedicated always-on publishing host, use Zotero Web API discovery and
+local Kokoro, with its own podcast/upload credentials and `auto_publish=true`.
+Create `control/service.json` containing `{"prevent_sleep": true}` before
+`za install` on Linux. The service holds a sleep/idle inhibitor for its lifetime,
+restarts after crashes, and supervises generation, discovery and delivery loops.
+Keep linger enabled. This host can discover uploaded PDFs, generate and publish
+without another computer connected; PDFs not uploaded to Zotero remain unavailable.
+Use `private_audio: outbox` in `control/delivery.json` for private recordings;
+collecting them on a laptop is independent of generation and public publication.
+
+Completed jobs are historical receipts, not proof that their files still exist.
+Missing previously ready editions get a new automatic recovery attempt; failed,
+cancelled and unavailable editions still require intentional Retry. The delivery
+worker also repairs stranded publication requests and refreshes source-bound
+license evidence for editions selected by a completed audio job. Imports alone
+never establish publication intent. New restrictive Rights or changed source
+bytes still block publication. Existing finished audio is reused without encoding.
+
 Most Python changes need only `za restart`; editable installation avoids an app
 bundle rebuild. Frontend files are ordinary HTML/CSS/JavaScript. Reinstall Python
 dependencies only when they change. Keep model files and runtime state outside
