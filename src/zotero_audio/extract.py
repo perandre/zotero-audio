@@ -367,10 +367,18 @@ def _inferred_license(page_texts: list[str]) -> tuple[str | None, str | None]:
     # Repair this known license word only; preserve substantive PDF wording.
     joined = re.sub(r"(?i)\binterna-\s+tional\b", "international", "\n".join(page_texts))
     raw = re.sub(r"\s+", " ", joined).casefold()
+    # PDF line wrapping can split a URL after the hostname or a slash. Repair
+    # only the CC URL, preserving NC/ND/SA path components and their meaning.
+    raw = re.sub(
+        r"creativecommons\s*\.\s*org\s*/\s*licen[cs]es\s*/\s*"
+        r"([a-z-]+)\s*/\s*(\d)\s*\.\s*(\d)",
+        r"creativecommons.org/licenses/\1/\2.\3", raw,
+    )
     text = re.sub(r"\s+", " ", normalize_speech_text("\n".join(page_texts))).casefold()
     if re.search(
         r"creative commons attribution(?: international)? license\s*4\.0"
         r"|creative commons attribution\s+4\.0\s+(?:international\s+)?license"
+        r"|creative commons attribution\s+international\s+4\.0\s+licen[cs]e"
         r"|\bcc\s*[- ]?by\s*4\.0\b"
         r"|creativecommons\.org/licenses/by/4\.0",
         raw + " " + text,
@@ -382,12 +390,30 @@ def _inferred_license(page_texts: list[str]) -> tuple[str | None, str | None]:
 
 
 def source_pdf_rights(pdf: Path, source_sha256: str) -> tuple[str | None, str | None]:
-    """Read front-page rights for cached research, bound to the exact PDF bytes."""
+    """Read source rights, including explicit closing notices, bound to PDF bytes."""
     if not pdf.is_file() or sha256_file(pdf) != source_sha256:
         return None, None
     try:
         reader = PdfReader(pdf)
         rights = _inferred_license([page.extract_text() or "" for page in reader.pages[:2]])
+        if rights[0] is None:
+            # Closing notices occur before references/appendices, too. A bare
+            # license in a bibliography must never classify the source paper.
+            for page in reader.pages[2:]:
+                text = re.sub(r"\s+", " ", page.extract_text() or "")
+                for notice in re.finditer(
+                    r"(?:this (?:article|work|paper) is (?:licensed|published|distributed)"
+                    r"|open access this article is licensed).{0,700}", text, re.I,
+                ):
+                    candidate = notice.group(0)
+                    if re.search(r"noncommercial|non-commercial|noderivatives|no.derivatives|"
+                                 r"sharealike|share-alike|by[\s-]+(?:nc|nd|sa)", candidate, re.I):
+                        continue
+                    rights = _inferred_license([candidate])
+                    if rights[0]:
+                        break
+                if rights[0]:
+                    break
     except Exception:
         return None, None
     return rights if sha256_file(pdf) == source_sha256 else (None, None)

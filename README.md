@@ -128,6 +128,12 @@ when Zotero Rights is empty; replacement PDFs, explicit restrictive rights,
 conflicts and embargoes still block publication. Reclassification alone does
 not select additional audio editions.
 
+PDF license checks recognize line-wrapped Creative Commons URLs and explicit
+source-license notices after the first two pages. A license cited in references
+alone does not establish publication permission. OCR and publisher/repository
+lookups can supply reviewed, exact-source evidence when PDF text is insufficient;
+they do not change the publication allowlist or authorize a different PDF version.
+
 ## Storage and privacy
 
 | Location | Contents |
