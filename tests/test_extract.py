@@ -137,6 +137,9 @@ def test_publisher_front_matter_without_abstract_heading_is_bounded():
     'This work is licensed under a Creative Commons Attribution 4.0 Interna-\ntional License.',
     'Creative Commons Attribution International License 4.0',
     'CC BY 4.0',
+    'This work is licensed under a Creative Commons Attribution International 4.0 License.',
+    'This article uses https://creativecommons.org/ licenses/by/4.0/.',
+    'This article uses http://creativecommons. org/licences/ by/4.0/.',
 ])
 def test_explicit_cc_by_notice_variants_are_recognized(notice):
     from zotero_audio.extract import _inferred_license
@@ -149,6 +152,8 @@ def test_explicit_cc_by_notice_variants_are_recognized(notice):
     'Creative Commons Attribution-ShareAlike 4.0 International License',
     'Creative Commons Attribution 3.0 International License',
     'All rights reserved',
+    'https://creativecommons. org/ licenses/ by-nc-nd/4.0/',
+    'https://creativecommons.org/ licences/by-sa/4.0/',
 ])
 def test_license_detection_does_not_relax_the_allowlist(notice):
     from zotero_audio.extract import _inferred_license
@@ -165,6 +170,26 @@ def test_cached_source_license_requires_matching_pdf_bytes(tmp_path):
         page.insert_text((50, 50), 'This work is licensed under a Creative Commons Attribution 4.0 International License.', fontsize=9)
         doc.save(pdf)
     assert source_pdf_rights(pdf, sha256_file(pdf))[0] == 'https://creativecommons.org/licenses/by/4.0/'
+    assert source_pdf_rights(pdf, '0' * 64) == (None, None)
+
+
+@pytest.mark.parametrize(('notice', 'allowed'), [
+    ('Open Access This article is licensed under a Creative Commons Attribution 4.0 International License.', True),
+    ('This work is licensed under a Creative Commons Attribution International 4.0 License.', True),
+    ('References: Smith. Open data under CC BY 4.0.', False),
+    ('This article is licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0. References mention CC BY 4.0.', False),
+])
+def test_closing_source_notice_is_distinct_from_reference_licenses(tmp_path, notice, allowed):
+    import pymupdf
+    from zotero_audio.extract import source_pdf_rights
+    from zotero_audio.util import sha256_file
+    pdf = tmp_path / 'Synthetic closing notice.pdf'
+    with pymupdf.open() as doc:
+        for number in range(3):
+            page = doc.new_page()
+            page.insert_textbox((40, 40, 550, 800), notice if number == 2 else 'Synthetic research content.', fontsize=9)
+        doc.save(pdf)
+    assert bool(source_pdf_rights(pdf, sha256_file(pdf))[0]) is allowed
     assert source_pdf_rights(pdf, '0' * 64) == (None, None)
 
 
