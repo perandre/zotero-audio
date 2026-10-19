@@ -138,6 +138,12 @@ def _register(root: Path, article: dict[str, Any], path: Path, *, provenance: st
     atomic_write_json(root / "index.json", index)
 
 
+def _revision_path(root: Path, target: Path, digest: str) -> Path:
+    suffix = f" — revision-{digest[:10]}"
+    stem = filename_part(target.stem, max_bytes=240 - len(suffix.encode("utf-8")))
+    return root / f"{stem}{suffix}.md"
+
+
 def adopt(root: Path, article: dict[str, Any], source: Path, *, provenance: str) -> Path:
     """Copy to the canonical name, preserving differing source revisions."""
     with _library_lock(root):
@@ -149,7 +155,7 @@ def adopt(root: Path, article: dict[str, Any], source: Path, *, provenance: str)
             if source.resolve() == target.resolve():
                 pass
             elif target.is_file() and sha256_file(target) != source_hash:
-                revision = root / f"{target.stem} — revision-{source_hash[:10]}.md"
+                revision = _revision_path(root, target, source_hash)
                 if not revision.exists():
                     revision.write_bytes(source.read_bytes())
                 conflicts.append(revision.name)
@@ -173,7 +179,7 @@ def write_research_markdown(root: Path, article: dict[str, Any], markdown: str, 
                 _register(root, article, target, provenance=provenance, conflicts=None)
                 return target
             old_hash = sha256_file(target)
-            revision = root / f"{target.stem} — revision-{old_hash[:10]}.md"
+            revision = _revision_path(root, target, old_hash)
             if not revision.exists():
                 atomic_write_text(revision, target.read_text(encoding="utf-8"))
             conflicts.append(revision.name)
