@@ -55,3 +55,28 @@ def test_paired_publication_keeps_abstract_marker_and_preserves_public_edits(tmp
     root = ET.parse(config.public_root / "full" / "feed.xml")
     assert "episode-abstract" not in root.findtext("./channel/item/description")
     assert all((item["pub_date"], item["audio_url"], item["bytes"]) == original[item["guid"]] for item in republished)
+
+
+def test_republish_upgrades_exact_legacy_placeholder_instead_of_preserving_it_as_manual(tmp_path):
+    audio = tmp_path / 'audio.m4a'; audio.write_bytes(b'synthetic audio')
+    config = podcast.PodcastConfig(private_root=tmp_path/'private', state_root=tmp_path/'state',
+        public_root=tmp_path/'public', base_url='https://podcast.example', owner_email='synthetic@example.org')
+    checksum = 'a'*64
+    record = {'guid': 'synthetic-brief', 'edition': 'brief', 'title': 'Synthetic research', 'authors': ['Ada Author'],
+        'audio': str(audio), 'duration': 42, 'source_sha256': checksum,
+        'show_notes': 'An actual source abstract.\n\nThis is a Brief audio edition.',
+        'description_abstract': 'An actual source abstract.', 'description_abstract_source': 'zotero'}
+    record['generated_show_notes'] = record['show_notes']
+    license_result = {'episode_license_url': 'https://creativecommons.org/licenses/by/4.0/'}
+    podcast._publish(config, 'synthetic-paper', checksum, {'brief': record}, license_result)
+    path = config.state_root/'publication-manifest.json'; manifest = load_json(path)
+    old = manifest['episodes'][0]; identity = (old['pub_date'], old['audio_url'], old['bytes'])
+    old['show_notes'] = 'A brief audio edition of this paper.\n\nAuthors: Ada Author\nThe authors and publisher do not sponsor or endorse this recording.'
+    old.pop('generated_show_notes', None); old['description_is_manual'] = True
+    atomic_write_json(path, manifest)
+    result, _ = podcast._publish(config, 'synthetic-paper', checksum, {'brief': record}, license_result)
+    assert result[0]['show_notes'].startswith('An actual source abstract.')
+    assert not result[0].get('description_is_manual')
+    assert (result[0]['pub_date'], result[0]['audio_url'], result[0]['bytes']) == identity
+    feed = ET.parse(config.public_root/'brief/feed.xml')
+    assert 'episode-abstract' in feed.findtext('./channel/item/description')

@@ -247,3 +247,26 @@ def edition_description(edition: str, brief_contents: str | None = None) -> str:
         contents = brief_contents
         return f"This Brief reads {contents} in the authors' own words."
     return "This Full Reading presents the paper's text as an audio edition."
+
+
+def legacy_placeholder_notes(record: dict[str, Any]) -> bool:
+    """Recognize only the exact old boilerplate template with matching metadata.
+
+    Unknown prose, changed metadata rows and mismatched links remain edits.
+    """
+    edition = record.get("edition")
+    noun = "report" if record.get("literature_type") == "report" else "paper"
+    lines = [line.strip() for line in str(record.get("show_notes") or "").splitlines() if line.strip()]
+    if edition not in {"brief", "full"} or not lines or lines[0] != f"A {edition} audio edition of this {noun}.":
+        return False
+    authors = ", ".join(str(a) for a in record.get("authors", []) if a) or "Not supplied"
+    required = {f"Authors: {authors}", "The authors and publisher do not sponsor or endorse this recording."}
+    allowed = set(required)
+    for label, value in (("Published in", record.get("journal")),
+                         ("Publication date", record.get("publication_date") or record.get("publication_year")),
+                         ("Institution", record.get("institution") or record.get("university")),
+                         (f"Read the {noun}", record.get("read_url")),
+                         ("Paired edition", record.get("paired_url"))):
+        if value:
+            allowed.add(f"{label}: {value}")
+    return required.issubset(lines[1:]) and all(line in allowed for line in lines[1:])

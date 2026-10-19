@@ -195,3 +195,13 @@ def test_rss_html_marks_shared_abstract_and_keeps_custom_notes_unclassified():
                               description_source="zotero", generated_show_notes="Old generated notes.")
     assert "episode-abstract" not in custom
     assert "My own edited notes." in custom
+
+
+def test_legacy_placeholder_requires_matching_authors_metadata_and_no_custom_prose():
+    from zotero_audio.episode_descriptions import legacy_placeholder_notes
+    record = {'edition': 'brief', 'authors': ['Ada Author'], 'journal': 'Synthetic Journal',
+              'read_url': 'https://source.example/paper', 'show_notes': 'A brief audio edition of this paper.\n\nAuthors: Ada Author\nPublished in: Synthetic Journal\nRead the paper: https://source.example/paper\n\nThe authors and publisher do not sponsor or endorse this recording.'}
+    assert legacy_placeholder_notes(record)
+    assert not legacy_placeholder_notes({**record, 'show_notes': record['show_notes']+'\nMy own recommendation.'})
+    assert not legacy_placeholder_notes({**record, 'authors': ['Different Author']})
+    assert not legacy_placeholder_notes({**record, 'read_url': 'https://different.example/paper'})

@@ -330,6 +330,10 @@ def enrich_records(config, records: list[dict[str, Any]], *, fetch_zotero: bool 
             generated = _upgrade_legacy_notes(original, selected["description_abstract"], source)
             record["show_notes"] = generated
             record["generated_show_notes"] = generated
+            # Earlier publishing mistook this old machine template for an edit.
+            # Clear that note-derived flag only when no abstract edit exists.
+            if not previous_description or normalize_abstract(previous_description) == normalize_abstract(previous_generated):
+                record["description_is_manual"] = False
             counts["legacy_notes_updated"] += 1
         elif old_notes:
             record["description_is_manual"] = True

@@ -27,7 +27,7 @@ from .podcast import (EDITION_VOICES, PodcastConfig, _authors, _episode_guid,
 from .segment import create_speech_plan
 from .util import atomic_write_json, atomic_write_text, json_digest, load_json, sha256_file, sha256_text
 from .zotero import license_record_from_metadata, load_bundle_metadata, merge_document_metadata
-from .episode_descriptions import edition_description, select_description_abstract
+from .episode_descriptions import edition_description, select_description_abstract, legacy_placeholder_notes
 
 NARRATION_POLICY = "research-markdown-narration-v4"
 ASSEMBLY_POLICY = "final-edition-aac-once-v1"
@@ -518,6 +518,7 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                 description_source=description["description_abstract_source"], brief_contents=plan.get("brief_contents"))
             saved_notes = generated_notes
             if (cached.get("source_sha256") == source_sha and cached.get("show_notes")
+                    and not legacy_placeholder_notes(cached)
                     and (not cached.get("generated_show_notes")
                          or cached.get("show_notes") != cached.get("generated_show_notes"))):
                 saved_notes = str(cached.get("show_notes") or generated_notes)
