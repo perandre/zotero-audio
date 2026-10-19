@@ -329,3 +329,18 @@ def test_backfill_clears_false_manual_flag_on_verified_generated_notes():
     html = _show_notes_html(output[0]['show_notes'], description_abstract=output[0]['description_abstract'],
         description_source=output[0]['description_abstract_source'], generated_show_notes=output[0]['generated_show_notes'])
     assert 'episode-abstract' in html
+
+
+def test_already_current_generated_notes_clear_only_stale_manual_flag():
+    abstract = 'An actual synthetic source abstract.'
+    notes = abstract + "\n\nThis is a Brief audio edition."
+    record = published_record(edition='brief', description_abstract=abstract,
+        generated_description_abstract=abstract, description_is_manual=True,
+        generated_show_notes=notes, show_notes=notes)
+    output, _ = enrich_records(SimpleNamespace(state_root=Path('/missing')), [record], fetch_zotero=False, allow_external=False)
+    assert output[0]['description_is_manual'] is False
+    assert output[0]['show_notes'] == notes
+    edited = {**record, 'description_abstract': 'My custom abstract.'}
+    output, _ = enrich_records(SimpleNamespace(state_root=Path('/missing')), [edited], fetch_zotero=False, allow_external=False)
+    assert output[0]['description_is_manual'] is True
+    assert output[0]['description_abstract'] == 'My custom abstract.'
