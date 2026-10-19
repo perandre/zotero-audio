@@ -151,3 +151,16 @@ def test_untracked_generation_bundle_is_linked_to_flat_library(tmp_path):
     article = store.article("LIB001")
     assert Path(article["markdown"]).parent == store.runtime / "papers"
     assert legacy.is_symlink() and legacy.read_text() == "Generation bundle Markdown"
+
+
+def test_revision_backups_reserve_bytes_for_unicode_titles(tmp_path):
+    from zotero_audio.research_library import write_research_markdown
+    root = tmp_path / "papers"
+    article = {"id": "UNICODE", "title": "Research " + "研究論文" * 70}
+    path = write_research_markdown(root, article, "Original hand edits.")
+    write_research_markdown(root, article, "Recovered research.", force=True)
+    assert path.read_text() == "Recovered research."
+    backups = list(root.glob("*revision*.md"))
+    assert len(backups) == 1
+    assert backups[0].read_text() == "Original hand edits."
+    assert len(backups[0].name.encode("utf-8")) <= 255
