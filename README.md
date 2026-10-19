@@ -102,6 +102,13 @@ Optional checks run on Markdown before
 speech and on the finished audio afterward. Usable results remain available
 with warnings; basic failures such as empty or invalid audio still fail clearly.
 
+AI review filenames reserve space for their suffix, including long article titles.
+For libraries affected by the historical filename collision,
+`scripts/repair_review_collisions.py --report /path/to/audit.json` previews the
+audit. Add `--apply` to recover the exact article text embedded in generated
+reports with versioned backups, and `--queue` to replace contaminated editions.
+Normal generation also recovers these reports before planning narration.
+
 Each edition gets one final encode, including its spoken introduction and
 selected opening/closing sounds. Publishing reuses that finished file. A ready
 Brief, Full edition or article can publish while other work continues. Only

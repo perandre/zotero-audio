@@ -72,3 +72,25 @@ def research_markdown_path(bundle: Path, value: dict[str, Any], *, current: Path
 def review_markdown_path(bundle: Path, value: dict[str, Any], *, current: Path | None = None,
                          migrate: bool = False) -> Path:
     return _resolve(bundle, value, current=current, review=True, migrate=migrate)
+
+
+REVIEW_SOURCE_MARKER = "## Complete research Markdown (source data)\n\n"
+
+
+def recover_review_source(markdown: str) -> tuple[str, int]:
+    """Unwrap only our generated review envelope, preserving its source verbatim.
+
+    Old long filenames could truncate the review suffix and overwrite research.
+    Reports embed the complete input, including edits, so recovery needs no PDF
+    re-extraction. Nested reports are possible after repeated generation.
+    """
+    depth = 0
+    while (markdown.startswith("# Review: ")
+           and "You are reviewing a Zotero research document and its optional audio editions."
+           in markdown.partition(REVIEW_SOURCE_MARKER)[0]):
+        envelope, marker, source = markdown.partition(REVIEW_SOURCE_MARKER)
+        if not marker or not source.strip():
+            raise ValueError("Generated review has no recoverable research Markdown")
+        markdown = source
+        depth += 1
+    return markdown, depth
