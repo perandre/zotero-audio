@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -64,6 +65,7 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
     abstracts = root / "abstracts"
     abstracts.mkdir(parents=True, exist_ok=True, mode=0o700)
     abstract_edits = []
+    retired_abstracts = []
     with _library_lock(root):
         abstract_entries = _read(abstracts / "index.json").get("abstracts", {})
         previous = _read(directory / "index.json").get("references", {})
@@ -78,7 +80,7 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
             provenance = "zotero" if abstract else "unavailable"
             retrieved = retrieved_abstract(store, record)
             if not abstract and retrieved.get("abstract"):
-                abstract, provenance = retrieved["abstract"], retrieved.get("source", "retrieved")
+                abstract, provenance = normalize_abstract(retrieved["abstract"]), retrieved.get("source", "retrieved")
             articles = catalog.get((library, key), [])
             full = []
             acquired = retrieved_fulltext.get(fulltext_fingerprint(record), {})
@@ -106,7 +108,27 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                 cached = cache.get(fingerprint, "")
                 # Older research-fit caches may be bounded excerpts, not complete abstracts.
                 if cached and len(cached) <= 8000:
-                    abstract, provenance = cached, "cached-crossref-metadata"
+                    abstract, provenance = normalize_abstract(cached), "cached-crossref-metadata"
+            quality_findings = []
+            if abstract and len(abstract.split()) < 40:
+                quality_findings.append("short-abstract-review-source")
+            if abstract and len(abstract.split()) > 1000:
+                quality_findings.append("long-abstract-review-boundaries")
+            if abstract and abstract.endswith(("...", "…")):
+                quality_findings.append("possible-truncated-abstract")
+            if not abstract:
+                # Retire only provably invalid generated placeholders. Preserve
+                # missing sources' valid cached abstracts and edited documents.
+                prior = abstract_entries.get(identity, {})
+                prior_path = abstracts / name
+                if prior.get("sha256") and prior_path.is_file() and sha256_file(prior_path) == prior["sha256"]:
+                    match = re.search(r"(?s)## Abstract\s*\n(.*?)(?:\n## Source|\Z)", prior_path.read_text())
+                    if match and match[1].strip() and not normalize_abstract(match[1]):
+                        archive = abstracts / "revisions" / (prior["sha256"] + ".md")
+                        atomic_write_text(archive, prior_path.read_text())
+                        prior_path.unlink()
+                        abstract_entries.pop(identity, None)
+                        retired_abstracts.append(data["title"])
             fields = {
                 "type": "Research Reference", "title": data["title"], "resource": _source(library, key),
                 "sources": [{"id": "zotero", "resource": _source(library, key)}],
@@ -115,6 +137,7 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                 "date": data.get("date"), "doi": data.get("DOI"), "url": data.get("url"),
                 "rights": data.get("rights"), "abstract_source": provenance,
                 "abstract_status": "available" if abstract else "unavailable",
+                "abstract_quality": {"status": "warning" if quality_findings else "pass" if abstract else "unavailable", "findings": quality_findings},
                 "full_text_status": "available" if full else "unavailable",
             }
             source_url = retrieved.get("resource") if retrieved.get("abstract") == abstract else None
@@ -145,7 +168,7 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                 preserved.append(data["title"])
             elif not path.exists() or path.read_text(encoding="utf-8") != content:
                 atomic_write_text(path, content)
-            rows.append({"id": identity, "path": name, "title": data["title"], "abstract_source": provenance,
+            rows.append({"id": identity, "path": name, "title": data["title"], "abstract_source": provenance, "abstract_quality_findings": quality_findings,
                          "abstract_available": bool(abstract), "full_text": [p.name for p in sorted(set(full))],
                          "sha256": old.get("sha256") if edited else sha256_file(path), "edited": edited})
         index = ["# Private research library", "", "All Zotero references, with sourced abstracts where available. Full research Markdown stays in the parent papers directory. Missing text is explicitly marked; license does not filter private coverage.", ""]
@@ -162,5 +185,5 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                                                   "active_ids": [row["id"] for row in rows],
                                                   "index_sha256": prior_index_hash if index_edited else sha256_file(index_path)})
         atomic_write_json(abstracts / "index.json", {"schema": "one-more-paper-abstracts/v1", "abstracts": abstract_entries})
-    return {"abstract_directory": str(abstracts), "abstract_files": len(abstract_entries), "preserved_abstract_edits": abstract_edits, "directory": str(directory), "references": len(rows), "with_abstract": sum(row["abstract_available"] for row in rows),
+    return {"abstract_directory": str(abstracts), "abstract_files": len(abstract_entries), "preserved_abstract_edits": abstract_edits, "retired_invalid_abstracts": retired_abstracts, "directory": str(directory), "references": len(rows), "with_abstract": sum(row["abstract_available"] for row in rows),
             "with_full_text": sum(bool(row["full_text"]) for row in rows), "preserved_edits": preserved, "index_edited": index_edited}

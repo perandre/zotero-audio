@@ -342,3 +342,19 @@ Source bytes, extraction structures and receipts remain outside Git. Neither
 metadata availability nor a successful HTTP response establishes full-text
 coverage. Full-text retrieval does not edit Zotero, reclassify licenses, request
 publication or alter existing audio cache identities.
+
+### Research extraction quality and repair
+
+The research renderer v2 retains original layout spans independently of narration
+blocks. Model layout labels cannot discard substantive prose; original table,
+figure, footnote and unassigned text remains available, including running
+furniture in research; narration retains its separate filtering. New PDF acquisitions save independent source-token coverage and
+sparse-page warnings through `markdown_quality.py`; these measurements do not
+certify semantics or visual fidelity and do not create an audio listening block.
+
+`repair_markdown_quality.py` compares current generated research with cached
+source structures, checks PDF and Markdown hashes, and repairs material source
+omissions with versioned originals. It preserves edits and existing editions.
+Abstract selection prefers bounded native front matter over merged prose blocks;
+export normalizes cached metadata and archives only hash-matched generated
+editorial placeholders that have no replacement. All receipts remain private.

@@ -677,13 +677,33 @@ def bundle_name(structure: dict[str, Any]) -> str:
     return filename_part(f"{prefix}{document['title']} [{identity}]")
 
 
-def render_research_markdown(structure: dict[str, Any]) -> str:
+def render_research_markdown(structure: dict[str, Any], *, original_spans: bool = True) -> str:
     """Retain research material that is deliberately omitted from narration.
 
     The legacy renderer describes a reading. This renderer also includes
     references, figure/table captions and grids, and extracted footnotes.
     Source page markers remain available to readers and retrieval tools.
     """
+    # Research is not narration: layout labels may incorrectly call entire
+    # paragraphs headers, footers or tables. Render their original spans in
+    # layout order, retaining tables/figures/notes and unassigned source text.
+    if original_spans and structure.get("pages") and all(page.get("layout") for page in structure["pages"]):
+        research = {**structure, "blocks": []}
+        for page in structure["pages"]:
+            for ordinal, record in enumerate(page["layout"], 1):
+                text = record.get("raw_text", "").strip()
+                if not text:
+                    continue
+                kind = record.get("type")
+                level = _heading_level(text) if kind == "section-header" else None
+                research["blocks"].append({
+                    "id": f"p{page['pdf_page']:04d}-source{ordinal:04d}",
+                    "pdf_page": page["pdf_page"], "text": re.sub(r"^#{1,6}\s+", "", text) if level else text,
+                    "type": "heading" if level else "paragraph",
+                    "heading_level": level or 2, "included_in_reading": True,
+                })
+        return render_markdown(research).replace("schema: zotero-audio-markdown/v1",
+                                                 "schema: zotero-audio-research-markdown/v1\nresearch_renderer: original-layout-spans/v2", 1)
     research = {**structure, "blocks": []}
     redundant = {"continuation-merged", "duplicate-document-title", "duplicate-editorial-front-matter",
                  "standalone-page-or-chapter-number"}
