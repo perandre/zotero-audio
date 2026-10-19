@@ -430,3 +430,23 @@ YAML `type`, title, resource, provenance and ordinary Markdown links, with an
 `index.md` for navigation. Existing full-text files keep their original format
 and content hashes; the entire papers directory is not claimed to be an OKF
 bundle. See [the format assessment](docs/open-knowledge-format.md).
+
+Run `za research-fit enrich` to retrieve missing abstracts and refresh both
+`papers/references/` and **`papers/abstracts/`**. The latter contains only actual
+sourced abstracts, one Markdown file per reference with available text; it never
+fills missing abstracts with bibliographic placeholders. Existing reference and
+abstract edits are preserved.
+
+The enrichment script tries Crossref, OpenAlex, Semantic Scholar, DataCite,
+arXiv identifiers and public publisher abstract metadata/sections. It includes
+references without DOIs and articles with existing Markdown excerpts. Results
+are matched to the source DOI/title, requests are bounded and paced, temporary
+failures retry, and each result is saved immediately for restart recovery.
+Provider outages/rate limits are recorded as `retry_pending`, separately from
+`not_found`; rerunning retries unresolved records without repeating successes.
+The JSON result includes attempt counts and final library coverage. Abstracts
+remain complete in storage; only relevance-classifier input is bounded. This
+command makes public metadata requests, without invoking a model or buying API
+access. External sources can still be unavailable or omit an abstract; inspect
+the durable per-reference retrieval receipts rather than assuming empty text
+means no abstract exists.
