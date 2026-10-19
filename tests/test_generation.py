@@ -477,3 +477,51 @@ def test_plain_abstract_boundaries_preserve_full_text(bundle, label, boundary):
     assert any('Article body continues.' in b['text'] for b in parsed['blocks'])
     if 'Body retained' in boundary:
         assert any('Body retained for Full.' in b['text'] for b in parsed['blocks'])
+
+
+def test_long_title_review_never_overwrites_research(bundle, assemblies):
+    title = "Long synthetic research title " * 10
+    metadata = {"title": title, "authors": ["Anna Author"], "publication_year": "2025"}
+    source = next(bundle.glob("*.md"))
+    source.rename(bundle / readable_markdown_filename(episode_title(title, ["Anna Author"], "2025")))
+    first = generation.process_article(bundle, metadata=metadata)
+    research = Path(first["markdown"])
+    before = research.read_bytes()
+    assert research.resolve() != Path(first["ai_review"]).resolve()
+    assert not before.startswith(b"# Review:")
+    second = generation.process_article(bundle, mode="full", metadata=metadata, backend=Backend())
+    assert research.read_bytes() == before
+    narration = (bundle / "editions/full/narration.md").read_text()
+    assert "You are reviewing" not in narration
+    assert "Companies improved" in narration
+
+
+def test_nested_review_collision_recovers_exact_manual_edits(bundle):
+    from zotero_audio.article_files import recover_review_source, REVIEW_SOURCE_MARKER
+    envelope = ("# Review: Synthetic article\n\n"
+                "You are reviewing a Zotero research document and its optional audio editions.\n\n"
+                + REVIEW_SOURCE_MARKER)
+    research = "# Synthetic article\n\nManually edited evidence and https://example.org/source.\n"
+    damaged = envelope + envelope + research
+    assert recover_review_source(damaged) == (research, 2)
+    original = generation._read_json(bundle / "structure.json")
+    parsed = generation._markdown_structure(damaged, original)
+    assert parsed["document"]["title"] == "Synthetic article"
+    assert all("You are reviewing" not in b["text"] for b in parsed["blocks"])
+    # A real article discussing review instructions is ordinary source material.
+    assert recover_review_source("# Review: A scholarly review\n\nArticle content.") == (
+        "# Review: A scholarly review\n\nArticle content.", 0)
+
+
+def test_generation_persists_collision_recovery_with_backup(bundle):
+    from zotero_audio.article_files import REVIEW_SOURCE_MARKER
+    first = generation.process_article(bundle)
+    path = Path(first["markdown"])
+    source = path.read_text().replace("useful improvements", "my important measured improvements")
+    damaged = ("# Review: Synthetic article\n\n"
+               "You are reviewing a Zotero research document and its optional audio editions.\n\n"
+               + REVIEW_SOURCE_MARKER + source)
+    path.write_text(damaged)
+    second = generation.process_article(bundle)
+    assert Path(second["markdown"]).read_text() == source
+    assert any(p.read_text() == damaged for p in path.parent.glob("*revision*.md"))

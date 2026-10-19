@@ -97,5 +97,6 @@ def episode_title(title: str, authors: Iterable[str] = (), year: str | int | Non
 
 def readable_markdown_filename(title: str, *, review: bool = False) -> str:
     """Make a safe, human-readable Markdown filename from an episode title."""
-    suffix = " — AI review" if review else ""
-    return filename_part(f"{title}{suffix}") + ".md"
+    suffix = " - AI review" if review else ""
+    return filename_part(title, max_length=180 - len(suffix),
+                         max_bytes=240 - len(suffix.encode("utf-8"))) + suffix + ".md"

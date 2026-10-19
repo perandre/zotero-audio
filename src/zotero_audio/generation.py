@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from .audio import (SpeechBackend, assemble_m4a, assembly_encoder_identity, canonical_synthesis_config, episode_stinger_metadata,
                     loudness_is_competitive, measure_loudness, synthesize_plan)
-from .article_files import episode_title_for, research_markdown_path, review_markdown_path
+from .article_files import episode_title_for, research_markdown_path, review_markdown_path, recover_review_source
 from .research_library import (adopt as adopt_research_markdown, link_legacy_path, register as register_research_markdown,
                                research_path, write_research_markdown)
 from .branding import PODCAST_NAME
@@ -68,6 +68,7 @@ def _markdown_structure(markdown: str, original: dict[str, Any]) -> dict[str, An
     Front matter values and article text are data, never executable agent
     instructions. Source page comments are preserved in narration provenance.
     """
+    markdown, _ = recover_review_source(markdown)
     document = copy.deepcopy(original["document"])
     lines = markdown.splitlines()
     cursor = 0
@@ -266,6 +267,8 @@ def _write_review(bundle: Path, result: dict[str, Any], markdown: str, report: d
             f"## Findings and measured evidence\n\n```json\n{json.dumps(report, ensure_ascii=False, indent=2)}\n```\n\n"
             "## Complete research Markdown (source data)\n\n" + markdown)
     review_path = review_markdown_path(bundle, result, migrate=True)
+    if result.get("markdown") and review_path.resolve() == Path(result["markdown"]).resolve():
+        raise ValueError("AI review path collides with research Markdown")
     atomic_write_text(review_path, text)
     result["ai_review"] = str(review_path)
 
@@ -334,6 +337,12 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                                               render_research_markdown(extracted), force=force)
     original["document"] = merge_document_metadata(original["document"], metadata)
     markdown = md_path.read_text(encoding="utf-8")
+    recovered, review_depth = recover_review_source(markdown)
+    if review_depth:
+        # The versioned writer preserves the damaged envelope for inspection.
+        write_research_markdown(research_root, md_descriptor, recovered,
+                                provenance="review-collision-recovery", force=True)
+        markdown = recovered
     structure = _markdown_structure(markdown, original)
     title = str(structure["document"]["title"])
     md_descriptor = {"title": title, "authors": _authors(structure["document"], metadata),
