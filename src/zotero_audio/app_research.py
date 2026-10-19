@@ -239,8 +239,11 @@ def enrich(store: Store, records: list[dict], *, limit=None, progress=print, fet
     Source text is retained in full; only the separate classifier input is bounded.
     Each result is durable before moving on, so interrupted runs resume safely.
     """
-    from .abstract_retrieval import doi_value, retrieve
+    from .abstract_retrieval import doi_value, retrieve, restore_backoffs
     init_tables(store)
+    if fetch is None:
+        with store.db() as db:
+            restore_backoffs([json.loads(row[0]) for row in db.execute("SELECT data FROM research_abstract_retrievals")])
     pending = {(i["library_id"], i["item_key"]) for i in rows(store)
                if i["coverage"] in {"title_only", "selected_markdown"}}
     candidates = [item for item in sorted(records, key=lambda r: (r["library_id"], r["key"]))

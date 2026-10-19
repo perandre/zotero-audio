@@ -450,3 +450,10 @@ command makes public metadata requests, without invoking a model or buying API
 access. External sources can still be unavailable or omit an abstract; inspect
 the durable per-reference retrieval receipts rather than assuming empty text
 means no abstract exists.
+
+Provider daily allowance reset headers are honored alongside `Retry-After`.
+Reset deadlines are stored in retrieval receipts and restored on subsequent
+runs, so restarting enrichment does not hammer an exhausted shared allowance.
+It resumes source requests after the deadline; it never purchases more access.
+OpenAlex title-search allowance is tracked separately from free DOI entity
+lookups, so a title-search quota hit does not pause DOI retrieval.

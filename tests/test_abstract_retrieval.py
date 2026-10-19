@@ -111,10 +111,11 @@ def test_rate_limit_honors_cooldown_without_hammering(monkeypatch):
     def opener(request, timeout):
         calls.append(1)
         raise HTTPError(request.full_url, 429, "rate limited", {"Retry-After": "120"}, None)
-    with pytest.raises(HTTPError):
+    with pytest.raises(retrieval.ProviderUnavailable) as caught:
         retrieval.get("https://example.org/rate", opener=opener, sleep=lambda _: None)
     with pytest.raises(URLError, match="cooldown"):
         retrieval.get("https://example.org/rate", opener=opener, sleep=lambda _: None)
+    assert caught.value.code == 429
     assert len(calls) == 1
     retrieval._NEXT.clear()
 
@@ -209,3 +210,40 @@ def test_group_local_abstract_does_not_leak_into_personal_record(tmp_path):
     research.prepare(store, records)
     coverages = {r["library_id"]: r["coverage"] for r in research.rows(store)}
     assert coverages == {"users/0": "title_only", "groups/123": "cached_abstract"}
+
+
+def test_daily_quota_reset_is_preserved_across_restart(monkeypatch):
+    import time
+    monkeypatch.setattr(retrieval, "public_url", lambda url: url)
+    retrieval._NEXT.clear()
+    calls = []
+    def opener(request, timeout):
+        calls.append(1)
+        raise HTTPError(request.full_url, 429, "daily allowance exhausted", {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "60000"}, None)
+    with pytest.raises(retrieval.ProviderUnavailable) as caught:
+        retrieval.get("https://example.org/quota", opener=opener, sleep=lambda _: None)
+    failure = caught.value
+    assert failure.retry_at > time.time() + 59000
+    retrieval._NEXT.clear()
+    retrieval.restore_backoffs([{"attempts": [{"host": failure.host, "http_status": failure.code, "retry_at": failure.retry_at}]}])
+    with pytest.raises(retrieval.ProviderUnavailable):
+        retrieval.get("https://example.org/quota", opener=opener, sleep=lambda _: None)
+    assert len(calls) == 1
+    retrieval._NEXT.clear()
+
+
+def test_openalex_search_quota_does_not_block_free_doi_lookups(monkeypatch):
+    monkeypatch.setattr(retrieval, "public_url", lambda url: url)
+    retrieval._NEXT.clear()
+    class FreeResponse(io.BytesIO):
+        headers = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "60000", "X-RateLimit-Cost-USD": "0"}
+    def opener(request, timeout):
+        if "/works?" in request.full_url:
+            raise HTTPError(request.full_url, 429, "search allowance exhausted", {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "60000"}, None)
+        return FreeResponse(b"{}")
+    with pytest.raises(retrieval.ProviderUnavailable) as caught:
+        retrieval.get("https://api.openalex.org/works?search=title", opener=opener, sleep=lambda _: None)
+    assert caught.value.backoff_key == "api.openalex.org:search"
+    for _ in range(2):
+        assert retrieval.get("https://api.openalex.org/works/https://doi.org/10.1234/test", opener=opener, sleep=lambda _: None) == b"{}"
+    retrieval._NEXT.clear()

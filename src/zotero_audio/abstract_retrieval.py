@@ -21,6 +21,7 @@ MAX_BYTES = 2_000_000
 POLICY = 2
 _GATE = threading.Lock()
 _NEXT: dict[str, float] = {}
+_BACKOFF_STATUS: dict[str, int] = {}
 INTERVALS = {"export.arxiv.org": 3.1, "api.semanticscholar.org": 1.1, "api.openalex.org": 0.2}
 
 
@@ -52,17 +53,53 @@ class PublicRedirect(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class ProviderUnavailable(URLError):
+    def __init__(self, host: str, delay: float, code: int = 429, *, bucket: str | None = None):
+        super().__init__("Provider cooldown; retry after its recorded reset")
+        self.code = code
+        self.retry_at = time.time() + delay
+        self.host = host
+        self.backoff_key = bucket or host
+
+
+def restore_backoffs(receipts: list[dict]) -> None:
+    """Restore provider reset times after a CLI/process restart."""
+    with _GATE:
+        for receipt in receipts:
+            for attempt in receipt.get("attempts", []):
+                delay = float(attempt.get("retry_at") or 0) - time.time()
+                host = attempt.get("backoff_key") or attempt.get("host")
+                if host and delay > 0:
+                    _NEXT[host] = max(_NEXT.get(host, 0), time.monotonic() + delay)
+                    _BACKOFF_STATUS[host] = attempt.get("http_status") or 429
+
+
+def quota_reset(headers, *, successful=False) -> float:
+    if not headers or headers.get("X-RateLimit-Remaining") != "0":
+        return 0
+    if successful and headers.get("X-RateLimit-Cost-USD") == "0":
+        return 0
+    try:
+        reset = float(headers.get("X-RateLimit-Reset", "0"))
+        return max(0, reset - time.time() if reset > 1_000_000 else reset)
+    except (ValueError, TypeError):
+        return 0
+
+
 def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
     """Retry transient failures; pace hosts and validate redirect destinations."""
     public_url(url)
-    host = urlsplit(url).hostname
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    # OpenAlex entity lookups are free even when title-search credits are exhausted.
+    bucket = host + ":search" if host == "api.openalex.org" and parsed.path.rstrip("/") == "/works" else host
     open_request = opener or build_opener(PublicRedirect()).open
     for attempt in range(3):
         with _GATE:
-            delay = max(0, _NEXT.get(host, 0) - time.monotonic())
+            delay = max(0, _NEXT.get(bucket, 0) - time.monotonic())
             if delay > 10:
-                raise URLError("Provider cooldown; retry on a later run")
-            _NEXT[host] = time.monotonic() + delay + INTERVALS.get(host, 0.5)
+                raise ProviderUnavailable(host, delay, _BACKOFF_STATUS.get(bucket, 429), bucket=bucket)
+            _NEXT[bucket] = time.monotonic() + delay + INTERVALS.get(host, 0.5)
         if delay:
             sleep(delay)
         try:
@@ -70,6 +107,11 @@ def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
             request = Request(url, headers={"User-Agent": "1MorePaper/0.2 (https://github.com/perandre/zotero-audio)", "Accept": accept})
             with open_request(request, timeout=12) as response:
                 raw = response.read(MAX_BYTES + 1)
+                reset = quota_reset(getattr(response, "headers", None), successful=True)
+                if reset:
+                    with _GATE:
+                        _NEXT[bucket] = max(_NEXT.get(bucket, 0), time.monotonic() + reset)
+                        _BACKOFF_STATUS[bucket] = 429
             if len(raw) > MAX_BYTES:
                 raise ValueError("Source response exceeds size limit")
             return raw
@@ -81,7 +123,7 @@ def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
                 return b""
             if code not in {408, 429, 500, 502, 503, 504}:
                 raise
-            delay = 2 ** (attempt + 1)
+            delay = max(2 ** (attempt + 1), quota_reset(exc.headers))
             if retry:
                 try:
                     delay = max(delay, float(retry))
@@ -93,8 +135,11 @@ def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
             if code == 429:
                 delay = max(delay, 60)
             with _GATE:
-                _NEXT[host] = max(_NEXT.get(host, 0), time.monotonic() + delay)
-            if attempt == 2 or delay > 60:
+                _NEXT[bucket] = max(_NEXT.get(bucket, 0), time.monotonic() + delay)
+                _BACKOFF_STATUS[bucket] = code
+            if delay > 10:
+                raise ProviderUnavailable(host, delay, code, bucket=bucket) from None
+            if attempt == 2:
                 raise
         except (URLError, TimeoutError):
             if attempt == 2:
@@ -206,7 +251,8 @@ def retrieve(data: dict, *, fetch=get, skip_crossref=False) -> dict:
                 return {"abstract": text, "source": source, "resource": url, "attempts": attempts, "status": "found"}
         except (OSError, ValueError, TypeError, KeyError, AttributeError, ET.ParseError) as exc:
             # Keep exception type/status, never response bodies or private URL queries.
-            attempts.append({"source": source, "status": "unavailable", "error": type(exc).__name__, "http_status": getattr(exc, "code", None)})
+            attempts.append({"source": source, "status": "unavailable", "error": type(exc).__name__, "http_status": getattr(exc, "code", None),
+                             "host": urlsplit(url).hostname, "backoff_key": getattr(exc, "backoff_key", None), "retry_at": getattr(exc, "retry_at", None)})
         return None
 
     providers = []
