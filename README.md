@@ -403,3 +403,30 @@ See [architecture and maintainer map](docs/architecture.md),
 [the read-only Zotero feed inbox](docs/zotero-feed-api.md), and
 [Kokoro evaluation](docs/tts-evaluation.md), and
 [direct Zotero reference imports](docs/zotero-cloud-import.md).
+
+### Complete private Markdown reference library
+
+Run `za library export` to build `papers/references/index.md` and one reference
+Markdown file per Zotero top-level reference, including records without a PDF
+and regardless of license. The exporter reads the supported Zotero GET API and
+includes configured group libraries in Web API mode. It reuses Zotero abstracts,
+saved article metadata, source-matched PDF abstracts and previously cached
+Crossref abstracts; it does not invent summaries or download paywalled full text.
+Missing abstracts and full text are explicitly marked. `--json` returns coverage
+counts. Rerun after new references or Markdown generation to refresh the inventory.
+
+Reference files contain an **Abstract** section and links to available **Full
+text**. Full research Markdown remains authoritative in the flat `papers/`
+directory; the exporter neither moves nor rewrites it. The reference inventory
+is a separate derived view, not an addition to the generation catalog, private
+cloud sync or publication queue. Manually edited reference/navigation files are
+preserved on repeated exports; removed Zotero references retain their saved files
+and manifest entries. `index.json` records the currently active reference IDs.
+All generated files stay in the private runtime, outside the source repository.
+
+These new reference documents use the minimal
+[Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md):
+YAML `type`, title, resource, provenance and ordinary Markdown links, with an
+`index.md` for navigation. Existing full-text files keep their original format
+and content hashes; the entire papers directory is not claimed to be an OKF
+bundle. See [the format assessment](docs/open-knowledge-format.md).
