@@ -86,7 +86,7 @@ def quota_reset(headers, *, successful=False) -> float:
         return 0
 
 
-def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
+def get(url: str, *, opener=None, sleep=time.sleep, max_bytes=MAX_BYTES, accept=None) -> bytes:
     """Retry transient failures; pace hosts and validate redirect destinations."""
     public_url(url)
     parsed = urlsplit(url)
@@ -103,16 +103,16 @@ def get(url: str, *, opener=None, sleep=time.sleep) -> bytes:
         if delay:
             sleep(delay)
         try:
-            accept = "application/atom+xml" if host == "export.arxiv.org" else "application/json" if host in {"api.crossref.org", "api.openalex.org", "api.semanticscholar.org", "api.datacite.org"} else "text/html"
-            request = Request(url, headers={"User-Agent": "1MorePaper/0.2 (https://github.com/perandre/zotero-audio)", "Accept": accept})
+            media_accept = accept or ("application/atom+xml" if host == "export.arxiv.org" else "application/json" if host in {"api.crossref.org", "api.openalex.org", "api.semanticscholar.org", "api.datacite.org"} else "text/html")
+            request = Request(url, headers={"User-Agent": "1MorePaper/0.2 (https://github.com/perandre/zotero-audio)", "Accept": media_accept})
             with open_request(request, timeout=12) as response:
-                raw = response.read(MAX_BYTES + 1)
+                raw = response.read(max_bytes + 1)
                 reset = quota_reset(getattr(response, "headers", None), successful=True)
                 if reset:
                     with _GATE:
                         _NEXT[bucket] = max(_NEXT.get(bucket, 0), time.monotonic() + reset)
                         _BACKOFF_STATUS[bucket] = 429
-            if len(raw) > MAX_BYTES:
+            if len(raw) > max_bytes:
                 raise ValueError("Source response exceeds size limit")
             return raw
         except HTTPError as exc:

@@ -57,6 +57,8 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
     with store.db() as db:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='research_abstract_cache'").fetchone()
         cache = dict(db.execute("SELECT hash,abstract FROM research_abstract_cache")) if exists else {}
+    from .fulltext_retrieval import receipts as fulltext_receipts, fingerprint as fulltext_fingerprint
+    retrieved_fulltext = fulltext_receipts(store)
     rows = []
     preserved = []
     abstracts = root / "abstracts"
@@ -79,6 +81,10 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                 abstract, provenance = retrieved["abstract"], retrieved.get("source", "retrieved")
             articles = catalog.get((library, key), [])
             full = []
+            acquired = retrieved_fulltext.get(fulltext_fingerprint(record), {})
+            acquired_path = Path(acquired.get("markdown") or "/missing")
+            if acquired_path.is_file() and acquired_path.resolve().parent == root.resolve():
+                full.append(acquired_path)
             for article in articles:
                 markdown = Path(article.get("markdown") or "/missing")
                 if markdown.is_file() and markdown.resolve().parent == root.resolve():

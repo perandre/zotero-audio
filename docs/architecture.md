@@ -319,3 +319,26 @@ QA and generation state, while immutable delivery snapshots remain under
 catalogued, full-library and report-pilot Markdown without discarding conflicts
 or changing document contents. Legacy bundle paths are compatibility links to
 the canonical file or a preserved conflict revision.
+
+## Full-text acquisition
+
+`fulltext_retrieval.py` powers `za library fetch-full` and `full-status`. It reads
+Zotero parents through the supported API and preserves the separate PDF-based
+audio discovery path. `fulltext_retrievals` records source attempts, reset times,
+source hashes, cached PDF paths and successful canonical Markdown paths. An
+exclusive acquisition lock prevents duplicate batches; extraction uses bounded
+subprocesses without loading the speech model. Existing Markdown and DOI aliases
+are reused. Acquired documents enter the same SQLite catalog/search and flat
+papers index, with stable reference IDs and `in_zotero=false`, preventing
+attachment discovery from scheduling automatic audio/publication for downloads.
+The private bridge's existing count/size/daily caps still apply.
+
+The reference exporter reads acquisition receipts as well as the catalog, so
+DOI aliases link to the same canonical full text. Downloaded PDF identity is
+checked against the original bytes before Zotero title enrichment. Accepted HTML
+needs matching metadata and substantive beginning/end/reference sections;
+HTML research remains useful independently of PDF-based audio generation.
+Source bytes, extraction structures and receipts remain outside Git. Neither
+metadata availability nor a successful HTTP response establishes full-text
+coverage. Full-text retrieval does not edit Zotero, reclassify licenses, request
+publication or alter existing audio cache identities.
