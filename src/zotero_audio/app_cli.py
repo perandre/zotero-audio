@@ -132,7 +132,9 @@ def parser():
     root.add_argument("--json", action="store_true", help="Machine-readable output")
     sub = root.add_subparsers(dest="command")
     library = sub.add_parser("library", help="Export a complete private Markdown reference inventory")
-    library.add_argument("action", choices=("export",))
+    library.add_argument("action", choices=("export", "fetch-full", "full-status"))
+    library.add_argument("--limit", type=int)
+    library.add_argument("--max-download-mib", type=int, default=2048)
     library.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     research = sub.add_parser("research-fit", help="Classify Zotero research relevance without changing Zotero or publication")
     research.add_argument("action", choices=("run", "enrich", "status", "list", "export", "override"))
@@ -228,9 +230,22 @@ def main(argv=None):
             serve(store, args.port)
             return 0
         if command == "library":
+            if args.action == "full-status":
+                from .fulltext_retrieval import status
+                emit(status(store), args.json)
+                return 0
             from .library_export import export_library
+            acquisition = None
+            if args.action == "fetch-full":
+                from .fulltext_retrieval import run
+                acquisition = run(store, limit=args.limit, max_download_mib=args.max_download_mib,
+                                  progress=(lambda _: None) if args.json else lambda text: print(text, flush=True))
             result = export_library(store)
+            if acquisition is not None:
+                result["acquisition"] = acquisition
             emit(result if args.json else f"Private Markdown library: {result['directory']}\n{result['references']} references; {result['with_abstract']} sourced abstracts; {result['with_full_text']} references with full text.\nPreserved {len(result['preserved_edits'])} edited reference files.", args.json)
+            if acquisition is not None and not args.json:
+                print(json.dumps(acquisition, indent=2))
             return 0
         if command == "research-fit":
             from . import app_research as research

@@ -464,3 +464,40 @@ runs, so restarting enrichment does not hammer an exhausted shared allowance.
 It resumes source requests after the deadline; it never purchases more access.
 OpenAlex title-search allowance is tracked separately from free DOI entity
 lookups, so a title-search quota hit does not pause DOI retrieval.
+
+### Retrieve full research text
+
+`za library fetch-full` retrieves missing full text across the Zotero reference
+inventory, then refreshes the reference/abstract index. It preserves existing
+Markdown, reuses exact-DOI copies, and never selects audio or publication. Use
+`--limit 10` for a bounded trial and `--json` for a machine receipt.
+`za library full-status --json` reports progress without network calls or
+starting the audio service. Reruns resume successful work and retry unresolved
+sources, with unattempted references first.
+
+The command tries existing local source PDFs, source-matched OpenAlex PDF and
+repository locations, Crossref PDF links, arXiv and publisher PDF links. It does
+not filter private research by license. Publisher HTML is accepted only when
+matching article metadata, substantive article body, introduction/background,
+conclusion/discussion and references are present; abstract/landing pages are
+not substituted for full text. Public destinations and redirects, response
+limits, host pacing and provider reset times use the abstract retrieval checks.
+Authenticated/paywalled sources remain explicitly unavailable to this process.
+
+Downloaded sources stay private in `control/fulltext/`; canonical full Markdown
+is written to the existing flat `papers/` directory and the same SQLite search
+catalog. Full titles, source hashes and extraction provenance are retained.
+New references receive stable `ref-<Zotero parent key>` IDs (qualified for group
+libraries); they do not impersonate Zotero PDF attachments or change Zotero.
+PDF extraction runs in bounded child processes with the existing extractor;
+no speech model or inference API is used. Research text/references are preserved;
+this is extraction, not a generated summary. Text QA is marked unchecked.
+
+The default cache budget is 2 GiB, individual source responses are limited to
+40 MiB, and the command reserves 5 GiB of free disk space. Set
+`--max-download-mib` deliberately to change the cache budget. Cached PDFs remain
+usable even when a new run's budget is smaller. Source failures, identity/OCR
+problems and disk-budget stops have durable per-reference receipts in SQLite;
+none is counted as completed full text. PDFs are never uploaded to the cloud.
+Existing private Markdown sync caps (2,000 articles, 128 MiB, 500 changed uploads
+per day) remain in force; cloud sync limits do not block local completion.
