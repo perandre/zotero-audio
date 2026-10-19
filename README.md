@@ -264,6 +264,11 @@ uv pip install --python ~/1mp/venv/bin/python \
   https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 ```
 
+On CPUs older than x86-64-v2 (no SSE4.2/POPCNT, for example a Core 2 Duo),
+NumPy 2.4+ wheels refuse to import; add
+`uv pip install --python ~/1mp/venv/bin/python "numpy<2.4"`. PyTorch's CPU wheel,
+spaCy and Kokoro run there unchanged, at roughly 4× real time.
+
 The first request downloads the model into `~/1mp/hf`. On the Mac, create
 `$ZOTERO_AUDIO_RUNTIME/control/speech.json` (kept out of the synchronized app
 settings, whose cloud schema only allows `tts_model: "kokoro"`), then run
