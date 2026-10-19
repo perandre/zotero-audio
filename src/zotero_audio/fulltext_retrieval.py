@@ -171,7 +171,10 @@ def extract_request(request_path):
     metadata = metadata_for(request['record'])
     descriptor = {**metadata, 'id': request['article_id'], 'metadata': metadata}
     markdown = write_research_markdown(Path(request['papers']), descriptor, render_research_markdown(structure), provenance='fulltext-retrieval')
-    atomic_write_json(bundle / 'extracted.json', {'markdown': str(markdown), 'source_sha256': sha256_file(pdf), 'pdf_pages': pages, 'source_kind': 'pdf'})
+    from .markdown_quality import pdf_quality
+    quality = pdf_quality(pdf, markdown.read_text())
+    atomic_write_json(bundle / 'markdown-quality.json', quality)
+    atomic_write_json(bundle / 'extracted.json', {'markdown': str(markdown), 'source_sha256': sha256_file(pdf), 'pdf_pages': pages, 'source_kind': 'pdf', 'markdown_quality': quality})
 
 
 def extract_source(store, record, pdf, *, timeout=120):
@@ -212,6 +215,8 @@ def register_article(store, record, result, *, bundle, pdf=None):
         'markdown_status': 'ready', 'in_zotero': False, 'source_origin': 'fulltext-retrieval',
         'artifacts': {**old.get('artifacts', {}), 'markdown': True},
         'source_changed': bool(old.get('source_sha256') and old['source_sha256'] != result['source_sha256'])}
+    if result.get('markdown_quality'):
+        article['markdown_quality'] = result['markdown_quality']
     if not old:
         article.update(audio_status='not_started', license_status='private', qa_status='unchecked', editions={}, warnings=[])
     store.put_article(article, markdown=path.read_text())

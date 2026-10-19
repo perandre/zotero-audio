@@ -106,3 +106,30 @@ def test_cli_exports_inventory_without_starting_daemon(tmp_path, monkeypatch, ca
     monkeypatch.setattr(library_export, "make_zotero_api", lambda *a, **k: object())
     assert app_cli.main(["library", "export", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["references"] == 1
+
+
+def test_invalid_generated_abstract_is_archived_but_edits_are_preserved(tmp_path):
+    from zotero_audio.app_research import abstract_fingerprint
+    store = Store(tmp_path)
+    r = record()
+    # Simulate the previous exporter accepting an editorial provider label.
+    with store.db() as db:
+        db.execute('CREATE TABLE research_abstract_retrievals (hash TEXT PRIMARY KEY, data TEXT, checked_at REAL)')
+        db.execute('INSERT INTO research_abstract_retrievals VALUES (?,?,0)', (abstract_fingerprint(r), json.dumps({'abstract': 'Peer Reviewed', 'source': 'openalex'})))
+    directory = tmp_path/'papers/abstracts'; directory.mkdir(parents=True)
+    path = directory/'old.md'; text = '# Research\n\n## Abstract\n\nPeer Reviewed\n\n## Source\nProvider'
+    path.write_text(text)
+    (directory/'index.json').write_text(json.dumps({'abstracts': {'REF1': {'path': 'old.md', 'sha256': sha256_file(path)}}}))
+    refs = tmp_path/'papers/references'; refs.mkdir()
+    (refs/'index.json').write_text(json.dumps({'references': {'REF1': {'path': 'old.md'}}}))
+    result = export_library(store, records=[r])
+    assert result['with_abstract'] == result['abstract_files'] == 0
+    assert result['retired_invalid_abstracts'] == [r['data']['title']]
+    assert not path.exists()
+    assert next((directory/'revisions').glob('*.md')).read_text() == text
+    # A file changed after generation must never be retired by this cleanup.
+    path.write_text(text + '\nManual explanation.')
+    (directory/'index.json').write_text(json.dumps({'abstracts': {'REF1': {'path': 'old.md', 'sha256': __import__('hashlib').sha256(text.encode()).hexdigest()}}}))
+    edited = path.read_bytes()
+    assert export_library(store, records=[r])['retired_invalid_abstracts'] == []
+    assert path.read_bytes() == edited

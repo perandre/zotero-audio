@@ -491,7 +491,26 @@ New references receive stable `ref-<Zotero parent key>` IDs (qualified for group
 libraries); they do not impersonate Zotero PDF attachments or change Zotero.
 PDF extraction runs in bounded child processes with the existing extractor;
 no speech model or inference API is used. Research text/references are preserved;
-this is extraction, not a generated summary. Text QA is marked unchecked.
+this is extraction, not a generated summary. Each new PDF retrieval stores an
+independent source-token coverage check in `markdown-quality.json` and its catalog
+receipt. Low coverage and sparse source pages produce review warnings. Coverage
+does not certify reading order, table relationships, equations or visual fidelity;
+semantic/audio QA remains separate.
+
+Research rendering retains original layout spans even when the classifier labels
+prose as a header, footer, table or figure. Narration filtering remains separate.
+Abstract export prefers the bounded source abstract, normalizes cached XML and
+rejects editorial labels such as “Peer Reviewed.” Short, long and apparently
+truncated abstracts carry review findings rather than silent certification.
+
+Preview repairs of source omissions with
+`scripts/repair_markdown_quality.py --report /path/to/report.json`; add `--apply`
+to repair verified generated files from cached structures. Source and generated
+Markdown hashes must match. Edits and changed sources are preserved, replaced
+versions are retained, and no audio/publication jobs are queued. Rerun
+`za library export` to repair generated abstract/reference files; invalid generated
+abstract placeholders are archived under `papers/abstracts/revisions/` when no
+replacement is available. No model/API calls are required by the repair script.
 
 The default cache budget is 2 GiB, individual source responses are limited to
 40 MiB, and the command reserves 5 GiB of free disk space. Set

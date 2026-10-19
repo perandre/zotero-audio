@@ -51,6 +51,11 @@ def normalize_abstract(value: Any) -> str:
     if len(value) > MAX_ABSTRACT_CHARS:
         return ""
     value = re.sub(r"^abstract\s*[:.—–-]\s*", "", value, flags=re.I)
+    # Depositor indexes sometimes put editorial labels in the abstract field.
+    if re.fullmatch(r"(?i)(?:peer[ -]reviewed|version\s*:\s*\w+|(?:no|not available) abstract[.!]?|abstract unavailable[.!]?)", value):
+        return ""
+    if re.match(r"(?i)^publisher copyright\s*:", value) and len(value.split()) < 30:
+        return ""
     return value.strip()
 
 
@@ -142,6 +147,12 @@ def _bounded_get(request: urllib.request.Request) -> bytes:
 def _pdf_abstract(structure: dict[str, Any], document: dict[str, Any]) -> str:
     structure_document = structure.get("document", {}) if isinstance(structure, dict) else {}
     source = str(structure_document.get("abstract_source") or document.get("abstract_source") or "")
+    # Native front-matter inference already has explicit heading/keyword
+    # boundaries. Prefer it over paragraph blocks, whose layout may merge an
+    # entire introduction into the abstract paragraph.
+    inferred = normalize_abstract(structure_document.get("abstract") or document.get("abstract"))
+    if inferred and (source.startswith("pdf-") or source == "preserved-extraction-metadata") and len(inferred.split()) <= 1000:
+        return inferred
     blocks = structure.get("blocks", []) if isinstance(structure, dict) else []
     active = False
     parts: list[str] = []
@@ -167,6 +178,13 @@ def _pdf_abstract(structure: dict[str, Any], document: dict[str, Any]) -> str:
                 text = inline.group(1).strip()
             else:
                 continue
+        # A flattened section boundary can be inside a single paragraph.
+        boundary = re.search(r"(?i)(?<!\w)(?:keywords?|index terms|ccs concepts)\s*[:—–-]|(?:^|(?<=[.!?])\s+)(?:1[.)]?\s+)?introduction\b", text)
+        if active and boundary:
+            prefix = text[:boundary.start()].strip()
+            if prefix:
+                parts.append(prefix)
+            break
         if re.match(r"(?i)^(?:keywords?|index terms|ccs concepts|received|revised|accepted|published online)\s*[:—–-]", text):
             break
         if block.get("included_in_reading", True) and text:
@@ -174,10 +192,10 @@ def _pdf_abstract(structure: dict[str, Any], document: dict[str, Any]) -> str:
             if sum(map(len, parts)) > MAX_ABSTRACT_CHARS:
                 return ""
     block_abstract = normalize_abstract(" ".join(parts))
-    if block_abstract:
+    if block_abstract and len(block_abstract.split()) <= 1000:
         return block_abstract
     abstract = normalize_abstract(structure_document.get("abstract") or document.get("abstract"))
-    return abstract if source.startswith("pdf-") or source == "preserved-extraction-metadata" else ""
+    return abstract if len(abstract.split()) <= 1000 and (source.startswith("pdf-") or source == "preserved-extraction-metadata") else ""
 
 
 def select_description_abstract(document: dict[str, Any], *, metadata: dict[str, Any] | None = None,
