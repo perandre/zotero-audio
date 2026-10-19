@@ -241,6 +241,8 @@ class LocalWorker:
             self.store.update_job(job["id"], title=original_article["title"], article_id_current=article_id,
                                   progress=round(100 * index / len(articles)), message=f"Article {index + 1} of {len(articles)}")
             settings = self.store.settings()
+            if job.get("publish") is False:
+                settings = {**settings, "auto_publish": False}
             def progress(event):
                 self.check_cancel(job)
                 self.last_activity = now()
@@ -268,7 +270,7 @@ class LocalWorker:
                 if record.get("markdown") and Path(record["markdown"]).is_file():
                     record["markdown"] = str(self.snapshot(Path(record["markdown"]), name=research_markdown_filename(display)))
                 publishing = bool(settings["auto_publish"] and record.get("public_eligible") and record.get("selected"))
-                private = not record.get("public_eligible")
+                private = not record.get("public_eligible") or job.get("publish") is False
                 mode = private_audio_mode(self.store.runtime, settings) if private else "none"
                 destination = (str(Path(settings["icloud_folder"]) / readable_filename(display, edition))
                                if mode == "icloud" else None)

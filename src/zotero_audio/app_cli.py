@@ -452,7 +452,7 @@ def main(argv=None):
             else:
                 if job["status"] not in TERMINAL:
                     raise ValueError("The job is still active")
-                result = store.create_job({k: job[k] for k in ("action", "scope", "article_id", "qa", "force")})
+                result = store.create_job({k: job[k] for k in ("action", "scope", "article_id", "qa", "force", "publish") if k in job})
             emit({"job": {k: v for k, v in result.items() if k != "remote"}} if args.json else f"{result['title']}\n  {result['status']}", args.json)
             return 0
         if command in {"markdown", "full", "brief", "both", "sync"}:

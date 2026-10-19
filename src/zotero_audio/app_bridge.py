@@ -203,7 +203,7 @@ class CloudBridge:
 
     def _adopt_claim_locked(self, job):
         remote = {"lease_token": job["lease_token"], "worker_id": self.worker_id, "acknowledged": False}
-        request = {key: job[key] for key in ("action", "scope", "article_id", "qa", "force") if key in job and job[key] is not None}
+        request = {key: job[key] for key in ("action", "scope", "article_id", "qa", "force", "publish") if key in job and job[key] is not None}
         try:
             local = self.store.create_job(request, job_id=job["id"], remote=remote)
             # Store.create_job is idempotent and deliberately returns an existing

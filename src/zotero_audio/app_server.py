@@ -139,6 +139,8 @@ def make_handler(store: Store, worker, port: int):
                         if old["status"] not in {"failed", "cancelled"}:
                             return self.send_json({"job": public_job(old)})
                         request = {key: old[key] for key in ("action", "scope", "article_id", "qa")}
+                        if "publish" in old:
+                            request["publish"] = old["publish"]
                         request.update(force=False, idempotency_key=f"retry:{job_id}")
                         return self.send_json({"job": public_job(store.create_job(request))}, 201)
                 match = re.fullmatch(r"/api/articles/([^/]+)(?:/(markdown|review|audio|open))?", path)

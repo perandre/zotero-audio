@@ -520,3 +520,14 @@ problems and disk-budget stops have durable per-reference receipts in SQLite;
 none is counted as completed full text. PDFs are never uploaded to the cloud.
 Existing private Markdown sync caps (2,000 articles, 128 MiB, 500 changed uploads
 per day) remain in force; cloud sync limits do not block local completion.
+
+### Private audio jobs
+
+A local `/api/jobs` request can set `"publish": false` to generate audio for
+private listening, using the configured iCloud/outbox delivery even when the
+source license permits public publication. The durable per-job flag survives
+restarts and retries. It leaves global publishing settings, source licensing
+and existing episodes unchanged. Omitting it preserves the usual behavior;
+`true` does not override a globally disabled publisher or licensing gates.
+This is useful for large audio batches when shared R2 storage is near its free
+allowance. Generation and private delivery do not require public uploads.

@@ -169,6 +169,8 @@ def create_server(store: Store | None = None, *, base_url: str = LOCAL_BASE_URL,
         if ensure_worker:
             ensure_worker()
         request = {key: previous[key] for key in ("action", "scope", "article_id", "qa")}
+        if "publish" in previous:
+            request["publish"] = previous["publish"]
         request.update(force=False, idempotency_key=f"retry:{id}")
         return store.create_job(request)
 
