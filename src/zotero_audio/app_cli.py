@@ -131,6 +131,9 @@ def parser():
     root = argparse.ArgumentParser(prog="za", description="1 More Paper — saved Zotero research, readable Markdown, optional audio.")
     root.add_argument("--json", action="store_true", help="Machine-readable output")
     sub = root.add_subparsers(dest="command")
+    library = sub.add_parser("library", help="Export a complete private Markdown reference inventory")
+    library.add_argument("action", choices=("export",))
+    library.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     research = sub.add_parser("research-fit", help="Classify Zotero research relevance without changing Zotero or publication")
     research.add_argument("action", choices=("run", "enrich", "status", "list", "export", "override"))
     research.add_argument("--limit", type=int)
@@ -223,6 +226,11 @@ def main(argv=None):
         if command == "serve":
             from .app_server import serve
             serve(store, args.port)
+            return 0
+        if command == "library":
+            from .library_export import export_library
+            result = export_library(store)
+            emit(result if args.json else f"Private Markdown library: {result['directory']}\n{result['references']} references; {result['with_abstract']} sourced abstracts; {result['with_full_text']} references with full text.\nPreserved {len(result['preserved_edits'])} edited reference files.", args.json)
             return 0
         if command == "research-fit":
             from . import app_research as research
