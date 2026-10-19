@@ -62,8 +62,22 @@ Brief and Full episode page, and both public feeds, then restart the local
 service. A successful upload confirms the objects reached R2; it does not
 confirm Apple Podcasts or other client caches have refreshed.
 
-The public site is a separate Next.js app in
-`/Users/pesh/Sites/perandre.no/podcast`. Its pages read RSS and may remain cached
-until that site rebuilds or revalidates them (currently up to daily). Updating
-the local public mirror and R2 feeds does not by itself rebuild that separate
-website; verify deployed episode pages after its refresh path runs.
+The public site is a separate static app in
+`/Users/pesh/Sites/perandre.no/podcast`. It displays published RSS descriptions
+and recording transcripts; it does not read the private canonical `papers/`
+Markdown. Repairing research Markdown alone therefore does not update an episode
+page, its existing recording, or its transcript.
+
+For description changes, run this backfill on the active publisher and sync the
+updated feeds. The website's freshness worker detects feed changes and dispatches
+the `Podcast site` build/deploy workflow. For an immediate refresh, run that
+existing GitHub workflow after verifying the live RSS. Verify the deployed page
+as well as the feed; a successful R2 upload alone does not establish that the
+static page refreshed. Transcripts remain matched to the actual recording;
+changing narration requires explicit audio regeneration and publication.
+
+The exact legacy “A brief/full audio edition of this paper” boilerplate can be
+upgraded when its author/metadata/link rows match the saved record. It is not a
+manual edit merely because it predates `generated_show_notes`. Genuine custom
+prose and changed metadata rows remain preserved. The backfill also clears an
+incorrect note-derived manual flag only when the saved abstract is unedited.

@@ -44,7 +44,7 @@ from .zotero import (
     merge_document_metadata,
     normalize_publication_date,
 )
-from .episode_descriptions import edition_description, select_description_abstract
+from .episode_descriptions import edition_description, select_description_abstract, legacy_placeholder_notes
 
 EDITION_BRIEF = "brief"
 EDITION_FULL = "full"
@@ -1590,7 +1590,7 @@ def _publish_locked(config: PodcastConfig, paper_guid: str, source_sha: str, pri
         private_generated = unpaired_notes(record.get("generated_show_notes"))
         # Public edits survive republishing the same source. A new explicit
         # private edit takes priority over an older public edit.
-        if previous_notes and (not previous_generated or previous_notes != previous_generated):
+        if previous_notes and (not previous_generated or previous_notes != previous_generated) and not legacy_placeholder_notes(previous):
             if private_notes == private_generated:
                 record["show_notes"] = previous_notes
                 record["description_is_manual"] = True
@@ -1910,6 +1910,7 @@ def build_local_podcast(bundle: Path, private_root: Path | None = None, *, backe
         saved_notes = generated_notes
         cached_for_edition = cached_episodes.get(edition, {})
         if (cached_for_edition.get("source_sha256") == source_sha and cached_for_edition.get("show_notes")
+                and not legacy_placeholder_notes(cached_for_edition)
                 and (not cached_for_edition.get("generated_show_notes")
                      or cached_for_edition.get("show_notes") != cached_for_edition.get("generated_show_notes"))):
             saved_notes = str(cached_for_edition.get("show_notes") or generated_notes)

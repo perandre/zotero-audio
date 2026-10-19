@@ -314,3 +314,18 @@ def test_main_apply_with_frozen_loaded_config_stages_writes_and_is_idempotent(tm
 
 def record_guid():
     return str(uuid.UUID(int=1))
+
+
+def test_backfill_clears_false_manual_flag_on_verified_generated_notes():
+    abstract = 'An actual synthetic source abstract.'
+    record = published_record(edition='brief', description_abstract=abstract,
+        generated_description_abstract=abstract, description_is_manual=True,
+        generated_show_notes='New generated notes.',
+        show_notes='A brief audio edition of this paper.\n\nAuthors: A. Example\nThe authors and publisher do not sponsor or endorse this recording.')
+    output, counts = enrich_records(SimpleNamespace(state_root=Path('/missing')), [record], fetch_zotero=False, allow_external=False)
+    assert counts['legacy_notes_updated'] == 1
+    assert output[0]['show_notes'] == output[0]['generated_show_notes']
+    assert output[0]['description_is_manual'] is False
+    html = _show_notes_html(output[0]['show_notes'], description_abstract=output[0]['description_abstract'],
+        description_source=output[0]['description_abstract_source'], generated_show_notes=output[0]['generated_show_notes'])
+    assert 'episode-abstract' in html
