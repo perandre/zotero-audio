@@ -130,6 +130,8 @@ def init_tables(store: Store):
                 library_id TEXT NOT NULL, item_key TEXT NOT NULL, profile_hash TEXT NOT NULL,
                 label TEXT NOT NULL, updated_at TEXT NOT NULL,
                 PRIMARY KEY(library_id, item_key, profile_hash));
+            CREATE TABLE IF NOT EXISTS research_abstract_retrievals (
+                hash TEXT PRIMARY KEY, data TEXT NOT NULL, checked_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS research_abstract_cache (
                 hash TEXT PRIMARY KEY, abstract TEXT NOT NULL, checked_at REAL NOT NULL);
         """)
@@ -137,6 +139,20 @@ def init_tables(store: Store):
 
 def profile_hash() -> str:
     return digest({"profile": PROFILE, "questions": QUESTIONS, "model": MODEL, "input_policy": 1})
+
+
+def abstract_fingerprint(item: dict) -> str:
+    from .abstract_retrieval import POLICY, doi_value
+    data = item["data"]
+    return digest({"library": item["library_id"], "key": item["key"], "doi": doi_value(data.get("DOI")).casefold(),
+                   "title": clean_text(data["title"]), "url": str(data.get("url") or "").split("?", 1)[0], "policy": POLICY})
+
+
+def retrieved_abstract(store: Store, item: dict) -> dict:
+    with store.db() as db:
+        exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='research_abstract_retrievals'").fetchone()
+        row = db.execute("SELECT data FROM research_abstract_retrievals WHERE hash=?", (abstract_fingerprint(item),)).fetchone() if exists else None
+    return json.loads(row[0]) if row else {}
 
 
 def prepare(store: Store, records: list[dict]):
@@ -149,6 +165,9 @@ def prepare(store: Store, records: list[dict]):
     cached_abstracts = {}
     for article in catalog:
         parent = article.get("metadata", {}).get("parent_key") or article.get("metadata", {}).get("zotero_parent_key")
+        prefix = str(article["id"]).split(":", 1)[0]
+        library = f"groups/{prefix[1:]}" if ":" in str(article["id"]) and prefix.startswith("g") else "users/0"
+        parent = (library, str(parent)) if parent else None
         if parent and article.get("metadata", {}).get("abstract"):
             cached_abstracts[parent] = article["metadata"]["abstract"]
         if parent and article.get("bundle"):
@@ -164,8 +183,11 @@ def prepare(store: Store, records: list[dict]):
     for item in records:
         markdown = ""
         data = dict(item["data"])
-        if not clean_text(data.get("abstractNote", "")) and item["key"] in cached_abstracts:
-            data.update(abstractNote=cached_abstracts[item["key"]], _research_coverage="cached_abstract")
+        retrieved = retrieved_abstract(store, item)
+        if not clean_text(data.get("abstractNote", "")) and retrieved.get("abstract"):
+            data.update(abstractNote=retrieved["abstract"], _research_coverage="crossref_abstract" if retrieved.get("source") == "crossref" else "retrieved_abstract")
+        if not clean_text(data.get("abstractNote", "")) and (item["library_id"], item["key"]) in cached_abstracts:
+            data.update(abstractNote=cached_abstracts[(item["library_id"], item["key"])], _research_coverage="cached_abstract")
         # Hydrate previously retrieved public abstracts before a new lookup. This
         # prevents an interrupted enrichment or provider outage degrading results.
         if not clean_text(data.get("abstractNote", "")):
@@ -173,11 +195,11 @@ def prepare(store: Store, records: list[dict]):
             cache_hash = digest({"doi": doi.casefold(), "title": clean_text(data["title"]), "policy": 1})
             with store.db() as db:
                 cached = db.execute("SELECT abstract FROM research_abstract_cache WHERE hash=?", (cache_hash,)).fetchone()
-            if cached and cached["abstract"]:
+            if cached and cached["abstract"] and len(cached["abstract"]) <= 8000:
                 data.update(abstractNote=cached["abstract"], _research_coverage="crossref_abstract")
-        if not clean_text(item["data"].get("abstractNote", "")) and item["key"] in markdown_paths:
+        if not clean_text(item["data"].get("abstractNote", "")) and (item["library_id"], item["key"]) in markdown_paths:
             try:
-                markdown = Path(markdown_paths[item["key"]]).read_text(encoding="utf-8")
+                markdown = Path(markdown_paths[(item["library_id"], item["key"])]).read_text(encoding="utf-8")
             except OSError:
                 pass
         value = article_input(data, markdown)
@@ -211,48 +233,58 @@ def crossref_abstract(doi: str, title: str, *, opener=urlopen) -> str:
     return clean_text(message.get("abstract", ""))
 
 
-def enrich(store: Store, records: list[dict], *, limit=None, progress=print, fetch=crossref_abstract):
-    """Fill only title-only inputs with cached public abstracts. Never edit Zotero."""
-    provisional = {i["item_key"] for i in rows(store) if i["coverage"] == "title_only"}
-    candidates = []
-    for item in sorted(records, key=lambda r: r["key"]):
-        doi = str(item["data"].get("DOI") or "").strip()
-        if item["key"] in provisional and re.fullmatch(r"10\.\d{4,9}/[^\s?#]+", doi):
-            candidates.append((item, doi))
-    candidates = candidates[:limit] if limit else candidates
+def enrich(store: Store, records: list[dict], *, limit=None, progress=print, fetch=None):
+    """Resolve every missing abstract, including no-DOI and Markdown-only records.
+
+    Source text is retained in full; only the separate classifier input is bounded.
+    Each result is durable before moving on, so interrupted runs resume safely.
+    """
+    from .abstract_retrieval import doi_value, retrieve
+    init_tables(store)
+    pending = {(i["library_id"], i["item_key"]) for i in rows(store)
+               if i["coverage"] in {"title_only", "selected_markdown"}}
+    candidates = [item for item in sorted(records, key=lambda r: (r["library_id"], r["key"]))
+                  if (item["library_id"], item["key"]) in pending]
+    if limit:
+        candidates = candidates[:limit]
 
     def get(candidate):
-        item, doi = candidate
+        item = candidate
+        doi = doi_value(item["data"].get("DOI"))
         fingerprint = digest({"doi": doi.casefold(), "title": clean_text(item["data"]["title"]), "policy": 1})
+        saved = retrieved_abstract(store, item)
         with store.db() as db:
             cached = db.execute("SELECT abstract,checked_at FROM research_abstract_cache WHERE hash=?", (fingerprint,)).fetchone()
-        if cached and (cached["abstract"] or time.time() - cached["checked_at"] < 30 * 86400):
-            abstract = cached["abstract"]
-        else:
+        if saved.get("abstract"):
+            return item, saved
+        # A previous Crossref miss only suppresses Crossref, never the other sources.
+        skip_crossref = bool(cached and not cached["abstract"] and time.time() - cached["checked_at"] < 30 * 86400)
+        if fetch is not None:
             try:
-                abstract = fetch(doi, item["data"]["title"])
-            except HTTPError as exc:
-                code = exc.code
-                exc.close()
-                if code != 404:
-                    return item, "", "lookup unavailable; preserved title-only input"
-                abstract = ""
+                abstract = fetch(doi, item["data"]["title"]) if doi else ""
+                result = {"abstract": abstract, "source": "crossref", "status": "found" if abstract else "not_found", "resource": "https://api.crossref.org/works/" + quote(doi, safe=""), "attempts": []}
+                with store.db() as db:
+                    db.execute("INSERT OR REPLACE INTO research_abstract_cache VALUES (?,?,?)", (fingerprint, abstract, time.time()))
             except (OSError, ValueError, KeyError, TypeError):
-                return item, "", "lookup unavailable; preserved title-only input"
-            # Keep at most one character beyond the inference limit so truncation
-            # is still detectable without caching an unbounded metadata field.
-            abstract = abstract[:8001]
-            with store.db() as db:
-                db.execute("INSERT OR REPLACE INTO research_abstract_cache VALUES (?,?,?)", (fingerprint, abstract, time.time()))
-        return item, abstract, "abstract found" if abstract else "no abstract available"
+                result = {"abstract": "", "status": "retry_pending", "attempts": [{"source": "crossref", "status": "unavailable"}]}
+        else:
+            result = retrieve(item["data"], skip_crossref=skip_crossref)
+        with store.db() as db:
+            db.execute("INSERT OR REPLACE INTO research_abstract_retrievals VALUES (?,?,?)",
+                       (abstract_fingerprint(item), json.dumps(result), time.time()))
+        return item, result
 
-    # Crossref's public pool: two concurrent metadata GETs, independent of inference.
+    counts = {"found": 0, "not_found": 0, "retry_pending": 0}
     with ThreadPoolExecutor(max_workers=2) as pool:
-        for item, abstract, status in pool.map(get, candidates):
-            if abstract:
-                item["data"].update(abstractNote=abstract, _research_coverage="crossref_abstract")
-            progress(f"{item['data']['title']}\n  {status}")
+        futures = [pool.submit(get, item) for item in candidates]
+        for future in as_completed(futures):
+            item, result = future.result()
+            counts[result["status"]] += 1
+            if result.get("abstract"):
+                item["data"].update(abstractNote=result["abstract"], _research_coverage="crossref_abstract" if fetch else "retrieved_abstract")
+            progress(f"{item['data']['title']}\n  {result['status']}" + (f" ({result.get('source')})" if result.get("abstract") else ""))
     prepare(store, records)
+    return {"attempted": len(candidates), **counts}
 
 
 def api_key(store: Store) -> str:
@@ -359,7 +391,7 @@ def summary(store: Store) -> dict:
     return {"profile": PROFILE["id"], "model": MODEL, "total": len(items),
             "statuses": {s: sum(i["status"] == s for i in items) for s in ("pending", "running", "completed", "failed")},
             "labels": {s: sum(i["label"] == s for i in items) for s in LABELS},
-            "coverage": {s: sum(i["coverage"] == s for i in items) for s in ("title_only", "title_abstract", "cached_abstract", "crossref_abstract", "selected_markdown")},
+            "coverage": {s: sum(i["coverage"] == s for i in items) for s in ("title_only", "title_abstract", "cached_abstract", "crossref_abstract", "retrieved_abstract", "selected_markdown")},
             "needs_review": sum(i["needs_review"] for i in items),
             "input_tokens": sum(i.get("usage", {}).get("input_tokens", 0) for i in unique.values())}
 

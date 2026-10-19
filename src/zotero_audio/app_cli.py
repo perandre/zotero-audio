@@ -244,9 +244,11 @@ def main(argv=None):
                         raise ValueError("A research-fit job is already running") from None
                     records = research.discover(make_zotero_api(store.root, timeout=15))
                     research.prepare(store, records)
-                    research.enrich(store, records, limit=args.limit,
+                    enrichment = research.enrich(store, records, limit=args.limit,
                                     progress=(lambda _: None) if args.json else lambda text: print(text, flush=True))
-                    emit(research.summary(store), args.json)
+                    from .library_export import export_library
+                    library = export_library(store)
+                    emit({**research.summary(store), "enrichment": enrichment, "library": library}, args.json)
                 return 0
             if args.action == "run":
                 result = research.run(store, limit=args.limit, workers=args.workers,

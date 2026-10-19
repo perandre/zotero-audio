@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
-from .app_research import clean_text, discover
+from .app_research import clean_text, discover, retrieved_abstract
 from .app_state import Store, digest
 from .episode_descriptions import normalize_abstract, select_description_abstract
 from .research_library import _library_lock
@@ -59,7 +59,11 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
         cache = dict(db.execute("SELECT hash,abstract FROM research_abstract_cache")) if exists else {}
     rows = []
     preserved = []
+    abstracts = root / "abstracts"
+    abstracts.mkdir(parents=True, exist_ok=True, mode=0o700)
+    abstract_edits = []
     with _library_lock(root):
+        abstract_entries = _read(abstracts / "index.json").get("abstracts", {})
         previous = _read(directory / "index.json").get("references", {})
         for record in sorted(records, key=lambda r: (str(r["data"]["title"]).casefold(), r["library_id"], r["key"])):
             data, key, library = record["data"], record["key"], record["library_id"]
@@ -70,6 +74,9 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
             path = directory / name
             abstract = normalize_abstract(data.get("abstractNote"))
             provenance = "zotero" if abstract else "unavailable"
+            retrieved = retrieved_abstract(store, record)
+            if not abstract and retrieved.get("abstract"):
+                abstract, provenance = retrieved["abstract"], retrieved.get("source", "retrieved")
             articles = catalog.get((library, key), [])
             full = []
             for article in articles:
@@ -104,8 +111,25 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
                 "abstract_status": "available" if abstract else "unavailable",
                 "full_text_status": "available" if full else "unavailable",
             }
+            source_url = retrieved.get("resource") if retrieved.get("abstract") == abstract else None
             if abstract:
-                fields["sources"].append({"id": "abstract", "resource": (f"https://doi.org/{data['DOI']}" if provenance == "cached-crossref-metadata" and data.get("DOI") else _source(library, key)), "title": f"Abstract ({provenance})"})
+                fields["sources"].append({"id": "abstract", "resource": source_url or (f"https://doi.org/{data['DOI']}" if provenance == "cached-crossref-metadata" and data.get("DOI") else _source(library, key)), "title": f"Abstract ({provenance})"})
+            if abstract:
+                abstract_path = abstracts / name
+                old_abstract = abstract_entries.get(identity, {})
+                abstract_fields = {**fields, "sources": list(fields["sources"]), "type": "Research Abstract"}
+                if source_url:
+                    abstract_fields["sources"].append({"id": "retrieval", "resource": source_url})
+                abstract_content = "\n".join(["---", *[f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in abstract_fields.items()],
+                    "---", "", f"# {data['title']}", "", "## Abstract", "", abstract, "", "## Source", "",
+                    f"Abstract source: {provenance}.", f"[Reference Markdown]({quote('../references/' + name)})", ""])
+                edited_abstract = abstract_path.exists() and (not old_abstract.get("sha256") or sha256_file(abstract_path) != old_abstract["sha256"])
+                if edited_abstract:
+                    abstract_edits.append(data["title"])
+                elif not abstract_path.exists() or abstract_path.read_text(encoding="utf-8") != abstract_content:
+                    atomic_write_text(abstract_path, abstract_content)
+                abstract_entries[identity] = {"path": name, "title": data["title"], "source": provenance,
+                    "sha256": old_abstract.get("sha256") if edited_abstract else sha256_file(abstract_path)}
             body = ["---", *[f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in fields.items()], "---", "", f"# {data['title']}", "", "## Abstract", "", abstract or "No sourced abstract is available. This file is a bibliographic record.", "", "## Full text", ""]
             body += [f"- [Full research Markdown]({quote('../' + p.name)})" for p in sorted(set(full))] or ["Full-text Markdown is not available locally. A reference or abstract does not establish full-text coverage."]
             body += ["", "## Provenance", "", f"[Zotero reference]({_source(library, key)}). Abstract source: {provenance}. Private research use; publication permissions are separate.", ""]
@@ -131,5 +155,6 @@ def export_library(store: Store, *, records: list[dict] | None = None) -> dict:
         atomic_write_json(directory / "index.json", {"schema": "one-more-paper-references/v1", "okf_version": "0.2", "references": entries,
                                                   "active_ids": [row["id"] for row in rows],
                                                   "index_sha256": prior_index_hash if index_edited else sha256_file(index_path)})
-    return {"directory": str(directory), "references": len(rows), "with_abstract": sum(row["abstract_available"] for row in rows),
+        atomic_write_json(abstracts / "index.json", {"schema": "one-more-paper-abstracts/v1", "abstracts": abstract_entries})
+    return {"abstract_directory": str(abstracts), "abstract_files": len(abstract_entries), "preserved_abstract_edits": abstract_edits, "directory": str(directory), "references": len(rows), "with_abstract": sum(row["abstract_available"] for row in rows),
             "with_full_text": sum(bool(row["full_text"]) for row in rows), "preserved_edits": preserved, "index_edited": index_edited}

@@ -47,3 +47,20 @@ The reference inventory is independent of the PDF generation catalog and remote
 MCP search. Extending remote discovery to bibliographic-only references would
 require a separate shared schema/API change. OKF's optional verification,
 freshness and attested-computation machinery is unnecessary for this inventory.
+
+## Abstract retrieval
+
+`za research-fit enrich` now uses independent public metadata sources and
+publisher abstract sections, then refreshes the reference inventory and writes
+actual abstracts into `papers/abstracts/`. It stores complete source text and
+provider provenance separately from bounded relevance-classifier input in the
+additive `research_abstract_retrievals` SQLite table. Per-record receipts include
+provider attempts, `found`, `not_found` or `retry_pending`; they preserve durable
+successes across restarts. Legacy Crossref misses do not suppress other sources.
+
+Publisher requests validate public destinations, including redirects, and omit
+URL query credentials. DOI-based responses require the matching DOI and title;
+identifier-free searches require a stricter title match. Generic search snippets
+are not abstracts. Retrieval does not edit Zotero, full research Markdown,
+publication permissions or audio caches. No new paid API or inference service
+is required.
