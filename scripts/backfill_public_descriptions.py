@@ -314,6 +314,10 @@ def enrich_records(config, records: list[dict[str, Any]], *, fetch_zotero: bool 
         legacy_reason = _legacy_note_rejection_reason(original, known)
         marked_generated = bool(record.get("generated_show_notes")) and old_notes == str(record["generated_show_notes"])
         recognized_legacy = legacy_reason is None
+        if marked_generated and (not previous_description or normalize_abstract(previous_description) == normalize_abstract(previous_generated)):
+            # A prior refresh can already have current generated text while
+            # retaining an obsolete note-derived manual flag.
+            record["description_is_manual"] = False
         counts["legacy_note_rejections"][legacy_reason or "recognized"] = counts["legacy_note_rejections"].get(legacy_reason or "recognized", 0) + 1
         already_current = (
             marked_generated
