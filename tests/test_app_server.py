@@ -162,7 +162,7 @@ def test_invalid_json_or_oversized_bodies_cannot_change_settings(local_server):
 
 def test_http_retry_is_idempotent_and_never_repeats_force(local_server):
     server = local_server
-    old = server.store.create_job({"action": "full", "scope": "one", "article_id": "ARTICLE1", "force": True})
+    old = server.store.create_job({"action": "full", "scope": "one", "article_id": "ARTICLE1", "force": True, "publish": False})
     server.store.update_job(old["id"], status="failed")
     route = f"/api/jobs/{old['id']}/retry"
     first = server.request("POST", route, body="{}", headers=credentials(server))
@@ -171,6 +171,7 @@ def test_http_retry_is_idempotent_and_never_repeats_force(local_server):
     first_job, second_job = json.loads(first.body)["job"], json.loads(second.body)["job"]
     assert first_job["id"] == second_job["id"] != old["id"]
     assert first_job["force"] is False
+    assert first_job["publish"] is False
     assert first_job["title"] == server.article["title"]
     assert len(server.store.jobs()["jobs"]) == 2
 

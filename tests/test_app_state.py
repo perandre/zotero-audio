@@ -146,3 +146,15 @@ def test_queue_priority_preserves_fifo_within_priority(store):
     new = store.create_job({'action': 'brief', 'scope': 'one', 'article_id': 'ARTICLE1'})
     assert store.claim_job()['id'] == new['id']
     assert store.claim_job()['id'] == maintenance['id']
+
+
+def test_job_publication_opt_out_is_validated_durable_and_part_of_idempotency(store):
+    request = {'action':'full','scope':'one','article_id':'ARTICLE1','publish':False,'idempotency_key':'private-batch'}
+    job = store.create_job(request)
+    assert store.job(job['id'])['publish'] is False
+    assert store.create_job(request)['id'] == job['id']
+    assert store.settings()['auto_publish'] is True
+    with pytest.raises(ValueError):
+        store.create_job({**request,'publish':True})
+    with pytest.raises(ValueError):
+        store.create_job({**request,'publish':'false','idempotency_key':'bad-flag'})

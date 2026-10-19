@@ -447,3 +447,23 @@ def test_damaged_source_snapshot_is_not_silently_reclassified_as_valid(tmp_path)
     with pytest.raises(RuntimeError, match='recorded checksum'):
         worker.snapshot(target, expected_hash=digest)
     assert target.read_bytes() == b'damaged'
+
+
+def test_private_audio_job_uses_private_delivery_for_licensed_source_without_changing_settings(article_store, monkeypatch):
+    store, article = article_store
+    store.update_settings({'icloud_folder':str(store.runtime/'icloud'),'auto_publish':True})
+    job=store.create_job({'action':'full','scope':'one','article_id':article['id'],'publish':False,'qa':True})
+    job=store.claim_job()
+    def generate(bundle, **kwargs):
+        assert kwargs['metadata']['podcast_selected'] is False
+        path=bundle/'full.m4a';path.write_bytes(b'synthetic finished audio')
+        record={'edition':'full','title':article['title'],'audio':str(path),'audio_sha256':sha256_file(path),
+                'public_eligible':True,'selected':True,'status':'ready'}
+        kwargs['on_edition_ready'](record)
+        return {'source_sha256':'a'*64,'warnings':[],'ai_review':str(bundle/'review.md'),'editions':{'full':record},'status':'ready','public_eligible':True}
+    monkeypatch.setattr(generation,'process_article',generate)
+    LocalWorker(store).process(job)
+    assert store.job(job['id'])['status']=='completed'
+    assert store.article(article['id'])['editions']['full']['publication_status']=='private'
+    assert [d['kind'] for d in deliveries(store)]==['icloud']
+    assert store.settings()['auto_publish'] is True

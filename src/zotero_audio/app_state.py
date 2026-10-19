@@ -278,7 +278,7 @@ class Store:
         action, scope = request.get("action"), request.get("scope", "one")
         if action not in ACTIONS or scope not in {"new", "all", "one"}:
             raise ValueError("Choose markdown, full, brief, both or sync and a valid scope")
-        for flag in ("qa", "force"):
+        for flag in ("qa", "force", "publish"):
             if flag in request and not isinstance(request[flag], bool):
                 raise ValueError(f"{flag} must be true or false")
         article_id = request.get("article_id")
@@ -315,7 +315,8 @@ class Store:
                     old = json.loads(row[0])
                     if old.get("idempotency_key") == idem:
                         expected = {"action": action, "scope": scope, "article_id": article_id,
-                                    "force": request.get("force", False), "qa": request.get("qa", self.settings()["qa_enabled"])}
+                                    "force": request.get("force", False), "qa": request.get("qa", self.settings()["qa_enabled"]),
+                                    "publish": request.get("publish")}
                         if any(old.get(k) != v for k, v in expected.items()):
                             raise ValueError("This idempotency key was already used for a different request")
                         return old
@@ -325,6 +326,8 @@ class Store:
                    "idempotency_key": idem, "title": title, "status": "queued", "stage": "queued", "progress": 0,
                    "message": "Waiting for the local worker", "created_at": timestamp, "updated_at": timestamp,
                    "remote": remote}
+            if "publish" in request:
+                job["publish"] = request["publish"]
             if automatic:
                 job["automatic"] = True
             prior = db.execute("SELECT data FROM jobs WHERE id=?", (job["id"],)).fetchone()
