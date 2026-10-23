@@ -155,7 +155,8 @@ they do not change the publication allowlist or authorize a different PDF versio
 Cloudflare Workers Paid ($5/month, upgraded 2026-10-23) hosts the authenticated
 dashboard and MCP. R2 Standard, D1 and OAuth KV have included allowances, with
 usage beyond them billed separately. Application caps are conservative but are
-not an account-wide billing cap. See [cloud setup and limits](cloud/README.md)
+not an account-wide billing cap. The owner has authorized up to 50 GB of total
+R2 storage across the account. See [cloud setup and limits](cloud/README.md)
 before increasing capacity.
 
 Searching synced Markdown works while the Mac is asleep. New extraction/audio
@@ -530,5 +531,5 @@ source license permits public publication. The durable per-job flag survives
 restarts and retries. It leaves global publishing settings, source licensing
 and existing episodes unchanged. Omitting it preserves the usual behavior;
 `true` does not override a globally disabled publisher or licensing gates.
-This is useful for large audio batches when shared R2 storage is near its free
-allowance. Generation and private delivery do not require public uploads.
+This is useful for large audio batches when shared R2 storage approaches the
+owner's 50 GB ceiling. Generation and private delivery do not require public uploads.
