@@ -70,8 +70,10 @@ Unqualified Python filenames above live under `src/zotero_audio/`.
 - Restart/transport failure preserves durable work and cached artifacts. Keep
   lease renewal independent of file uploads, and reject stale cloud leases.
 - The owner upgraded the Cloudflare account to Workers Paid ($5/month) on
-  2026-10-23. Application quotas still do not replace checking shared account
-  usage and billing. Do not add other paid services or automatic upgrades.
+  2026-10-23 and authorized up to 50 GB of total R2 storage across the account.
+  Check all buckets before large uploads and keep usage within that ceiling.
+  Application quotas still do not replace checking shared account usage and
+  billing. Do not add other paid services or automatic upgrades.
 
 # Validation and runtime hygiene
 
