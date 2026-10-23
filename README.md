@@ -152,10 +152,11 @@ they do not change the publication allowlist or authorize a different PDF versio
 | Server outbox (headless server only) | Private audio waits in `outbox/` until `za pull-audio` copies it to iCloud; see [docs/private-audio-outbox.md](docs/private-audio-outbox.md). |
 | Optional backup folder | Separate versions of Markdown/audio; disabled by default. |
 
-Cloudflare Workers Free hosts the authenticated dashboard and MCP. R2 Standard,
-D1 and OAuth KV use their free allowances. Application caps are conservative,
-but **account-wide usage is shared, and these are not an absolute $0 billing
-cap**. See [cloud setup and limits](cloud/README.md) before increasing capacity.
+Cloudflare Workers Paid ($5/month, upgraded 2026-10-23) hosts the authenticated
+dashboard and MCP. R2 Standard, D1 and OAuth KV have included allowances, with
+usage beyond them billed separately. Application caps are conservative but are
+not an account-wide billing cap. See [cloud setup and limits](cloud/README.md)
+before increasing capacity.
 
 Searching synced Markdown works while the Mac is asleep. New extraction/audio
 jobs wait for the Mac. Access through an authorized MCP client shares requested
@@ -518,7 +519,7 @@ The default cache budget is 2 GiB, individual source responses are limited to
 usable even when a new run's budget is smaller. Source failures, identity/OCR
 problems and disk-budget stops have durable per-reference receipts in SQLite;
 none is counted as completed full text. PDFs are never uploaded to the cloud.
-Existing private Markdown sync caps (2,000 articles, 128 MiB, 500 changed uploads
+Existing private Markdown sync caps (2,000 articles, 512 MiB, 500 changed uploads
 per day) remain in force; cloud sync limits do not block local completion.
 
 ### Private audio jobs

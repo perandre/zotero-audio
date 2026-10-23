@@ -246,10 +246,10 @@ exact private-Markdown fetch and a remotely queued Markdown job completed by
 the Mac. Actual ChatGPT account/phone connection remains an explicit
 interoperability check beyond those SDK/OAuth tests.
 
-Workers Free, D1, R2 Standard and OAuth KV avoid a paid compute/model dependency.
+Workers Paid, D1, R2 Standard and OAuth KV avoid a paid model dependency.
 The private library applies conservative capacity and upload limits documented
 in [cloud/README.md](../cloud/README.md). These caps are not an account-wide
-billing guarantee: public podcast storage and other projects share free
+billing guarantee: public podcast storage and other projects share included
 allowances. Never silently upgrade a plan or expose the private bucket to solve
 an integration problem.
 
