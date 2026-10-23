@@ -23,7 +23,7 @@ npx wrangler deploy --dry-run
 
 Integration tests require the local server at `http://127.0.0.1:8797`, read `.dev.vars` without printing secrets, and create clearly named test fixtures in local D1/R2/KV. They exercise actual OAuth registration, consent with CSRF, S256 PKCE code exchange, MCP initialization/tool calls, private documents, search, job claims, stale leases and scope isolation. `TEST_BASE_URL` and `TEST_SECRETS_FILE` override local settings. Remote tests require an explicit `ALLOW_REMOTE_INTEGRATION` because they create fixtures.
 
-## Deployment and free-plan boundaries
+## Deployment and paid-plan boundaries
 
 The Worker name `one-more-paper` and its `workers.dev` hostname are reserved
 for this private service. The public `www.1morepaper.com` website deploys from
@@ -38,16 +38,16 @@ audio jobs. The website must be moved first, with its own queue. Existing
 PhD D1, R2, OAuth KV bindings and Worker secrets must be preserved. Do not
 roll back to a website version of this Worker.
 
-Provision the `one-more-paper-library` D1 database and private R2 Standard bucket, plus an `OAUTH_KV` namespace. Fill the returned IDs in `wrangler.jsonc`. Keep R2 public development URL and public custom domains disabled. The existing public podcast bucket stays separate. Apply D1 migrations before deploying, then add the three Worker secrets using Wrangler’s secure stdin/file input. No paid plan upgrade is required or configured.
+Provision the `one-more-paper-library` D1 database and private R2 Standard bucket, plus an `OAUTH_KV` namespace. Fill the returned IDs in `wrangler.jsonc`. Keep R2 public development URL and public custom domains disabled. The existing public podcast bucket stays separate. Apply D1 migrations before deploying, then add the three Worker secrets using Wrangler’s secure stdin/file input. The owner upgraded the account to Workers Paid ($5/month) on 2026-10-23; this repository does not manage the subscription.
 
 ```sh
 npm run migrate:remote
 npm run deploy
 ```
 
-The app limits the private library to 128 MiB of current Markdown/review content, 2,000 articles, 512 KiB per document, 500 changed-article uploads a day and 100 active jobs. It replaces old R2 mirror objects after the new human-readable object and D1 index commit; local processing retains source evidence and revisions. A sync-schema bump migrates existing current objects from ID/hash keys to episode-title keys. These limits provide substantial headroom inside the free allowances. They are not an account-wide billing cap: other Workers, R2 podcast files and other services share Cloudflare allowances. The Mac must poll no more frequently than once a minute when idle and sync only changed articles. Search uses FTS5 and metadata queries, not R2 bucket scans. CPU-intensive processing never runs in Workers.
+The app limits the private library to 512 MiB of current Markdown/review content, 2,000 articles, 512 KiB per document, 500 changed-article uploads a day and 100 active jobs. The library reached its former 128 MiB app cap on 2026-10-23, leaving new Markdown unable to sync. It replaces old R2 mirror objects after the new human-readable object and D1 index commit; local processing retains source evidence and revisions. A sync-schema bump migrates existing current objects from ID/hash keys to episode-title keys. These limits are not an account-wide billing cap: other Workers, R2 podcast files and other services share Cloudflare allowances. The Mac must poll no more frequently than once a minute when idle and sync only changed articles. Search uses FTS5 and metadata queries, not R2 bucket scans. CPU-intensive processing never runs in Workers.
 
-Current free-plan references: [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/). Validate these and the account’s actual usage before changing storage limits. The pinned Sharp override fixes the dev-only transitive libheif advisory in Wrangler/Miniflare; no image transformations run in the deployed app.
+Current plan and usage references: [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/). Validate these and the account’s actual usage before changing storage limits. The pinned Sharp override fixes the dev-only transitive libheif advisory in Wrangler/Miniflare; no image transformations run in the deployed app.
 
 ## Browser and MCP authentication
 

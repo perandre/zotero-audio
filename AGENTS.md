@@ -69,8 +69,9 @@ Unqualified Python filenames above live under `src/zotero_audio/`.
   and network delivery do not gate generation completion.
 - Restart/transport failure preserves durable work and cached artifacts. Keep
   lease renewal independent of file uploads, and reject stale cloud leases.
-- Cloudflare must stay on the free-plan design. Application quotas do not replace
-  checking shared account usage. Do not add paid services or automatic upgrades.
+- The owner upgraded the Cloudflare account to Workers Paid ($5/month) on
+  2026-10-23. Application quotas still do not replace checking shared account
+  usage and billing. Do not add other paid services or automatic upgrades.
 
 # Validation and runtime hygiene
 

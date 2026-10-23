@@ -184,7 +184,7 @@ function matches(item: ZoteroItem, metadata: ArticleMetadata) {
 }
 
 // Zotero quick search does not reliably search DOI/URL fields. Scan explicit
-// fields, bounded to 2,000 references / 20 requests on Workers Free. Fail closed
+// fields, bounded to 2,000 references / 20 requests. Fail closed
 // for larger or concurrently changing libraries instead of claiming no match.
 async function findDuplicate(
   env: AppEnv,

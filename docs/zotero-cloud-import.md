@@ -74,8 +74,8 @@ and rate limits persist in D1. External responses, redirects and timeouts are
 bounded; metadata fetches never carry the Zotero key. Private/local URL targets
 are rejected and Workers' public-network fetch restriction stays enabled.
 
-No paid services or plan upgrades are introduced. Each duplicate scan uses at
-most 20 external requests, within the Workers Free subrequest limit; account
+No additional paid services or plan upgrades are introduced. Each duplicate scan uses at
+most 20 external requests, within the Workers subrequest limit; account
 usage still needs monitoring alongside other apps. The import adds no R2 files.
 
 References: [Zotero API basics](https://www.zotero.org/support/dev/web_api/v3/basics),
