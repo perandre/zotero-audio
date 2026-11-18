@@ -221,6 +221,14 @@ PyTorch wheels newer than 2.2.2, which caps Python at **3.12** (3.11 also works;
 3.13 does not). Keep the runtime path short (under about 150 characters): the
 bundled espeak-ng library cannot open its data files from very long paths.
 
+**Segment disk use.** Each edition's `audio/segments/*.wav` (about 4 GB per Full
+edition, 150 GB across a 600-paper library) is deleted once the final `.m4a` is
+verified against its recorded hash, after all requested editions have run (Brief
+and Full seed each other's segments). The `.m4a`, `edition.json` and the R2 copy
+are unaffected. The cost is that re-assembly (bitrate/sound change) or a Markdown
+edit re-synthesizes the edition instead of reusing segments. To keep them, pass
+`keep_segments=True` to `process_article` or set `ZOTERO_AUDIO_KEEP_SEGMENTS=1`.
+
 ```sh
 brew install ffmpeg python@3.12          # afconvert ships with macOS
 REPO=~/Sites/zotero-audio; RUNTIME=~/Sites/zotero-audio-runtime

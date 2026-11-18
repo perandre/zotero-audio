@@ -16,6 +16,8 @@ from zotero_audio.util import atomic_write_json, episode_title, json_digest, rea
 @pytest.fixture
 def bundle(tmp_path, monkeypatch):
     monkeypatch.setenv("ZOTERO_AUDIO_RUNTIME", str(tmp_path / "runtime"))
+    # Segment reuse is under test here; pruning has its own test.
+    monkeypatch.setenv("ZOTERO_AUDIO_KEEP_SEGMENTS", "1")
     structure = {
         "document": {"title": "How companies use AI", "authors": ["Anna Author"],
                      "publication_year": "2025", "rights": "CC BY 4.0", "url": "https://example.org/paper"},
@@ -240,6 +242,19 @@ def test_speed_compatibility_does_not_hide_real_cache_changes(bundle, assemblies
         assert len(backend.texts) == synthesized * 2
     else:
         assert len(backend.texts) == synthesized
+
+
+def test_segments_are_pruned_after_verified_final_audio_unless_kept(bundle, assemblies, monkeypatch):
+    monkeypatch.delenv("ZOTERO_AUDIO_KEEP_SEGMENTS")
+    result = generation.process_article(bundle, mode="both", backend=Backend())
+    for edition in ("brief", "full"):
+        record = result["editions"][edition]
+        assert Path(record["audio"]).is_file()
+        assert not (bundle / "editions" / edition / "audio" / "segments").exists()
+    assert result["status"].startswith("ready")
+    kept = generation.process_article(bundle, mode="full", backend=Backend(), bitrate=48_000, keep_segments=True)
+    assert any((bundle / "editions" / "full" / "audio" / "segments").glob("*.wav"))
+    assert Path(kept["editions"]["full"]["audio"]).is_file()
 
 
 def test_markdown_edits_invalidate_audio_but_reuse_unchanged_segments(bundle, assemblies):

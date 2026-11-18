@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -39,6 +41,15 @@ AUTHOR_YEAR_CITATION = re.compile(r"\((?:[A-ZÀ-ÖØ-Þ][\w’'’-]+(?:\s+(?:et
 # Exact, unambiguous typesetting splits only. Broad hyphen removal would
 # damage meaningful compounds such as long-term, re-form, and human-in-the-loop.
 BROKEN_WORD = re.compile(r"(?i)\b(?:so-cial|com-panies|implemen-tation|technol-ogy|adop-tion|man-agement|arti-ficial|organi-zation|organi-sation|organiza-tions|organi-sations|suc-cess|perfor-mance)\b")
+
+
+def _prune_segments(bundle: Path, editions: dict[str, Any]) -> None:
+    """Delete segment WAVs of editions whose final audio exists and matches its recorded hash."""
+    for edition, record in editions.items():
+        audio = Path(record.get("audio") or "")
+        if not (record.get("audio_sha256") and audio.is_file() and sha256_file(audio) == record["audio_sha256"]):
+            continue
+        shutil.rmtree(bundle / "editions" / edition / "audio" / "segments", ignore_errors=True)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -281,8 +292,12 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
                     full_voice: str = EDITION_VOICES["full"], brief_voice: str = EDITION_VOICES["brief"],
                     speed: float = 1.0, max_chars: int = 900, bitrate: int = 64_000,
                     progress: Event | None = None, on_edition_ready: Event | None = None,
-                    research_root: Path | None = None) -> dict[str, Any]:
+                    research_root: Path | None = None, keep_segments: bool = False) -> dict[str, Any]:
     """Create/reuse Markdown and independently complete each requested edition.
+
+    Intermediate segment WAVs (about 4 GB per Full edition) are deleted once the
+    final audio is verified; ``keep_segments`` or ``ZOTERO_AUDIO_KEEP_SEGMENTS=1``
+    retains them. Without them a re-assembly or edit re-synthesizes the edition.
 
     A callback exception is a delivery failure owned by the caller; finished
     artifacts and generation state are already persisted for a cheap retry.
@@ -572,6 +587,9 @@ def process_article(bundle: Path, *, mode: str = "markdown", pdf: Path | None = 
             emit("edition_failed", edition=edition, error=str(exc))
             if mode != "both":
                 raise
+    # Pruned only after every edition ran: Brief and Full seed each other's segments.
+    if not (keep_segments or os.environ.get("ZOTERO_AUDIO_KEEP_SEGMENTS") == "1"):
+        _prune_segments(bundle, result["editions"])
     save()
     if not any(item.get("audio") for item in result["editions"].values()):
         result["status"] = "failed"
